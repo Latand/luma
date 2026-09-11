@@ -1,26 +1,54 @@
-<!doctype html><html lang="uk"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Luma Studio</title>
-<style>:root{color-scheme:dark}body{margin:0;background:#0b0e15;color:#e9edf5;font:14px/1.5 Inter,'Segoe UI',system-ui,sans-serif}.wrap{max-width:860px;margin:0 auto;padding:36px 24px}h1{font-size:22px;font-weight:500;letter-spacing:-.4px;margin:0 0 4px}h1 b{color:#a1eed8;font-weight:500}.sub{color:#8f9bb0;font-size:12px;margin-bottom:26px}
-.drop{border:1px dashed #3a4760;border-radius:16px;padding:34px 24px;text-align:center;color:#aab5c8;cursor:pointer;transition:.15s}.drop.over,.drop:hover{border-color:#a1eed8;background:#a1eed808}.drop b{color:#e9edf5;font-weight:500}
-.row{display:flex;gap:10px;margin-top:14px}.row input{flex:1;background:#141c29;border:1px solid #30394d;color:#e9edf5;border-radius:9px;padding:9px 11px;font:inherit}button.go{background:#c9bbed;color:#211a30;border:0;border-radius:10px;padding:0 18px;font:600 13px Inter,system-ui,sans-serif;cursor:pointer}button.go:disabled{opacity:.4}
-h2{font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:#6a778e;margin:34px 0 10px;font-weight:500}.job{border:1px solid #ffffff10;border-radius:12px;padding:12px 14px;margin-bottom:8px;background:#0f141d}.job .t{display:flex;justify-content:space-between;gap:12px;align-items:baseline}.job b{font-weight:500}.st{font:11px ui-monospace,monospace;color:#8f9bb0}.st.running{color:#d3b88f}.st.done{color:#a1eed8}.st.failed{color:#e3a9b0}pre{font:11px/1.5 ui-monospace,monospace;color:#6a778e;background:#080e18;border-radius:8px;padding:8px 10px;margin:8px 0 0;max-height:120px;overflow:auto;white-space:pre-wrap}
-a{color:#a1eed8}.lib a{display:block;padding:8px 0;border-bottom:1px solid #ffffff0a;text-decoration:none;color:#e9edf5}.lib a small{color:#6a778e;margin-left:8px}.lib a:hover{color:#a1eed8}.note{font-size:12px;color:#8f9bb0;margin-top:22px;line-height:1.6}</style>
-<div class="wrap"><h1><b>luma</b> studio</h1><div class="sub">Кинь пісню — отримай тренажер. Розділення й висота рахуються на цій машині (Demucs, CREPE, pYIN); в інтернет іде лише транскрипція слів, якщо задано ключ Soniox.</div>
-<div class="drop" id="drop"><b>Перетягни аудіофайл сюди</b> або натисни, щоб вибрати<br><small>m4a, mp3, flac, wav, ogg · до 10 хв · назва «Пісня - Виконавець» заповнює поля сама</small><input type="file" id="file" accept="audio/*,.m4a,.mp3,.flac,.wav,.ogg" hidden></div>
-<div class="row"><input id="title" placeholder="Назва"><input id="artist" placeholder="Виконавець"><button class="go" id="go" disabled>Підготувати</button></div>
-<h2>Черга</h2><div id="jobs"><div class="st">порожньо</div></div>
-<h2>Бібліотека</h2><div class="lib" id="lib"></div>
-<div class="note">Відкривай тренажери звідси (через http://127.0.0.1) — так працює мікрофон. Одна пісня займає кілька хвилин на GPU і помітно довше на CPU.</div></div>
+<!doctype html>
+<html lang="uk"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Luma Studio</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#0b0e15;color:#e9edf5;font:14px/1.6 Inter,'Segoe UI',system-ui,sans-serif}.wrap{max-width:910px;margin:auto;padding:32px 24px}h1{font-size:26px;font-weight:500;margin:0 0 8px}h1 b{color:#a1eed8;font-weight:500}.sub,.note,.st{color:#a5b2c6}.sub{margin:0 0 24px}.note{font-size:13px}h2{font-size:18px;font-weight:500;margin:30px 0 12px}button,input{font:inherit}button{cursor:pointer;min-height:44px;padding:8px 14px;border:1px solid #45546b;border-radius:9px;background:#172131;color:#e9edf5}button:disabled{opacity:.5;cursor:default}button:focus-visible,input:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid #a1eed8;outline-offset:3px}a{color:#a1eed8}kbd{font:12px monospace}.drop{border:1px dashed #63748e;border-radius:16px;padding:24px;text-align:center}.drop.over{border-color:#a1eed8;background:#a1eed808}.drop p{margin:8px 0}.drop small{color:#a5b2c6}.drop b{overflow-wrap:anywhere}.row{display:flex;align-items:end;gap:12px;margin-top:16px}.row label{flex:1;min-width:0}.row input{display:block;width:100%;min-width:0;margin-top:5px;background:#141c29;border:1px solid #4e5d75;color:#e9edf5;border-radius:9px;padding:10px}.go{background:#c9bbed;color:#211a30;border-color:transparent;font-weight:600}.notice{padding:12px;border:1px solid #826446;border-radius:10px;background:#241e18;margin:16px 0}.notice p{margin:0 0 8px}.job{border:1px solid #354158;border-radius:12px;padding:14px;margin-bottom:10px;background:#0f141d}.job .t{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}.st{font-size:13px}.st.running,.st.uploading{color:#e4c89e}.st.done{color:#a1eed8}.st.failed{color:#f0bac4}pre{font:12px/1.6 monospace;color:#b1bdd0;background:#080e18;border-radius:8px;padding:12px;max-height:200px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}summary{cursor:pointer;padding:8px 0}.lib a{display:block;padding:12px 0;border-bottom:1px solid #ffffff20;text-decoration:none;color:#e9edf5}.lib small{color:#a5b2c6;margin-left:10px}.lib a:hover{color:#a1eed8}.empty{padding:16px;background:#111925;border-radius:10px;color:#b7c3d5}.library-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.library-actions a{padding:10px 0}[hidden]{display:none!important}
+@media(max-width:560px){.wrap{padding:22px 16px}.row{flex-direction:column;align-items:stretch}.row label,.row button{width:100%}.drop{padding:18px}.lib small{display:block;margin:0}}
+</style>
+<main class="wrap">
+<h1><b>luma</b> studio</h1>
+<p class="sub">Додай пісню, щоб тренувати голос. Studio відокремить вокал і визначить мелодію на цьому комп’ютері.</p>
+<div class="drop" id="drop"><b id="fileName">Перетягни аудіофайл сюди</b><p><button id="choose">Вибрати аудіофайл</button></p><small>m4a, mp3, flac, wav, ogg · до 10 хв · до 200 МБ</small><input type="file" id="file" accept="audio/*,.m4a,.mp3,.flac,.wav,.ogg" hidden></div>
+<form id="prepareForm" class="row"><label for="title">Назва пісні<input id="title" autocomplete="off"></label><label for="artist">Виконавець<input id="artist" autocomplete="off"></label><button class="go" id="go" disabled>Підготувати</button></form>
+<div class="notice" id="uploadNotice" hidden role="alert"></div>
+<div class="notice" id="connectionNotice" hidden role="status"><p>Зв’язок зі Studio втрачено. Показано останні отримані дані; перевіряємо з’єднання.</p><button id="refreshBtn">Перевірити знову</button></div>
+<h2>Черга</h2><div id="jobs"><p class="st">Отримуємо стан підготовки…</p></div>
+<h2>Бібліотека</h2><div class="library-actions"><button id="importTrainer">Додати готовий тренажер</button><a href="/demo" target="_blank" rel="noopener">Спробувати демо</a><input id="trainerFile" type="file" accept=".html" hidden></div><div class="lib" id="lib"><p class="st">Завантажуємо бібліотеку…</p></div>
+<p class="note">Відкривай пісні з бібліотеки, щоб працював запис голосу. Готові тренажери зберігаються в каталозі songs поточного проекту. HTML зі старого проекту можна додати кнопкою вище.</p>
+<details class="note"><summary>Час підготовки та приватність</summary><p>Одна пісня потребує кількох хвилин на GPU; на CPU підготовка триває довше. Demucs, CREPE та pYIN працюють локально. Якщо налаштовано ключ Soniox, аудіо надсилається цьому сервісу для розпізнавання слів. Записи твого голосу залишаються у вкладці тренажера.</p></details>
+</main>
 <script>
-const $=id=>document.getElementById(id);let file=null;
-function pick(f){file=f;const m=f.name.replace(/\.[^.]+$/,'').match(/^(.*?)\s+-\s+(.*)$/);$('title').value=m?m[1].trim():f.name.replace(/\.[^.]+$/,'');$('artist').value=m?m[2].trim():'';$('go').disabled=false;$('drop').querySelector('b').textContent=f.name;}
-$('drop').onclick=()=>$('file').click();$('file').onchange=()=>$('file').files[0]&&pick($('file').files[0]);
+const $=id=>document.getElementById(id);
+let file=null, requestId=null, busy=false, timer=null, refreshing=false;
+let jobsKey='',songsKey='';
+function message(text){$('uploadNotice').textContent=text;$('uploadNotice').hidden=!text;}
+function syncForm(){for(const id of ['go','choose','title','artist','importTrainer'])$(id).disabled=busy||(id==='go'&&!file);$('go').textContent=busy?'Завантажуємо…':'Підготувати';}
+function pick(f){if(busy)return;if(f.size>200*1024*1024){message('Файл завеликий. Вибери аудіо до 200 МБ.');return;}file=f;requestId=crypto.randomUUID();const stem=f.name.replace(/\.[^.]+$/,''),m=stem.match(/^(.*?)\s+-\s+(.*)$/);$('title').value=m?m[1].trim():stem;$('artist').value=m?m[2].trim():'';$('fileName').textContent=f.name;message('');syncForm();}
+$('choose').onclick=()=>$('file').click();$('file').onchange=()=>{if($('file').files[0])pick($('file').files[0]);$('file').value='';};
 $('drop').ondragover=e=>{e.preventDefault();$('drop').classList.add('over');};$('drop').ondragleave=()=>$('drop').classList.remove('over');$('drop').ondrop=e=>{e.preventDefault();$('drop').classList.remove('over');if(e.dataTransfer.files[0])pick(e.dataTransfer.files[0]);};
-$('go').onclick=async()=>{if(!file)return;$('go').disabled=true;$('go').textContent='Завантажую…';const q=new URLSearchParams({name:file.name,title:$('title').value.trim()||file.name,artist:$('artist').value.trim()});const r=await fetch('/upload?'+q,{method:'PUT',body:file});$('go').textContent='Підготувати';$('drop').querySelector('b').textContent='Перетягни аудіофайл сюди';file=null;if(!r.ok)alert('Не вдалося: '+await r.text());refresh();};
-const esc=s=>s.replace(/[<&]/g,c=>c==='<'?'&lt;':'&amp;');
-async function refresh(){const d=await (await fetch('/status')).json();const J=$('jobs');J.replaceChildren();if(!d.jobs.length)J.innerHTML='<div class="st">порожньо</div>';
- for(const j of d.jobs.slice().reverse()){const el=document.createElement('div');el.className='job';const dur=j.finished?Math.round(j.finished-j.started)+' с':j.started?Math.round(Date.now()/1000-j.started)+' с…':'';
-  el.innerHTML=`<div class="t"><span><b>${esc(j.title)}</b> <span class="st">${esc(j.artist||'')}</span></span><span class="st ${j.state}">${({queued:'у черзі',running:'обробляю',done:'готово',failed:'помилка'})[j.state]} ${dur}</span></div>`+(j.state==='done'?`<div style="margin-top:6px"><a href="/song/${encodeURIComponent(j.html)}" target="_blank">Відкрити тренажер</a>${j.copy?` <span class="st">· копія: ${esc(j.copy)}</span>`:''}</div>`:'')+(j.tail?`<pre>${esc(j.tail)}</pre>`:'');J.append(el);}
- const L=$('lib');L.replaceChildren();for(const s of d.songs){const a=document.createElement('a');a.href='/song/'+encodeURIComponent(s.name);a.target='_blank';a.innerHTML=esc(s.name.replace(/^Luma_|\.html$/g,'').replace(/_/g,' '))+`<small>${(s.bytes/1048576).toFixed(0)} МБ · ${s.mtime}</small>`;L.append(a);}
- setTimeout(refresh,d.jobs.some(j=>j.state==='running'||j.state==='queued')?2000:15000);}
-refresh();
+$('prepareForm').onsubmit=async e=>{e.preventDefault();if(!file||busy)return;busy=true;syncForm();message('');
+ try{const q=new URLSearchParams({name:file.name,title:$('title').value.trim()||file.name,artist:$('artist').value.trim(),requestId});const r=await fetch('/upload?'+q,{method:'PUT',body:file});if(!r.ok)throw Error(await r.text());file=null;requestId=null;$('fileName').textContent='Перетягни аудіофайл сюди';message('Пісню додано до черги. Стан підготовки показано нижче.');await refresh();}
+ catch(e){message('Не вдалося підтвердити завантаження. Перевір чергу та з’єднання. Вибраний файл збережено у формі. '+(e instanceof TypeError?'Сервер зараз недоступний.':e.message));}
+ finally{busy=false;syncForm();}
+};
+$('importTrainer').onclick=()=>$('trainerFile').click();
+$('trainerFile').onchange=async()=>{const f=$('trainerFile').files[0];$('trainerFile').value='';if(!f||busy)return;busy=true;syncForm();
+ try{const r=await fetch('/import?name='+encodeURIComponent(f.name),{method:'PUT',body:f});if(!r.ok)throw Error(await r.text());message('Готовий тренажер додано до бібліотеки.');await refresh();}
+ catch(e){message('Не вдалося додати тренажер. '+e.message);}
+ finally{busy=false;syncForm();}
+};
+function el(tag,text,className){const n=document.createElement(tag);if(text)n.textContent=text;if(className)n.className=className;return n;}
+function renderJobs(jobs){const key=JSON.stringify(jobs);if(key===jobsKey)return;jobsKey=key;const root=$('jobs');root.replaceChildren();if(!jobs.length)root.append(el('p','Немає пісень у черзі. Можна відкрити готову пісню з бібліотеки.','st'));
+ for(const j of jobs.slice().reverse()){const card=el('article',null,'job'),row=el('div',null,'t');row.append(el('b',j.title),el('span',({queued:'У черзі',uploading:'Завантаження',running:'Готуємо мелодію',done:'Готово',failed:'Не вдалося підготувати'})[j.state]||'Уточнюємо стан','st '+j.state));card.append(row);if(j.artist)card.append(el('div',j.artist,'st'));
+ if(j.state==='done'){const a=el('a','Відкрити тренажер');a.href='/song/'+encodeURIComponent(j.html);a.target='_blank';a.rel='noopener';card.append(a);}
+ if(j.state==='failed'){card.append(el('p','Підготовка зупинилася. Вихідний файл залишився у Studio. Переглянь причину нижче; після її усунення можна повторити підготовку.'));const retry=el('button','Повторити підготовку');retry.onclick=async()=>{retry.disabled=true;try{const r=await fetch('/retry?id='+encodeURIComponent(j.id),{method:'POST'});if(!r.ok)throw Error(await r.text());await refresh();}catch(e){message('Не вдалося повторити підготовку. '+e.message);retry.disabled=false;}};card.append(retry);}
+ if(j.tail){const details=el('details');details.append(el('summary','Технічні подробиці'),el('pre',j.tail));card.append(details);}root.append(card);}
+}
+function renderSongs(songs){const key=JSON.stringify(songs);if(key===songsKey)return;songsKey=key;const root=$('lib');root.replaceChildren();if(!songs.length)root.append(el('p','Тут поки немає пісень. Додай готовий тренажер, підготуй аудіофайл або відкрий демо.','empty'));
+ for(const s of songs){const a=el('a',s.name.replace(/^Luma_|\.html$/g,'').replace(/_/g,' '));a.href='/song/'+encodeURIComponent(s.name);a.target='_blank';a.rel='noopener';a.append(el('small',(s.bytes/1048576).toFixed(0)+' МБ · '+s.mtime));root.append(a);}}
+async function refresh(){clearTimeout(timer);if(refreshing)return;refreshing=true;let delay=5000;
+ try{const r=await fetch('/status');if(!r.ok)throw Error('status');const d=await r.json();if(!Array.isArray(d.jobs)||!Array.isArray(d.songs))throw Error('format');$('connectionNotice').hidden=true;renderJobs(d.jobs);renderSongs(d.songs);delay=d.jobs.some(j=>['running','queued'].includes(j.state))?2000:15000;}
+ catch(e){$('connectionNotice').hidden=false;}
+ finally{refreshing=false;timer=setTimeout(refresh,delay);}
+}
+$('refreshBtn').onclick=refresh;refresh();
 </script></html>

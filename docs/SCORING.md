@@ -17,10 +17,10 @@ attempts, which is why the live number and the attempt card agree.
 | level | corridor | time slack | note counts as ✓ when | octave |
 |---|---|---|---|---|
 | Легко | ±80 ¢ | 120 ms | ≥ 35 % of its frames hit | forgiven (distance folded into ±6 semitones) |
-| Норм | ±50 ¢ | 60 ms | ≥ 50 % | strict |
+| Звично | ±50 ¢ | 60 ms | ≥ 50 % | strict |
 | Точно | ±35 ¢ | 50 ms | ≥ 65 % | strict |
 
-A custom corridor typed in settings switches to "свій коридор" with the Норм timing parameters. The level is stored in each
+A custom corridor typed in settings switches to "свій коридор" with the Звично timing parameters. The level is stored in each
 attempt, so a card keeps the rules it was recorded with.
 
 ## Colour and non-colour cues
@@ -33,7 +33,7 @@ drag the plot, use ← → or the wheel, or jump between misses. ▶ on an attem
 the same trace. CSV export includes the per-point match state.
 
 ## Punch-in
-With an attempt on screen and the playhead inside it, "Співати" becomes "Дописати з …" and re-records that attempt from the
+With an attempt on screen and the playhead inside it, "Співати" becomes "Перезаписати з …" and re-records that attempt from the
 playhead: old audio before the point, new audio, then the old tail beyond the new end. Seeking back while singing does the
 same. The WAV and the points are spliced and rescored.
 

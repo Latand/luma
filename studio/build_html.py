@@ -7,7 +7,7 @@ with the current app code while keeping its embedded song data byte-for-byte.
   build_html.py --rebuild <trainer.html> [...]   re-wrap the data line of existing trainers with app/ parts
 """
 from __future__ import annotations
-import argparse, base64, json, sys
+import argparse, base64, html, json, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -20,7 +20,7 @@ def parts():
 
 def wrap(song: dict, data_line: str) -> str:
     head, workers, script = parts()
-    head = head.replace('{{TITLE}}', song.get('title', 'Luma')).replace('{{ARTIST}}', song.get('artist', '') or '')
+    head = head.replace('{{TITLE}}', html.escape(str(song.get('title', 'Luma')))).replace('{{ARTIST}}', html.escape(str(song.get('artist', '') or '')))
     return head + workers + data_line + '\n' + script
 
 def build(package: Path, out: Path) -> Path:

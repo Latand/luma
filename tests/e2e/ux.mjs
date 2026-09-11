@@ -1,0 +1,56 @@
+// Regression coverage for the audited user flows. Uses the demo, never the preparation pipeline.
+import {launch, open, assert, window_, url} from './lib.mjs';
+const b = await launch(['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream']);
+const {page: p, logs} = await open(b);
+const win = await p.evaluate(src => eval(src), window_());
+const live=await b.newPage();await live.goto(url);
+const jump=await live.evaluate(a=>{
+  const t=window.Luma.test;t.seek(a);t.fakeSing({a,b:a+3});
+  const before=t.state();t.livePush({t:.5,f:82.4069,confidence:.99,db:-20,rms:.1,peak:.2});
+  const after=t.state();return{before:before.rangeHi-before.rangeLo,after:after.rangeHi-after.rangeLo};
+},win.a);
+assert(jump.after-jump.before<4,'a single octave jump from the microphone cannot instantly flatten the scale '+JSON.stringify(jump));
+await live.close();
+await p.evaluate(a => window.Luma.test.seek(a), win.a);
+let state = await p.evaluate(() => window.Luma.test.state());
+assert(state.rangeHi - state.rangeLo < 22, 'fragment scale is tighter than the old two-octave floor');
+// No reference at the end of the demo: the scale must follow the recorded low voice there.
+await p.setViewportSize({width:390,height:844});
+await p.waitForTimeout(100);
+const gap = await p.evaluate(() => {
+  const end = window.LUMA_SONG.duration, last = window.LUMA_SONG.notes.at(-1).b;
+  const a = last + .1, b = end - .05, points = [];
+  for (let t = 0; t < b-a; t += .02) points.push({t, f:82.4069, confidence:.99, db:-20, rms:.1, peak:.2});
+  window.Luma.test.injectTake({a,b,points});window.Luma.test.seek(end);window.Luma.test.draw();
+  return window.Luma.test.state();
+});
+assert(gap.rangeLo < 40 && gap.rangeHi > 40 && gap.rangeHi-gap.rangeLo <= 14, 'target-free fragment frames the recorded E2 closely '+JSON.stringify({lo:gap.rangeLo,hi:gap.rangeHi,pos:gap.pos}));
+await p.setViewportSize({width:1440,height:900});
+await p.evaluate(a => {window.Luma.test.closeTrace();window.Luma.test.setRange(a,a+2);window.Luma.test.seek(a+2);}, win.a);
+await p.locator('#loopBtn').click();await p.locator('#listenBtn').click();
+await p.waitForFunction(() => window.Luma.test.state().mode === 'listen');await p.waitForTimeout(700);
+state = await p.evaluate(() => window.Luma.test.state());
+assert(state.transportLoop && state.time >= win.a && state.time < win.a+2, 'starting at B honors the enabled A-B repeat');
+await p.evaluate(a=>window.Luma.test.applySeek(a+3),win.a);
+state=await p.evaluate(()=>window.Luma.test.state());
+assert(!state.loop&&!state.transportLoop,'seeking beyond the loop also clears its visible active state');
+await p.locator('#loopBtn').click();
+state=await p.evaluate(()=>window.Luma.test.state());
+assert(state.loop&&state.transportLoop&&state.time<win.a+2,'enabling repeat outside its region returns to A during playback');
+await p.locator('#stopBtn').click();
+await p.setViewportSize({width:390,height:844});
+assert(await p.locator('#listenBtn').getAttribute('aria-label') === 'Слухати пісню', 'mobile listen has an accessible name');
+const dimensions = await p.evaluate(() => ({page:document.documentElement.scrollWidth,view:innerWidth}));
+assert(dimensions.page === dimensions.view, 'trainer fits the narrow viewport');
+await p.evaluate(()=>{
+  window.Luma.test.closeTrace();window.LUMA_SONG.duration=600;
+  window.Luma.test.injectTake({a:0,b:600,points:[]});
+  window.Luma.test.setRange(1,3);window.Luma.test.seek(1);
+});
+await p.locator('#singBtn').click();await p.waitForFunction(()=>!document.querySelector('#errorBanner').hidden);
+assert((await p.locator('#errorText').textContent()).includes('Ліміт пам’яті'), 'short punch reserves its full replacement plus the undo WAV');
+await p.evaluate(()=>{window.Luma.test.closeTrace();window.Luma.test.clearRange();window.Luma.test.seek(600);});
+await p.locator('#singBtn').click();await p.waitForFunction(()=>!document.querySelector('#errorBanner').hidden);
+assert((await p.locator('#errorText').textContent()).includes('Ліміт пам’яті'), 'starting at song end reserves the restarted full song');
+assert(logs.length === 0, 'trainer console clean: '+JSON.stringify(logs));
+await b.close();

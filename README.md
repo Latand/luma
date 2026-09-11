@@ -12,11 +12,12 @@ of your voice, no server after the file is built.
   current line is shown at the top.
 - **Live match score.** Hits ÷ frames with a target, counted once per 20 ms. Silence under a note is a miss; frames with no
   target are excluded; draft notes count and are labelled as draft. Hit notes turn mint with ✓, misses subdued red with ×.
-- **Three levels.** Легко (±80 ¢, octave errors forgiven), Норм (±50 ¢), Точно (±35 ¢); each also sets timing slack and how
+- **Three levels.** Легко (±80 ¢, octave errors forgiven), Звично (±50 ¢), Точно (±35 ¢); each also sets timing slack and how
   much of a note must be hit. Details in [docs/SCORING.md](docs/SCORING.md).
+- **Fragment pitch scale.** The vertical range follows notes and confident voice in the visible fragment, including voice-only passages. Use Масштаб → Детальніше for a closer view; live changes settle smoothly.
 - **Attempts with history.** Every take keeps its WAV, its timestamped pitch trace and per-frame results. Scrub back to see
   where you drifted, jump between misses, play your voice over the backing in sync, export WAV and CSV.
-- **Punch-in.** Seek inside an attempt and "Співати" becomes "Дописати з …": the same take is re-recorded from that point.
+- **Punch-in.** Seek inside an attempt and "Співати" becomes "Перезаписати з …": the same take is re-recorded from that point. Нова спроба records a separate take; Скасувати перезапис restores the previous version of the last punch.
 - **Loop and seek.** Whole song by default; draw an A–B region under the waveform or press A / B while listening, loop it
   without gaps. Seek during playback and the music picks up from there.
 - **Vocal on/off.** One button (V) mutes the original vocal stem so you hear only the backing and yourself.
@@ -42,7 +43,7 @@ Drop an `m4a` / `mp3` / `flac` / `wav`, confirm title and artist (a file named `
    without a key lyrics are skipped)
 6. one self-contained HTML in `songs/`
 
-The library on the Studio page serves the trainers over http, so the microphone works out of the box.
+The library on the Studio page serves the trainers over http, so the microphone works out of the box. Додати готовий тренажер imports an existing Luma HTML, preserves its song data, and wraps it in the current app. Imported files get unique names so existing songs are preserved.
 Command line equivalent: `.venv/bin/python studio/prepare_song.py song.m4a --title "Song" --artist "Artist"`.
 
 **Hardware.** A 5-minute song takes about 4 minutes on an RTX 3060 (Demucs ≈ 50 s, pYIN ≈ 1 min, CREPE ≈ 30 s). CPU works
