@@ -1,0 +1,9 @@
+.venv
+.venv/
+node_modules/
+songs/
+examples/demo/
+__pycache__/
+*.pyc
+tests/e2e/shot_*.png
+.DS_Store

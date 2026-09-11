@@ -1,0 +1,9 @@
+{
+  "name": "luma",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Sing-along pitch trainer: one HTML per song, built locally by Luma Studio",
+  "license": "MIT",
+  "scripts": { "test:e2e": "tests/e2e/run.sh", "demo": ".venv/bin/python examples/make_demo.py" },
+  "devDependencies": { "playwright": "^1.63.0" }
+}
