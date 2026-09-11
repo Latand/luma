@@ -2,6 +2,7 @@
 // that really sings them. Expected notes are recomputed here from lessons/definitions.py, not read back from the
 // generator, so a change in either side has to be deliberate.
 import {execFileSync} from 'node:child_process';
+import {readFileSync, renameSync, writeFileSync} from 'node:fs';
 import {launch, open, assert} from './lib.mjs';
 
 const studio = process.env.LUMA_STUDIO_URL || 'http://127.0.0.1:8793/';
@@ -9,6 +10,7 @@ const library = process.env.LUMA_TEST_LIBRARY;
 const py = process.env.LUMA_PY || '.venv/bin/python';
 if (!library) { console.error('FAIL lessons: LUMA_TEST_LIBRARY is not set (tests/e2e/run.sh exports it)'); process.exit(1); }
 
+const TAG = '<script type="application/json" id="luma-lessons">';
 const run = args => execFileSync(py, ['lessons/build_lessons.py', ...args], {encoding: 'utf8', maxBuffer: 64 << 20});
 const defs = JSON.parse(run(['--definitions']));
 console.log(run(['--songs', library]).trim());
@@ -69,6 +71,19 @@ const browser = await launch(['--autoplay-policy=no-user-gesture-required']);
   const lib = await page.locator('#lib').textContent();
   assert(/Тут поки немає/.test(lib), 'a fresh library still reads as empty: lessons are not songs you added');
   assert(await page.evaluate(() => document.querySelector('#lessonsSection').compareDocumentPosition(document.querySelector('#lib')) & Node.DOCUMENT_POSITION_FOLLOWING) > 0, '«Уроки» sits above the library');
+  // A lesson added while Studio is open reaches «Уроки» on a later poll: open the page with the third one hidden from
+  // both the library and the catalogue, then put it back the way a rebuild would.
+  const catalogue = library + '/lessons.index.html', whole = readFileSync(catalogue, 'utf8');
+  const third = library + '/' + defs.lessons[2].file, parked = third + '.parked';
+  const head = whole.indexOf(TAG) + TAG.length, tail = whole.indexOf('</script>', head);
+  const known = JSON.parse(whole.slice(head, tail));
+  const cards = n => page.waitForFunction(want => document.querySelectorAll('#lessons .lesson').length === want, n);
+  renameSync(third, parked);
+  writeFileSync(catalogue, whole.slice(0, head) + JSON.stringify({...known, lessons: known.lessons.slice(0, 2)}) + whole.slice(tail));
+  await page.reload(); await page.waitForSelector('#lessonsSection .lesson'); await cards(2);
+  writeFileSync(catalogue, whole); renameSync(parked, third);
+  await page.evaluate(() => refresh()); await cards(3);
+  assert(true, 'a lesson that appears while Studio is open joins «Уроки» without a reload');
   await page.setViewportSize({width: 390, height: 844}); await page.waitForTimeout(150);
   assert(await page.evaluate(() => document.documentElement.scrollWidth === innerWidth), 'the lessons section fits 390 px');
   if (process.env.LUMA_SHOT) await page.screenshot({path: process.env.LUMA_SHOT, fullPage: true});
@@ -83,7 +98,7 @@ for (const lesson of defs.lessons) {
   await page.waitForFunction(() => window.Luma && window.Luma.test);
   const map = await page.evaluate(() => {
     const s = window.LUMA_SONG;
-    return {duration: s.duration, status: s.status, title: s.title, artist: s.artist, hop: s.hop, phrases: s.phrases.length,
+    return {duration: s.duration, status: s.status, title: s.title, artist: s.artist, hop: s.hop, phrases: s.phrases.length, lesson: s.lesson,
       notes: s.notes.map(n => ({a: n.a, b: n.b, m: n.m, ok: n.ok, q: n.q, ignored: n.ignored})),
       draftPoints: s.points.filter(p => p[1] !== null && !p[3]).length, voiced: s.points.filter(p => p[1] !== null).length,
       words: s.lyrics.flatMap(l => l.words).map(w => w.w), lyricLines: s.lyrics.length,
@@ -97,6 +112,8 @@ for (const lesson of defs.lessons) {
   assert(map.notes.every(n => n.ok === true && n.ignored === false && n.q >= .9), `${lesson.id}: nothing is a draft — every note is exact and confident`);
   assert(map.draftPoints === 0 && map.status !== 'unverified_draft', `${lesson.id}: the contour is exact too (status "${map.status}")`);
   assert(map.title === lesson.title && map.artist === lesson.artist, `${lesson.id}: title and artist reach the trainer`);
+  // The trainer does not apply this yet (docs/LESSONS.md, "Known gaps"); the map has to carry it for the follow-up.
+  assert(map.lesson && map.lesson.id === lesson.id && map.lesson.level === lesson.level && map.lesson.bpm === lesson.bpm, `${lesson.id}: the map carries the suggested level «${lesson.level}»`);
   assert(map.words.length === want.notes.length && map.words.every((w, i) => w === want.notes[i].w), `${lesson.id}: one syllable per note in the lyric lane`);
   assert(map.phrases === want.keys && map.lyricLines === want.keys, `${lesson.id}: one practice fragment and one lyric line per repetition (${want.keys})`);
 

@@ -55,7 +55,7 @@ details{font-size:12px;color:var(--muted)}summary{cursor:pointer;padding:6px 0;c
 </main>
 <script>
 const $=id=>document.getElementById(id);
-let file=null, requestId=null, busy=false, timer=null, refreshing=false, jobsKey='', songsKey='', lessonsKey='', lessons=null;
+let file=null, requestId=null, busy=false, timer=null, refreshing=false, jobsKey='', songsKey='', lessonsKey='', lessons=null, lessonsFor=null;
 const fmt=t=>{t=Math.max(0,Math.round(t||0));return t>=3600?Math.floor(t/3600)+' год '+Math.floor(t%3600/60)+' хв':t>=60?Math.floor(t/60)+' хв '+String(t%60).padStart(2,'0')+' с':t+' с';};
 const clock=t=>{t=Math.max(0,Math.round(t||0));return Math.floor(t/60)+':'+String(t%60).padStart(2,'0');};
 function message(text){$('uploadNotice').textContent=text;$('uploadNotice').hidden=!text;}
@@ -90,10 +90,10 @@ function renderJobs(jobs){const key=JSON.stringify(jobs);if(key===jobsKey)return
 // serves .html only, hence the file name; the JSON sits in a script tag inside it.
 const LESSON_FILE=/^Luma_Lesson_\d+_/, LESSON_TAG='<script type="application/json" id="luma-lessons">';
 const LEVELS={'Легко':'easy','Звично':'normal','Точно':'strict'};
-async function loadLessons(){
+async function loadLessons(files){
  try{const r=await fetch('/song/lessons.index.html');if(!r.ok)throw Error('index');const text=await r.text();const i=text.indexOf(LESSON_TAG);if(i<0)throw Error('format');
-  const d=JSON.parse(text.slice(i+LESSON_TAG.length,text.indexOf('</'+'script>',i)));lessons=Array.isArray(d.lessons)?d.lessons.slice().sort((a,b)=>a.order-b.order):[];}
- catch(e){lessons=null;}  // unreadable catalogue: the lessons stay visible as ordinary library entries
+  const d=JSON.parse(text.slice(i+LESSON_TAG.length,text.indexOf('</'+'script>',i)));lessons=Array.isArray(d.lessons)?d.lessons.slice().sort((a,b)=>a.order-b.order):[];lessonsFor=files;}
+ catch(e){lessons=null;}  // unreadable catalogue: the lessons stay visible as ordinary library entries, and the next poll retries
 }
 function renderLessons(list){const key=JSON.stringify(list);if(key===lessonsKey)return;lessonsKey=key;
  $('lessonsSection').hidden=!list.length;$('lessonsCount').textContent=list.length?String(list.length):'';const root=$('lessons');root.replaceChildren();
@@ -110,7 +110,8 @@ function renderSongs(songs){const key=JSON.stringify(songs);if(key===songsKey)re
 function setStatus(kind,text){const el=$('serverStatus');el.className='status'+(kind?' '+kind:'');$('serverStatusText').textContent=text;}
 async function refresh(){clearTimeout(timer);if(refreshing)return;refreshing=true;let delay=5000;
  try{const r=await fetch('/status');if(!r.ok)throw Error('status');const d=await r.json();if(!Array.isArray(d.jobs)||!Array.isArray(d.songs))throw Error('format');$('connectionNotice').hidden=true;renderJobs(d.jobs);
-  if(lessons===null&&d.songs.some(s=>LESSON_FILE.test(s.name)))await loadLessons();
+  const files=d.songs.map(s=>s.name).filter(n=>LESSON_FILE.test(n)).sort().join('|');
+  if(files&&files!==lessonsFor)await loadLessons(files);   // first poll, and again whenever a lesson is added, renamed or removed
   const built=new Set(d.songs.map(s=>s.name)),shown=(lessons||[]).filter(l=>built.has(l.html));
   renderLessons(shown);renderSongs(d.songs.filter(s=>!shown.some(l=>l.html===s.name)));const working=d.jobs.some(j=>['running','queued'].includes(j.state));setStatus(working?'busy':'live',working?'ГОТУЄМО ПІСНЮ':'STUDIO ПРАЦЮЄ');delay=working?2000:15000;}
  catch(e){$('connectionNotice').hidden=false;setStatus('','НЕМАЄ ЗВ’ЯЗКУ');}

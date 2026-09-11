@@ -42,14 +42,22 @@ note_name = lambda m: NAMES[int(m) % 12] + str(int(m) // 12 - 1)
 hz = lambda m: 440 * 2 ** ((m - 69) / 12)
 
 
+def validate(lesson: Lesson) -> None:
+    """Definition invariants that would otherwise fail quietly, long after the build reported success."""
+    if not (lesson.file.startswith('Luma_') and lesson.file.endswith('.html')):
+        raise SystemExit(f'{lesson.id}: the library lists Luma_*.html, so «{lesson.file}» would never appear in Studio')
+    for section in lesson.sections:
+        p = section.pattern
+        if round((len(p.semitones) * p.beats + p.rest) % 1, 6):
+            raise SystemExit(f'{lesson.id}: «{p.name}» must fill a whole number of beats, so the click stays on the grid')
+
+
 def plan(lesson: Lesson):
     """Note-by-note timeline of a lesson: exact seconds and exact MIDI, the single source for audio, map and lyrics."""
     beat = 60 / lesson.bpm
     notes, reps, t = [], [], LEAD_SILENCE
     for index, section in enumerate(lesson.sections):
         p = section.pattern
-        if round((len(p.semitones) * p.beats + p.rest) % 1, 6):
-            raise SystemExit(f'{lesson.id}: «{p.name}» must fill a whole number of beats, so the click stays on the grid')
         t += section.lead * beat
         for key in section.keys:
             start, first = t, len(notes)
@@ -217,6 +225,8 @@ def write_index(songs: Path, payload: dict) -> None:
 
 
 def ensure(songs: Path, force: bool = False) -> dict:
+    for lesson in LESSONS:
+        validate(lesson)
     songs.mkdir(parents=True, exist_ok=True)
     data_fp, app_fp = fingerprints()
     index = None if force else read_index(songs)
@@ -247,6 +257,8 @@ if __name__ == '__main__':
     ap.add_argument('--definitions', action='store_true', help='print the lesson definitions as JSON and exit')
     ap.add_argument('--quiet', action='store_true')
     a = ap.parse_args()
+    for lesson in LESSONS:
+        validate(lesson)
     if a.definitions:
         print(json.dumps({'timing': {'leadSilence': LEAD_SILENCE, 'tail': TAIL, 'gapMax': GAP_MAX, 'gapRatio': GAP_RATIO, 'hop': HOP},
                           'lessons': [asdict(l) for l in sorted(LESSONS, key=lambda l: l.order)]}, ensure_ascii=False))
