@@ -5,6 +5,7 @@ import runpy
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
@@ -71,6 +72,23 @@ class StudioHTTPTests(unittest.TestCase):
         self.assertEqual(job['state'], 'queued')
         self.assertNotIn('error', job)
         self.assertEqual(self.request(path, b'', 'POST')[0], 409)
+
+    def test_stage_info_reads_the_latest_marker(self):
+        now = time.time(); stamp = lambda ago: time.strftime('%H:%M:%S', time.localtime(now - ago))
+        log = Path(self.directory.name) / 'job.log'
+        log.write_text(stamp(100) + ' [1/8] decode\n' + stamp(95) + ' [2/8] separation htdemucs_ft\nsome warning without a marker\n' + stamp(40) + ' [3/8] pYIN\n')
+        info = self.module['stage_info']({'log': str(log), 'started': now - 100}, now)
+        self.assertEqual((info['n'], info['total'], info['key']), (3, 8, 'pYIN'))
+        self.assertTrue(0 < info['progress'] < 1)
+        self.assertGreater(info['eta'], 0)
+        self.assertIsNone(self.module['stage_info']({'log': str(log) + '.missing'}, now))
+
+    def test_status_lists_library_metadata(self):
+        trainer = Path(self.directory.name) / 'Luma_Test.html'
+        trainer.write_text('<html>' + 'x' * 100 + '<script>window.LUMA_SONG={"schema":"luma.song.v1","title":"T\u00e9st \\"q\\"","artist":"Band","duration":123.4,"points":[]};window.LUMA_ASSETS={};</script>', encoding='utf-8')
+        status, body = self.request('/status')
+        song = json.loads(body)['songs'][0]
+        self.assertEqual((status, song['title'], song['artist'], song['duration']), (200, 'T\u00e9st "q"', 'Band', 123.4))
 
 
 if __name__ == '__main__':

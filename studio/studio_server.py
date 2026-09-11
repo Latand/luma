@@ -3,13 +3,16 @@
 
   GET  /                         drop zone, queue, library
   PUT  /upload?name=&title=&artist=   raw file body -> inbox/, job queued
-  GET  /status                   jobs and log tails
+  PUT  /import?name=             finished trainer HTML -> re-wrapped with the current app, added to the library
+  POST /retry?id=                queue a failed job again
+  GET  /status                   jobs with stage progress, library with title / artist / duration
   GET  /song/<name>.html         generated trainers (served over http so the microphone works)
+  GET  /demo                     the synthetic demo trainer, if it has been built
 
 Run: python studio/studio_server.py [--port 8792] [--songs DIR] [--copy-to DIR]
 """
 from __future__ import annotations
-import argparse, json, os, re, shutil, subprocess, sys, threading, time, urllib.parse, uuid
+import argparse, datetime, json, os, re, shutil, subprocess, sys, threading, time, urllib.parse, uuid
 from build_html import wrap
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
@@ -23,10 +26,48 @@ COPY_TO = Path(args.copy_to).expanduser() if args.copy_to else None
 PREP = ROOT / 'studio' / 'prepare_song.py'
 jobs: list[dict] = []; lock = threading.Lock(); upload_lock = threading.Lock()
 
+# Pipeline stages as prepare_song.py logs them ("[n/8] name"), with typical seconds for a 5-minute song on a mid-range GPU.
+# The weights only shape the progress bar and the rough ETA; a slower machine stretches them by the observed pace.
+STAGES = [('decode', 'Декодування', 3), ('separation', 'Розділення вокалу (Demucs)', 45), ('pYIN', 'Висота голосу: pYIN', 105), ('CREPE', 'Висота голосу: CREPE', 27), ('map', 'Карта мелодії', 2), ('stems', 'Доріжки MP3', 12), ('lyrics', 'Слова (Soniox)', 10), ('html', 'Збирання тренажера', 6)]
+STAGE_RE = re.compile(r'^(\d\d):(\d\d):(\d\d) \[(\d)/8\] ')
+TOTAL_WEIGHT = sum(w for _, _, w in STAGES)
+
 def slugify(t): return ''.join(c if c.isalnum() else '_' for c in t).strip('_') or 'song'
 def guess(name):
     stem = Path(name).stem; m = re.match(r'^(.*?)\s+-\s+(.*)$', stem)
     return (m.group(1).strip(), m.group(2).strip()) if m else (stem.strip(), '')
+
+def stage_info(job: dict, now: float) -> dict | None:
+    """Latest stage marker in the job log, with progress 0..1 and a rough ETA in seconds."""
+    try: lines = Path(job['log']).read_text(errors='replace').splitlines()
+    except (KeyError, OSError, TypeError): return None
+    last = None
+    for line in lines:
+        m = STAGE_RE.match(line)
+        if m: last = (int(m.group(4)), int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    if not last: return None
+    n, hh, mm, ss = last; n = max(1, min(8, n)); key, name, weight = STAGES[n - 1]
+    stamp = datetime.datetime.combine(datetime.date.today(), datetime.time(hh, mm, ss)).timestamp()
+    if stamp > now + 60: stamp -= 86400  # the log line was written before midnight
+    in_stage = max(0.0, now - stamp); done = sum(w for _, _, w in STAGES[:n - 1]); started = job.get('started') or stamp
+    expected_so_far = done + min(in_stage, weight); pace = max(1.0, (now - started) / expected_so_far) if expected_so_far > 20 else 1.0
+    progress = min(.99, (done + min(in_stage, weight * pace) / pace) / TOTAL_WEIGHT)
+    eta = max(0.0, (TOTAL_WEIGHT - done) * pace - in_stage)
+    return {'n': n, 'total': 8, 'key': key, 'name': name, 'progress': round(progress, 3), 'eta': round(eta), 'stalled': in_stage > weight * pace * 3 + 60}
+
+_meta_cache: dict[str, tuple[tuple[int, float], dict]] = {}
+_META_RE = re.compile(r'window\.LUMA_SONG=\{"schema":"luma\.song\.v1","title":("(?:[^"\\]|\\.)*"),"artist":("(?:[^"\\]|\\.)*"),"duration":([0-9.]+)')
+def song_meta(p: Path) -> dict:
+    """Title, artist and duration from the head of a trainer file; cached by size and mtime, so /status stays cheap."""
+    st = p.stat(); sig = (st.st_size, st.st_mtime); hit = _meta_cache.get(p.name)
+    if hit and hit[0] == sig: return hit[1]
+    meta = {}
+    try:
+        with open(p, 'rb') as f: head = f.read(512 * 1024).decode('utf-8', errors='replace')
+        m = _META_RE.search(head)
+        if m: meta = {'title': json.loads(m.group(1)), 'artist': json.loads(m.group(2)), 'duration': float(m.group(3))}
+    except (OSError, ValueError): meta = {}
+    _meta_cache[p.name] = (sig, meta); return meta
 
 def worker():
     while True:
@@ -66,6 +107,7 @@ class Handler(BaseHTTPRequestHandler):
             if demo.is_file(): return self.send(200, demo.read_bytes())
             return self.send(404, 'Демо ще не зібрано. Додай готовий тренажер до бібліотеки.', 'text/plain; charset=utf-8')
         if u.path == '/status':
+            now = time.time()
             with lock:
                 js = []
                 for j in jobs:
@@ -74,8 +116,11 @@ class Handler(BaseHTTPRequestHandler):
                     if j.get('log') and j['state'] in ('running', 'failed'):
                         try: d['tail'] = '\n'.join(Path(j['log']).read_text(errors='replace').splitlines()[-6:])
                         except OSError: pass
+                        d['stage'] = stage_info(j, now)
                     js.append(d)
-            songs = [{'name': p.name, 'bytes': p.stat().st_size, 'mtime': time.strftime('%Y-%m-%d %H:%M', time.localtime(p.stat().st_mtime))} for p in sorted(SONGS.glob('Luma_*.html'), key=lambda p: -p.stat().st_mtime)]
+            songs = []
+            for p in sorted(SONGS.glob('Luma_*.html'), key=lambda p: -p.stat().st_mtime):
+                songs.append({'name': p.name, 'bytes': p.stat().st_size, 'mtime': time.strftime('%Y-%m-%d %H:%M', time.localtime(p.stat().st_mtime)), **song_meta(p)})
             return self.send(200, json.dumps({'jobs': js, 'songs': songs}), 'application/json')
         if u.path.startswith('/song/'):
             name = os.path.basename(urllib.parse.unquote(u.path[6:])); p = SONGS / name
