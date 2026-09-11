@@ -63,7 +63,13 @@ _meta_cache: dict[str, tuple[tuple[int, float], dict]] = {}
 _HEAD_RE = re.compile(r'window\.LUMA_SONG=\{"schema":"luma\.song\.v1"')
 _STR = r'("(?:[^"\\]|\\.)*")'
 def song_meta(p: Path) -> dict:
-    """Title, artist and duration from the head of a trainer file; cached by size and mtime, so /status stays cheap."""
+    """Title, artist and duration from the head of a trainer file; cached by size and mtime, so /status stays cheap.
+
+    Contract with prepare_song.py and build_html.py: both write ``window.LUMA_SONG`` as compact JSON whose top-level
+    scalars (title, artist, duration, a4, hop, status, neuralSeparation, method, warning) precede the long arrays.
+    The search window below is 4096 bytes, which those fields fit into with room to spare; key order inside the window
+    does not matter. A writer that moves title, artist or duration behind ``points``/``notes`` must widen this window.
+    """
     st = p.stat(); sig = (st.st_size, st.st_mtime); hit = _meta_cache.get(p.name)
     if hit and hit[0] == sig: return hit[1]
     meta = {}
@@ -71,7 +77,6 @@ def song_meta(p: Path) -> dict:
         with open(p, 'rb') as f: head = f.read(512 * 1024).decode('utf-8', errors='replace')
         m = _HEAD_RE.search(head)
         if m:
-            # Top-level fields sit at the start of the object, before the long arrays; key order does not matter.
             obj = head[m.end():m.end() + 4096]; field = lambda key, pat: (re.search(r'"' + key + r'":' + pat, obj) or [None, None])[1]
             title, artist, duration = field('title', _STR), field('artist', _STR), field('duration', r'([0-9.]+)')
             if title: meta = {'title': json.loads(title), 'artist': json.loads(artist) if artist else '', 'duration': float(duration) if duration else None}
