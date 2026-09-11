@@ -58,6 +58,37 @@ await p.evaluate(a=>{const t=window.Luma.test;if(!t.state().loop)document.getEle
 await p.locator('#singBtn').click();await p.waitForFunction(()=>window.Luma.test.state().mode==='singing',null,{timeout:8000});
 state=await p.evaluate(()=>window.Luma.test.state());assert(state.loop&&state.time>=win.a-.05&&state.time<win.a+1.5,'Sing from the fragment end with the loop on records from A '+state.time);
 await p.locator('#stopBtn').click();await p.waitForTimeout(1500);await p.evaluate(()=>{if(window.Luma.test.state().loop)document.getElementById('loopBtn').click();});
+// Moving the playhead by hand must frame the new place before it is played: the review measured 44 frames (0.72 s)
+// with a note drawn outside the pitch range after a far A-B region was applied from the number fields.
+// Count every animation frame from just before the control is used until a second later.
+const watch=async(act,ms=1000)=>{
+  await p.evaluate(()=>{const w=window.__watch={bad:0,frames:0,glide:0};
+    const step=()=>{const st=window.Luma.test.state(),v=window.Luma.test.viewWindow(st.time),g=window.Luma.test.scale();w.frames++;
+      if(window.LUMA_SONG.notes.some(n=>!n.ignored&&n.b>=v.a&&n.a<=v.b&&(n.m<st.rangeLo||n.m>st.rangeHi)))w.bad++;
+      w.glide=Math.max(w.glide,Math.abs(st.rangeLo-g.goalLo),Math.abs(st.rangeHi-g.goalHi));
+      w.raf=requestAnimationFrame(step);};w.raf=requestAnimationFrame(step);});
+  await act();await p.waitForTimeout(ms);
+  return p.evaluate(()=>{const w=window.__watch;cancelAnimationFrame(w.raf);return{bad:w.bad,frames:w.frames,glide:+w.glide.toFixed(2)};});};
+const far=await p.evaluate(()=>{const ns=window.LUMA_SONG.notes.filter(n=>!n.ignored),lo=ns.reduce((a,b)=>a.m<b.m?a:b);
+  return{a:+Math.max(0,lo.a-.3).toFixed(2),b:+Math.min(window.LUMA_SONG.duration,lo.b+2).toFixed(2)};});
+// Park the plot on a recorded E2 at the target-free end of the song, two octaves under the melody, then type an A-B
+// region back up in the melody: the new region has to be framed before its first frame, not glided into.
+await p.evaluate(()=>{const T=window.Luma.test,S=window.LUMA_SONG,end=S.duration,last=S.notes.at(-1).b;
+  const a=last+.1,b=end-.05,points=[];for(let t=0;t<b-a;t+=.02)points.push({t,f:82.4069,confidence:.99,db:-20,rms:.1,peak:.2});
+  T.closeTrace();T.clearRange();T.injectTake({a,b,points});T.seek(end);});
+await p.locator('#settingsBtn').click();
+await p.evaluate(a=>{document.getElementById('rangeA').value=a;document.getElementById('rangeB').value=a+2;},win.a);
+let framed=await watch(()=>p.locator('#applyRange').click());
+assert(framed.glide===0,'the A-B number field frames its region at once instead of gliding to it '+JSON.stringify(framed));
+assert(framed.bad===0,'the A-B number field frames the region it moved the playhead to '+JSON.stringify(framed));
+await p.evaluate(()=>document.getElementById('settingsDialog').close());
+// the same for "Повторити складну фразу", which jumps to a miss far from whatever is framed now
+await p.evaluate(f=>{const T=window.Luma.test,pts=[];for(let t=0;t<f.b-f.a;t+=.02)pts.push({t,f:82.4069,confidence:.99,db:-20,rms:.1,peak:.2});
+  T.clearRange();T.injectTake({a:f.a,b:f.b,points:pts});T.seek(0);},far);
+framed=await watch(()=>p.locator('#repeatMissBtn').click());
+assert(framed.bad===0,'repeating a hard phrase frames it before it plays '+JSON.stringify(framed));
+await p.locator('#stopBtn').click();await p.waitForFunction(()=>window.Luma.test.state().mode==='idle');
+await p.evaluate(()=>{const T=window.Luma.test;if(T.state().loop)document.getElementById('loopBtn').click();T.closeTrace();T.clearRange();});
 await p.setViewportSize({width:390,height:844});
 assert(await p.locator('#listenBtn').getAttribute('aria-label') === 'Слухати пісню', 'mobile listen has an accessible name');
 const dimensions = await p.evaluate(() => ({page:document.documentElement.scrollWidth,view:innerWidth}));

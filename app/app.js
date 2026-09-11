@@ -17,7 +17,7 @@ function levelLabel(opt){return opt.level==='custom'?'свій коридор':(
 // Signed distance in cents; on the easy level the octave is forgiven (distance folds into ±6 semitones).
 function centsOff(m,refM,opt){let d=m-refM;if(opt.octaveFree){d=((d%12)+12)%12;if(d>6)d-=12;}return d*100;}
 const LOOP_LANE=24;
-const s={ctx:null,stream:null,capture:null,micSource:null,worker:null,micGeneration:0,busy:false,cancel:0,mode:'idle',transport:null,sources:[],endTimer:null,nextTimer:null,bufs:new Map(),gains:null,pos:song.initialTime||0,range:{a:0,b:song.duration},rangeId:0,history:[],current:null,takes:[],takeCounter:0,pending:new Map(),awaitFinish:false,trace:null,live:null,verified:[],dirty:true,raf:0,lastDraw:0,lastUI:0,rangeLo:48,rangeHi:76,liveSmooth:null,lastSmoothT:0,toastTimer:0,edit:null,computeMs:0,windowMs:0,unsaved:false,undoPunch:null,busyFor:'',scrub:null,lyricKey:'',resumeAt:null,tlDrag:null,seekTimer:0};
+const s={ctx:null,stream:null,capture:null,micSource:null,worker:null,micGeneration:0,busy:false,cancel:0,mode:'idle',transport:null,sources:[],endTimer:null,nextTimer:null,bufs:new Map(),gains:null,pos:song.initialTime||0,range:{a:0,b:song.duration},rangeId:0,history:[],current:null,takes:[],takeCounter:0,pending:new Map(),awaitFinish:false,trace:null,live:null,verified:[],dirty:true,raf:0,lastDraw:0,lastFrame:0,lastUI:0,rangeLo:48,rangeHi:76,liveSmooth:null,lastSmoothT:0,toastTimer:0,edit:null,computeMs:0,windowMs:0,unsaved:false,undoPunch:null,busyFor:'',scrub:null,lyricKey:'',resumeAt:null,tlDrag:null,seekTimer:0};
 const canvas=$('chart'),g=canvas.getContext('2d',{alpha:false}),tl=$('timeline'),tg=tl.getContext('2d',{alpha:false});let W=1,H=1,DPR=1,TW=1,TH=1;
 const reduced=matchMedia('(prefers-reduced-motion: reduce)');
 function fmt(t){t=Math.max(0,Number.isFinite(t)?t:0);return String(Math.floor(t/60)).padStart(2,'0')+':'+String(Math.floor(t%60)).padStart(2,'0');}
@@ -86,7 +86,7 @@ function clearRange(){s.range={a:0,b:song.duration};s.rangeId=0;if(s.transport?.
 // the next one waits SCALE.dwell seconds, except after an explicit seek. Voice enters through a percentile band of confident
 // frames, so single glitches never drive the scale.
 const SCALE={lookahead:4,dwell:2.5,shrinkHold:2,shrinkMin:3,ease:1,inner:.5,pad:1.5,minSpan:8,voiceMin:25,voiceTrail:2};
-const sc={goalLo:48,goalHi:76,fromLo:48,fromHi:76,changedAt:-1e9,shrinkSince:null,lastEase:0};
+const sc={goalLo:48,goalHi:76,fromLo:48,fromHi:76,changedAt:-1e9,shrinkSince:null,p:1};
 function scaleZoom(){return Number($('scaleSelect').value)||1;}
 function pointIndex(t){const a=song.points;let lo=0,hi=a.length;while(lo<hi){const m=(lo+hi)>>1;if(a[m][0]<t)lo=m+1;else hi=m;}return lo;}
 // Pitch extremes of the drawn target between a and b: notes always; in contour view the contour too, but only where it stays
@@ -112,7 +112,7 @@ function goalFor(need){const z=scaleZoom(),pad=SCALE.pad/z,minSpan=SCALE.minSpan
 function fitsGoal(band){return band.lo>=sc.goalLo+SCALE.inner&&band.hi<=sc.goalHi-SCALE.inner;}
 // First look-ahead note outside the goal: does it reach the visible window before an eased change could finish?
 function entrySoon(v,opt){const o=opt.octave;for(const n of song.notes){if(n.ignored||n.b<v.b)continue;if(n.a>v.b+SCALE.lookahead)break;const m=n.m+o;if(m<sc.goalLo+SCALE.inner||m>sc.goalHi-SCALE.inner)return n.a-v.b<=SCALE.ease+.25;}return false;}
-function setGoal(g,wall,instant){sc.fromLo=instant?g.lo:s.rangeLo;sc.fromHi=instant?g.hi:s.rangeHi;sc.goalLo=g.lo;sc.goalHi=g.hi;sc.changedAt=instant?-1e9:wall;sc.shrinkSince=null;if(instant){s.rangeLo=g.lo;s.rangeHi=g.hi;}s.dirty=true;}
+function setGoal(g,wall,instant){sc.fromLo=instant?g.lo:s.rangeLo;sc.fromHi=instant?g.hi:s.rangeHi;sc.goalLo=g.lo;sc.goalHi=g.hi;sc.changedAt=instant?-1e9:wall;sc.shrinkSince=null;sc.p=instant?1:0;if(instant){s.rangeLo=g.lo;s.rangeHi=g.hi;}s.dirty=true;}
 function planScale(v,t,wall,instant){
  const opt=effective(),tb=targetBands(v,opt),voice=voiceBand(v,t),plan=mergeBand(tb.plan,voice),vis=mergeBand(tb.vis,voice);
  if(!plan)return;// nothing to frame here: keep what is on screen
@@ -124,14 +124,14 @@ function planScale(v,t,wall,instant){
  if((sc.goalHi-sc.goalLo)-(cand.hi-cand.lo)>=SCALE.shrinkMin){if(sc.shrinkSince===null)sc.shrinkSince=wall;else if(wall-sc.shrinkSince>=SCALE.shrinkHold&&wall-sc.changedAt>=SCALE.dwell)setGoal(cand,wall,false);}
  else sc.shrinkSince=null;
 }
-function easeScale(wall){if(s.rangeLo===sc.goalLo&&s.rangeHi===sc.goalHi){sc.lastEase=wall;return;}
- if(wall-(sc.lastEase||0)>.25&&!reduced.matches){sc.fromLo=s.rangeLo;sc.fromHi=s.rangeHi;sc.changedAt=wall;}// frames were not running: resume the glide from the current plot
- sc.lastEase=wall;const p=reduced.matches?1:clamp((wall-sc.changedAt)/SCALE.ease,0,1),e=p*p*(3-2*p);
- if(p>=1){s.rangeLo=sc.goalLo;s.rangeHi=sc.goalHi;}else{s.rangeLo=sc.fromLo+(sc.goalLo-sc.fromLo)*e;s.rangeHi=sc.fromHi+(sc.goalHi-sc.fromHi)*e;}s.dirty=true;}
+// Progress runs on rendered frames, not on the wall clock: a paused tab or a slow frame never shortens or stretches the glide.
+function easeScale(dt){if(s.rangeLo===sc.goalLo&&s.rangeHi===sc.goalHi){sc.p=1;return;}
+ sc.p=reduced.matches?1:clamp(sc.p+dt/SCALE.ease,0,1);const e=sc.p*sc.p*(3-2*sc.p);
+ if(sc.p>=1){s.rangeLo=sc.goalLo;s.rangeHi=sc.goalHi;}else{s.rangeLo=sc.fromLo+(sc.goalLo-sc.fromLo)*e;s.rangeHi=sc.fromHi+(sc.goalHi-sc.fromHi)*e;}s.dirty=true;}
 // Explicit seek or a new selection: frame the new place at once.
 function setRangeScale(){planScale(view(s.pos),s.pos,performance.now()/1000,true);}
 // Every frame during playback: plan ahead, then glide.
-function followRange(v,t){const wall=performance.now()/1000;planScale(v,t,wall,false);easeScale(wall);}
+function followRange(v,t){const wall=performance.now()/1000,dt=clamp(wall-(s.lastFrame||wall),0,.25);s.lastFrame=wall;planScale(v,t,wall,false);easeScale(dt);}
 function populateSong(){
  $('songTitle').textContent=song.title;$('artistName').textContent=song.artist||'';$('songMeta').textContent=fmt(song.duration)+(prefs.speed!==1?' · '+prefs.speed+'×':'');document.title='Luma · '+song.title;$('timeEnd').textContent=fmt(song.duration);$('timelineWrap').setAttribute('aria-valuemax',song.duration.toFixed(1));
  $('qualityCoverage').textContent=(song.metrics?.comparablePercentOfTrack??0)+'% надійної розмітки';
@@ -493,7 +493,7 @@ function jumpMiss(dir){if(!traceShown()||s.mode!=='idle')return;const runs=missR
 $('singBtn').onclick=()=>startTransport(true);$('listenBtn').onclick=()=>startTransport(false);$('stopBtn').onclick=()=>stopTransport();$('settingsBtn').onclick=()=>modal('settingsDialog');$('mixBtn').onclick=()=>modal('mixDialog');$('helpBtn').onclick=()=>modal('helpDialog');$('qualityBtn').onclick=()=>modal('qualityDialog');$('editBtn').onclick=openEditor;$('dismissError').onclick=()=>{$('errorBanner').hidden=true;updateStatus();};$('errorSettings').onclick=()=>modal('settingsDialog');
 $('scaleSelect').onchange=()=>{setRangeScale();requestDraw();};
 $('newTakeBtn').onclick=()=>{if(s.mode!=='idle'||s.busy||s.awaitFinish)return;closeTrace();startTransport(true);};$('undoPunchBtn').onclick=undoPunch;
-$('repeatMissBtn').onclick=()=>{if(!traceShown()||s.mode!=='idle'||s.busy||s.awaitFinish)return;const runs=missRuns(s.trace.score),r=runs.find(r=>r.b>s.pos)||runs[0];if(!r)return;const a=Math.max(0,r.a-.6),b=Math.min(song.duration,r.b+.8);closeTrace();setRange(a,b);prefs.loop=true;s.pos=a;sync();startTransport(false);};
+$('repeatMissBtn').onclick=()=>{if(!traceShown()||s.mode!=='idle'||s.busy||s.awaitFinish)return;const runs=missRuns(s.trace.score),r=runs.find(r=>r.b>s.pos)||runs[0];if(!r)return;const a=Math.max(0,r.a-.6),b=Math.min(song.duration,r.b+.8);closeTrace();setRange(a,b);prefs.loop=true;s.pos=a;setRangeScale();sync();startTransport(false);};
 function markRange(which){if(s.busy||s.awaitFinish)return;const t=now();const ok=which==='a'?setRange(t,Math.max(s.range.b,t+.5)):setRange(Math.min(s.range.a,t-.5),t);if(ok)toast((which==='a'?'Початок':'Кінець')+' фрагмента: '+fmt(t));}
 $('markA').onclick=()=>markRange('a');$('markB').onclick=()=>markRange('b');$('rangeSettings').onclick=()=>{modal('settingsDialog');$('rangeA').focus();};$('prevMiss').onclick=()=>jumpMiss(-1);$('nextMiss').onclick=()=>jumpMiss(1);$('closeReview').onclick=closeTrace;$('takesToggle').onclick=()=>{prefs.takesOpen=!prefs.takesOpen;savePrefs();sync();};$('lyricsBtn').onclick=()=>{prefs.lyrics=!prefs.lyrics;savePrefs();s.lyricKey='~';resize();sync();};
 for(const b of document.querySelectorAll('[data-close]'))b.onclick=()=>$(b.dataset.close).close();
@@ -527,7 +527,7 @@ $('gate').oninput=()=>{prefs.gate=+$('gate').value;s.worker?.postMessage({type:'
 $('latency').onchange=()=>{const v=+$('latency').value;if(!Number.isFinite(v))return;prefs.latency=clamp(v,-500,1000);savePrefs();sync();};
 $('tolerance').onchange=()=>{const v=+$('tolerance').value;if(!Number.isFinite(v))return;prefs.tolerance=clamp(v,10,100);prefs.level=Object.keys(LEVELS).find(k=>LEVELS[k].tolerance===prefs.tolerance)||'custom';savePrefs();sync();};
 $('micSelect').onchange=()=>{prefs.mic=$('micSelect').value;if(s.stream)releaseMic();};$('micToggle').onclick=async()=>{if(s.stream){await releaseMic();return;}if(s.busy)return;const token=++s.cancel;s.busy=true;s.busyFor='mic';sync();try{await ensureMic(token);}catch(e){error(micError(e),errorKind(e));}finally{if(token===s.cancel){s.busy=false;sync();}}};
-$('applyRange').onclick=()=>{const a=+$('rangeA').value,b=+$('rangeB').value;if(!Number.isFinite(a)||!Number.isFinite(b)||a<0||b>song.duration||b-a<.5){toast('Початок і кінець мають бути в межах пісні; довжина — від 0.5 с.');return;}setRange(a,b);s.pos=a;s.history=[];sync();toast('Фрагмент встановлено.');};
+$('applyRange').onclick=()=>{const a=+$('rangeA').value,b=+$('rangeB').value;if(!Number.isFinite(a)||!Number.isFinite(b)||a<0||b>song.duration||b-a<.5){toast('Початок і кінець мають бути в межах пісні; довжина — від 0.5 с.');return;}setRange(a,b);s.pos=a;s.history=[];setRangeScale();sync();toast('Фрагмент встановлено.');};
 for(const [id,key]of[['backGain','back'],['foreGain','fore']])$(id).oninput=()=>{prefs[key]=+$(id).value/100;$(id+'Out').textContent=Math.round(prefs[key]*100)+'%';applyMix();};$('originalMix').onclick=()=>{prefs.back=.75;prefs.fore=.75;applyMix();sync();};
 for(const b of document.querySelectorAll('[data-view]'))b.onclick=()=>{prefs.view=b.dataset.view;if(traceShown())rescoreTake(s.trace.take,{view:prefs.view});savePrefs();s.dirty=true;sync();};
 $('saveVerify').onclick=()=>{if($('confirmTarget').checked){s.verified.push({...s.range});toast('Підтверджено тільки вибраний фрагмент.');}else s.verified=s.verified.filter(r=>r.b<s.range.a||r.a>s.range.b);saveEdits();$('qualityDialog').close();sync();};$('revokeVerify').onclick=()=>{s.verified=s.verified.filter(r=>r.b<s.range.a||r.a>s.range.b);saveEdits();$('qualityDialog').close();sync();};
@@ -548,7 +548,7 @@ window.Luma={diagnostics:()=>({mode:s.mode,busy:s.busy,pending:s.awaitFinish,tim
   injectTake:({a,b,speed=1,points,tolerance,octave=prefs.octave,view=prefs.view})=>{const duration=(b-a)/speed,meta={...takeMeta(a,b,speed),octave,view};if(tolerance!==undefined){meta.tolerance=tolerance;meta.level='custom';}const id=meta.id;const m={id,blob:silentWav(duration),sampleRate:48000,duration,start:0,end:duration,reason:'end',points:points.filter(p=>p.t>=0&&p.t<duration),gap:0};const t=storeTake(meta,m);s.pos=a;sync();return {id:t.id,pct:scorePct(t.score),frames:t.score.frames.length,points:t.points.length};},
   livePush:(p)=>{handleWorker({type:'pitch',computeMs:0,windowMs:64,...p});},
   seek:t=>seekTo(t,true),applySeek,selectTake:id=>{const t=s.takes.find(t=>t.id===id);if(t)selectTrace(t);},closeTrace,jumpMiss,draw:()=>{draw(now());updateReadout(now());},
-  setLevel:l=>{document.querySelector('[data-level="'+l+'"]').click();return levelOpt();},viewWindow:t=>view(t),scale:()=>({...SCALE,goalLo:sc.goalLo,goalHi:sc.goalHi}),setRange,clearRange,levelOpt,centsOff,now,punchTarget:()=>punchTarget()?.id??null,gains:()=>s.gains?{back:s.gains.back.gain.value,fore:s.gains.fore.gain.value,vocal:prefs.vocal}:null,takes:()=>s.takes.map(t=>({id:t.id,a:t.a,endSong:t.endSong,duration:t.duration,bytes:t.blob.size,points:t.points.length,punches:t.punches||0,pct:scorePct(t.score)})),
+  setLevel:l=>{document.querySelector('[data-level="'+l+'"]').click();return levelOpt();},viewWindow:t=>view(t),plot:()=>({...bounds()}),scale:()=>({...SCALE,goalLo:sc.goalLo,goalHi:sc.goalHi}),setRange,clearRange,levelOpt,centsOff,now,punchTarget:()=>punchTarget()?.id??null,gains:()=>s.gains?{back:s.gains.back.gain.value,fore:s.gains.fore.gain.value,vocal:prefs.vocal}:null,takes:()=>s.takes.map(t=>({id:t.id,a:t.a,endSong:t.endSong,duration:t.duration,bytes:t.blob.size,points:t.points.length,punches:t.punches||0,pct:scorePct(t.score)})),
   state:()=>({mode:s.mode,pos:s.pos,time:now(),trace:s.trace?{id:s.trace.take.id,points:s.trace.points.length,frames:s.trace.score.frames.length,pct:scorePct(s.trace.score),missRuns:missRuns(s.trace.score)}:null,liveScore:s.live?{target:s.live.target,hit:s.live.hit,sung:s.live.sung,pct:scorePct(s.live)}:null,history:s.history.length,matchText:$('matchPct').textContent,matchDetail:$('matchDetail').textContent,reviewHidden:$('reviewBar').hidden,missCount:$('missCount').textContent,lyric:$('lyricNow').textContent,liveNote:$('liveNote').textContent,deviation:$('deviation').textContent,range:{...s.range},rangeId:s.rangeId,rangeText:$('rangeText').textContent,loop:prefs.loop,transportLoop:s.transport?.loop??null,level:prefs.level,tolerance:prefs.tolerance,rangeLo:s.rangeLo,rangeHi:s.rangeHi}),
   fakeSing:({a,b,speed=1})=>{// enter singing mode without audio: transport clock driven by a fake context
    if(s.mode!=='idle')return false;const meta=takeMeta(a,b,speed),id=meta.id;if(!s.ctx)s.ctx={currentTime:0,state:'running',sampleRate:48000,resume(){},get _fake(){return true;}};const when=s.ctx.currentTime;s.transport={token:++s.cancel,when,offset:a,end:b,speed,loop:null};s.mode='singing';s.history=[];s.live=newScore(meta);s.pending.set(id,meta);sync();return {id,when};},
