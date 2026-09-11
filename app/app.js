@@ -78,7 +78,15 @@ function chooseRange(id){
 }
 function setRange(a,b,id=-1){a=clamp(a,0,song.duration);b=clamp(b,0,song.duration);if(b-a<.5)return false;s.range={a,b};s.rangeId=id;if(s.transport?.loop){s.transport.loop={a,b};}setRangeScale();sync();return true;}
 function clearRange(){s.range={a:0,b:song.duration};s.rangeId=0;if(s.transport?.loop)s.transport.loop=null;setRangeScale();sync();}
-function setRangeScale(){const o=effective().octave;const ns=song.notes.filter(n=>!n.ignored&&n.b>s.range.a&&n.a<s.range.b);const certain=ns.filter(n=>n.ok||n.manual);let vals=(certain.length>=4?certain:ns).map(n=>n.m+o);if(traceShown())vals.push(...s.trace.points.filter(p=>Number.isFinite(p.m)).map(p=>p.m));if(!vals.length)vals=[55+o,72+o];vals.sort((a,b)=>a-b);let lo=vals[Math.floor(vals.length*.02)]-2,hi=vals[Math.min(vals.length-1,Math.floor(vals.length*.98))]+2;let span=Math.max(22,Math.min(34,hi-lo));s.rangeLo=Math.floor((lo+hi-span)/2);s.rangeHi=s.rangeLo+Math.ceil(span);s.dirty=true;}
+// Vertical scale follows the melody near the visible window (whole-song range would otherwise squeeze 4+ octaves into the plot).
+function desiredRange(v){const o=effective().octave;const vals=[];for(const n of song.notes){if(n.ignored||n.b<v.a-2)continue;if(n.a>v.b+2)break;vals.push(n.m+o);}
+ for(const p of activePoints()){if(p.songT>v.a-2&&p.songT<v.b+2&&Number.isFinite(p.m))vals.push(p.m);}
+ if(!vals.length)return null;vals.sort((a,b)=>a-b);const lo=vals[Math.floor(vals.length*.03)]-2.5,hi=vals[Math.min(vals.length-1,Math.floor(vals.length*.97))]+2.5;const span=Math.max(22,Math.min(34,hi-lo));return{lo:(lo+hi-span)/2,hi:(lo+hi+span)/2};}
+function setRangeScale(){const w=desiredRange(view(s.pos));if(w){s.rangeLo=Math.floor(w.lo);s.rangeHi=Math.ceil(w.hi);}else{const o=effective().octave;s.rangeLo=55+o-11;s.rangeHi=72+o+5;}s.dirty=true;}
+// Called every frame: glide toward the desired band; while singing only expand, never pull the live voice out of view.
+function followRange(v){const w=desiredRange(v);if(!w)return;const singing=s.mode==='singing';let lo=s.rangeLo,hi=s.rangeHi;
+ if(w.lo<lo+.5||w.hi>hi-.5||(!singing&&(w.lo>lo+5||w.hi<hi-5))){const k=.18;lo+=(Math.floor(w.lo)-lo)*k;hi+=(Math.ceil(w.hi)-hi)*k;if(singing){lo=Math.min(lo,s.rangeLo);hi=Math.max(hi,s.rangeHi);}
+  if(Math.abs(lo-s.rangeLo)<.03&&Math.abs(hi-s.rangeHi)<.03){lo=Math.round(lo);hi=Math.round(hi);}else s.dirty=true;s.rangeLo=lo;s.rangeHi=Math.max(lo+12,hi);}}
 function populateSong(){
  $('songTitle').textContent=song.title;$('artistName').textContent=song.artist||'';$('songMeta').textContent=fmt(song.duration)+(prefs.speed!==1?' · '+prefs.speed+'×':'');document.title='Luma · '+song.title;$('timeEnd').textContent=fmt(song.duration);$('timelineWrap').setAttribute('aria-valuemax',song.duration.toFixed(1));
  $('qualityCoverage').textContent=(song.metrics?.comparablePercentOfTrack??0)+'% надійної розмітки';
@@ -299,7 +307,7 @@ function tracePaths(points,x,y,frames,upTo){
  return paths;
 }
 function draw(t){
- if(!g)return;const b=bounds(),v=view(t),x=a=>b.left+(a-v.a)/v.span*(b.right-b.left),y=m=>b.bottom-(m-s.rangeLo)/(s.rangeHi-s.rangeLo)*(b.bottom-b.top);const rowH=(b.bottom-b.top)/(s.rangeHi-s.rangeLo);
+ if(!g)return;const b=bounds(),v=view(t);followRange(v);const x=a=>b.left+(a-v.a)/v.span*(b.right-b.left),y=m=>b.bottom-(m-s.rangeLo)/(s.rangeHi-s.rangeLo)*(b.bottom-b.top);const rowH=(b.bottom-b.top)/(s.rangeHi-s.rangeLo);
  g.fillStyle='#0e131c';g.fillRect(0,0,W,H);const mono=getComputedStyle(document.body).getPropertyValue('--mono'),sans=getComputedStyle(document.body).getPropertyValue('--sans');
  // piano-roll rows: black-key rows darker, C rows outlined, labels every semitone when rows are tall enough
  const labelStep=rowH>=11?1:2;g.textAlign='right';g.textBaseline='middle';g.font='10px '+mono;
@@ -330,7 +338,7 @@ function draw(t){
    else if(glyph&&ww>=12){g.font='9px '+mono;g.textAlign='center';g.fillStyle=kind==='hit'?'#0d1f1a':'#ffd9dd';g.fillText(glyph,xx+ww/2,yy+.5);}
   }g.globalAlpha=1;
  }else{
-  let last=null;for(const p of song.points){if(p[0]<v.a-.03)continue;if(p[0]>v.b+.03)break;const r=targetAt(p[0],opt);if(!r){last=null;continue;}const pt={t:p[0],m:r.m,ok:r.ok};if(last&&pt.t-last.t<.05&&Math.abs(pt.m-last.m)<8){const st=frameState(sc,pt.t);g.beginPath();g.moveTo(x(last.t),y(last.m));g.lineTo(x(pt.t),y(pt.m));g.strokeStyle=st===1?'#a1eed8d0':st>=2?'#c9707ab0':pt.ok?'#b4a2ebb0':'#8f8aa870';g.lineWidth=pt.ok?2.4:1.4;g.setLineDash(pt.ok?[]:[3,3]);g.stroke();g.setLineDash([]);}last=pt;}
+  let last=null;for(const p of song.points){if(p[0]<v.a-.03)continue;if(p[0]>v.b+.03)break;const r=targetAt(p[0],opt);if(!r){last=null;continue;}const pt={t:p[0],m:r.m,ok:r.ok};if(last&&pt.t-last.t<.05&&Math.abs(pt.m-last.m)<8){const st=frameState(sc,pt.t);g.beginPath();g.moveTo(x(last.t),y(last.m));g.lineTo(x(pt.t),y(pt.m));g.strokeStyle=st===1?'#a1eed8d0':st>=2?'#c9707ab0':pt.ok?'#b4a2ebb0':'#a39dc0a8';g.lineWidth=pt.ok?2.4:1.8;g.setLineDash(pt.ok?[]:[3,3]);g.stroke();g.setLineDash([]);}last=pt;}
  }
  // sung trace, coloured per 20 ms frame: mint = in corridor, subdued red = off target, dim = no target here
  if(pts.length){const review=s.mode!=='singing';const upTo=review?v.b+.1:t+.03;const paths=tracePaths(pts,x,y,sc,upTo);
@@ -384,7 +392,7 @@ function updateReadout(t){
 function requestDraw(){if(!s.raf&&!document.hidden)s.raf=requestAnimationFrame(tick);}
 function tick(wall){s.raf=0;const moving=s.mode!=='idle'||!!s.stream||s.busy;if(wall-s.lastDraw>=(reduced.matches?32:15)){const t=now(),wasDirty=s.dirty;
  if(s.mode==='singing'&&s.live&&s.transport)scoreAdvance(s.live,s.history,Math.min(t-.18*s.transport.speed,s.transport.end));
- if(wasDirty||moving){draw(t);s.dirty=false;s.lastDraw=wall;}if(wall-s.lastUI>55||wasDirty){updateReadout(t);s.lastUI=wall;}}if(moving||s.dirty)requestDraw();}
+ if(wasDirty||moving){s.dirty=false;draw(t);s.lastDraw=wall;}if(wall-s.lastUI>55||wasDirty){updateReadout(t);s.lastUI=wall;}}if(moving||s.dirty)requestDraw();}
 function modal(id){$(id).showModal();if(id==='settingsDialog')populateMics();if(id==='qualityDialog')$('confirmTarget').checked=rangeVerified();}
 function openEditor(){if(s.mode!=='idle')return;const ns=song.notes.filter(n=>n.b>s.range.a&&n.a<s.range.b);const sel=$('editNoteSelect');sel.replaceChildren();for(const n of ns)sel.add(new Option(fmt(n.a)+' · '+name(n.m)+' · '+(n.b-n.a).toFixed(2)+' с',String(n.id)));if(!ns.length){toast('У цьому фрагменті немає нот для редагування. Обери інший фрагмент або підготуй кращу ціль.');return;}const near=ns.find(n=>n.b>s.pos)||ns[0];selectEdit(near.id);sel.value=String(near.id);modal('editDialog');}
 function selectEdit(id){const n=song.notes.find(n=>n.id===+id);if(!n)return;s.edit=structuredClone(n);$('editNoteName').textContent=name(s.edit.m);$('editStart').value=n.a;$('editEnd').value=n.b;$('editIgnore').checked=!!n.ignored;}

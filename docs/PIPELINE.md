@@ -10,7 +10,9 @@
 4. **CREPE** (`torchcrepe`, "full" model, Viterbi decoding, 10 ms hop) on the same stem. CREPE holds up far better than pYIN on
    rough, high or breathy passages.
 5. **Map.** CREPE pitch is the source; pYIN is the cross-check.
-   - *valid* frame: CREPE periodicity > 0.45, level > −43 dBFS, MIDI 43..90; runs shorter than 5 frames are dropped.
+   - *valid* frame: CREPE periodicity > 0.45, level > −43 dBFS, MIDI 36..90 (C2 upward, so low male voices are kept), or a
+     *draft-only* frame where CREPE holds a stable pitch (within 1 semitone of its 11-frame median) with periodicity > 0.25 and
+     level > −34 dBFS for at least 160 ms — this keeps rough or breathy passages visible; runs shorter than 5 frames are dropped.
    - *reliable* frame: valid, periodicity ≥ 0.70, level > −38 dBFS, and either pYIN agrees within 50 cents or periodicity ≥ 0.85.
    - Notes: hysteretic labelling over a median-filtered contour (a change of more than 0.72 semitones starts a new note); a note is
      `ok` when at least 55 % of its frames are reliable. Phrases are short automatic groupings for the settings dialog.

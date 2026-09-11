@@ -78,10 +78,17 @@ def build_map(ct, f0, pd, P, mix22, duration, title, artist, method):
     fc = nearest(ct, f0); pdg = nearest(ct, pd); fp = nearest(P[:, 0], P[:, 1]); rms = nearest(P[:, 0], P[:, 3])
     with np.errstate(divide='ignore', invalid='ignore'):
         midi = 69 + 12 * np.log2(fc / 440); mp = 69 + 12 * np.log2(fp / 440); db = 20 * np.log10(rms + 1e-12); agree = np.abs(midi - mp) * 100
-    valid = np.isfinite(midi) & (pdg > .45) & (db > -43) & (midi >= 43) & (midi <= 90)
+    inrange = np.isfinite(midi) & (midi >= 36) & (midi <= 90)  # C2..F#6: low male voices included
+    strong = inrange & (pdg > .45) & (db > -43)
+    # rough / breathy passages: CREPE keeps a stable pitch while its periodicity drops; accept them as draft when loud enough
+    med = ndi.median_filter(np.nan_to_num(midi, nan=0), size=11); stable = np.abs(midi - med) < 1.0
+    weak = inrange & (pdg > .25) & (db > -34) & stable
+    for a, b in runs(weak):
+        if b - a < 8: weak[a:b] = False
+    valid = strong | weak
     for a, b in runs(valid):
         if b - a < 5: valid[a:b] = False
-    reliable = valid & (pdg >= .70) & (db > -38) & ((np.isfinite(agree) & (agree < 50)) | (pdg >= .85))
+    reliable = strong & (pdg >= .70) & (db > -38) & ((np.isfinite(agree) & (agree < 50)) | (pdg >= .85))
     for a, b in runs(valid): reliable[a:min(a + 2, b)] = False; reliable[max(a, b - 2):b] = False
     smooth = np.full(len(ts), np.nan)
     for a, b in runs(valid): smooth[a:b] = ndi.median_filter(midi[a:b], size=5, mode='nearest')
@@ -157,8 +164,8 @@ def main():
     y, sr2 = sf.read(work / 'vocal22.wav', dtype='float32', always_2d=True); y = y.mean(axis=1); rows = []; hop = 256
     for start in np.arange(0, duration, 25):
         lo = max(0, int(round((start - .5) * sr2))); hi = min(len(y), int(round((start + 25.5) * sr2))); z = y[lo:hi]
-        f, _, prob = librosa.pyin(z, fmin=librosa.note_to_hz('G2'), fmax=librosa.note_to_hz('E6'), sr=sr2, frame_length=2048, hop_length=hop, fill_na=np.nan)
-        yf = librosa.yin(z, fmin=librosa.note_to_hz('G2'), fmax=librosa.note_to_hz('E6'), sr=sr2, frame_length=2048, hop_length=hop)
+        f, _, prob = librosa.pyin(z, fmin=librosa.note_to_hz('C2'), fmax=librosa.note_to_hz('E6'), sr=sr2, frame_length=4096, hop_length=hop, fill_na=np.nan)
+        yf = librosa.yin(z, fmin=librosa.note_to_hz('C2'), fmax=librosa.note_to_hz('E6'), sr=sr2, frame_length=4096, hop_length=hop)
         rms = librosa.feature.rms(y=z, frame_length=2048, hop_length=hop)[0]; tt = lo / sr2 + np.arange(len(f)) * hop / sr2; keep = (tt >= start) & (tt < min(start + 25, duration))
         rows.extend(zip(tt[keep], f[keep], prob[keep], rms[keep], yf[keep]))
     P = np.array(rows); manifest['steps']['pyin_s'] = round(time.time() - t2, 1)
@@ -166,7 +173,7 @@ def main():
     log('[4/8] CREPE'); t3 = time.time()
     import torchcrepe
     y16 = librosa.resample(vocal.mean(1), orig_sr=sr, target_sr=16000)
-    f0, pd = torchcrepe.predict(torch.from_numpy(y16)[None], 16000, hop_length=160, fmin=80, fmax=1500, model='full', batch_size=1024, device=device, return_periodicity=True, decoder=torchcrepe.decode.viterbi)
+    f0, pd = torchcrepe.predict(torch.from_numpy(y16)[None], 16000, hop_length=160, fmin=50, fmax=1500, model='full', batch_size=1024, device=device, return_periodicity=True, decoder=torchcrepe.decode.viterbi)
     pd = torchcrepe.filter.median(pd, 3); f0 = torchcrepe.filter.mean(f0, 3); f0 = f0[0].cpu().numpy(); pd = pd[0].cpu().numpy(); ct = np.arange(len(f0)) * 160 / 16000
     manifest['steps']['crepe'] = {'model': 'torchcrepe full', 'seconds': round(time.time() - t3, 1)}
 
