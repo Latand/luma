@@ -17,11 +17,15 @@ await p.evaluate(() => document.getElementById('stopBtn').click()); await p.wait
 await p.evaluate(w => { window.Luma.test.clearRange(); window.Luma.test.seek(w.a); document.getElementById('singBtn').click(); }, win);
 await p.waitForTimeout(2100 + 3000); await p.evaluate(() => document.getElementById('stopBtn').click()); await p.waitForTimeout(1200);
 const t1 = await st(); assert(t1.takes.length === 1 && t1.takes[0].duration > 2 && !t1.err, 'microphone take recorded ' + JSON.stringify(t1.takes[0]));
-await p.evaluate(w => window.Luma.test.seek(w.a + 1.2), win); await p.waitForTimeout(100); const t2 = await st(); assert(t2.punch === t1.takes[0].id && /Дописати/.test(t2.label), 'punch-in offered inside the take');
+await p.evaluate(w => window.Luma.test.seek(w.a + 1.2), win); await p.waitForTimeout(100); const t2 = await st(); assert(t2.punch === t1.takes[0].id && /Перезаписати/.test(t2.label), 'punch-in offered inside the take');
 await p.evaluate(() => document.getElementById('singBtn').click()); await p.waitForTimeout(2100 + 2500); await p.evaluate(() => document.getElementById('stopBtn').click()); await p.waitForTimeout(1200);
 const t3 = await st(); assert(t3.takes.length === 1 && t3.takes[0].punches === 1 && t3.takes[0].duration > t1.takes[0].duration, 'same take re-recorded from the playhead ' + JSON.stringify(t3.takes[0]));
 // review playback moves the clock in sync
 await p.evaluate(() => document.querySelector('#takesList .play').click()); await p.waitForTimeout(1200); const r1 = await st(); assert(r1.mode === 'review' && r1.time > win.a, 'review playback runs ' + JSON.stringify({mode: r1.mode, time: r1.time, err: r1.err}));
 await p.evaluate(() => document.getElementById('stopBtn').click()); await p.waitForTimeout(300);
+await p.locator('#undoPunchBtn').click();
+const undone = await st(); assert(undone.takes.length === 1 && undone.takes[0].punches === 0 && undone.takes[0].duration === t1.takes[0].duration, 'undo restores the original recording and metadata');
+await p.locator('#newTakeBtn').click();await p.waitForTimeout(2100 + 1000);await p.locator('#stopBtn').click();await p.waitForTimeout(500);
+const fresh = await st();assert(fresh.takes.length === 2 && fresh.takes.some(t => t.id === t1.takes[0].id && t.duration === t1.takes[0].duration), 'new take preserves the existing attempt');
 assert(logs.length === 0, 'console clean ' + JSON.stringify(logs));
 await p.screenshot({path: process.env.LUMA_SHOT || 'shot_audio.png'}); await b.close();

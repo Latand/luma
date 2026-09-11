@@ -1,0 +1,22 @@
+// UI states use intercepted responses. Never submit a real preparation job.
+import {launch, assert} from './lib.mjs';
+const b=await launch(),p=await b.newPage({viewport:{width:390,height:844}});
+const url=process.env.LUMA_STUDIO_URL||'http://127.0.0.1:8795/';
+let offline=false;
+await p.route('**/status',r=>offline?r.abort('failed'):r.fulfill({json:{jobs:[],songs:[]}}));
+await p.goto(url);await p.keyboard.press('Tab');
+assert(await p.evaluate(()=>document.activeElement.id)==='choose','file picker is the first keyboard action');
+const [chooser]=await Promise.all([p.waitForEvent('filechooser'),p.keyboard.press('Enter')]);
+await chooser.setFiles({name:'Song - Artist.wav',mimeType:'audio/wav',buffer:Buffer.from('fake audio; network is intercepted')});
+assert(await p.locator('#title').inputValue()==='Song'&&await p.locator('#artist').inputValue()==='Artist','file name fills labelled fields');
+assert(await p.evaluate(()=>document.documentElement.scrollWidth===innerWidth),'Studio form fits 390px');
+await p.route('**/upload?**',r=>r.abort('failed'));await p.locator('#go').click();
+await p.waitForFunction(()=>!document.querySelector('#go').disabled);
+assert((await p.locator('#uploadNotice').textContent()).includes('Не вдалося'),'upload failure has a visible explanation');
+assert(await p.locator('#title').inputValue()==='Song','upload failure preserves metadata');
+offline=true;await p.locator('#refreshBtn').evaluate(e=>e.click());await p.waitForFunction(()=>!document.querySelector('#connectionNotice').hidden);
+assert(await p.locator('#connectionNotice').isVisible(),'offline state is separate from the empty library');
+offline=false;await p.locator('#refreshBtn').click();await p.waitForFunction(()=>document.querySelector('#connectionNotice').hidden);
+assert((await p.locator('#lib').textContent()).includes('Тут поки немає'),'polling recovers to an explicit empty state');
+if(process.env.LUMA_SHOT)await p.screenshot({path:process.env.LUMA_SHOT,fullPage:true});
+await b.close();
