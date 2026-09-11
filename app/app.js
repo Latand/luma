@@ -17,7 +17,7 @@ function levelLabel(opt){return opt.level==='custom'?'свій коридор':(
 // Signed distance in cents; on the easy level the octave is forgiven (distance folds into ±6 semitones).
 function centsOff(m,refM,opt){let d=m-refM;if(opt.octaveFree){d=((d%12)+12)%12;if(d>6)d-=12;}return d*100;}
 const LOOP_LANE=24;
-const s={ctx:null,stream:null,capture:null,micSource:null,worker:null,micGeneration:0,busy:false,cancel:0,mode:'idle',transport:null,sources:[],endTimer:null,nextTimer:null,bufs:new Map(),gains:null,pos:song.initialTime||0,range:{a:0,b:song.duration},rangeId:0,history:[],current:null,takes:[],takeCounter:0,pending:new Map(),awaitFinish:false,trace:null,live:null,verified:[],dirty:true,raf:0,lastDraw:0,lastUI:0,rangeLo:48,rangeHi:76,liveSmooth:null,lastSmoothT:0,toastTimer:0,edit:null,computeMs:0,windowMs:0,unsaved:false,undoPunch:null,scrub:null,lyricKey:'',resumeAt:null,tlDrag:null,seekTimer:0};
+const s={ctx:null,stream:null,capture:null,micSource:null,worker:null,micGeneration:0,busy:false,cancel:0,mode:'idle',transport:null,sources:[],endTimer:null,nextTimer:null,bufs:new Map(),gains:null,pos:song.initialTime||0,range:{a:0,b:song.duration},rangeId:0,history:[],current:null,takes:[],takeCounter:0,pending:new Map(),awaitFinish:false,trace:null,live:null,verified:[],dirty:true,raf:0,lastDraw:0,lastUI:0,rangeLo:48,rangeHi:76,liveSmooth:null,lastSmoothT:0,toastTimer:0,edit:null,computeMs:0,windowMs:0,unsaved:false,undoPunch:null,busyFor:'',scrub:null,lyricKey:'',resumeAt:null,tlDrag:null,seekTimer:0};
 const canvas=$('chart'),g=canvas.getContext('2d',{alpha:false}),tl=$('timeline'),tg=tl.getContext('2d',{alpha:false});let W=1,H=1,DPR=1,TW=1,TH=1;
 const reduced=matchMedia('(prefers-reduced-motion: reduce)');
 function fmt(t){t=Math.max(0,Number.isFinite(t)?t:0);return String(Math.floor(t/60)).padStart(2,'0')+':'+String(Math.floor(t%60)).padStart(2,'0');}
@@ -78,22 +78,57 @@ function chooseRange(id){
 }
 function setRange(a,b,id=-1){a=clamp(a,0,song.duration);b=clamp(b,0,song.duration);if(b-a<.5)return false;s.range={a,b};s.rangeId=id;if(s.transport?.loop){s.transport.loop={a,b};}setRangeScale();sync();return true;}
 function clearRange(){s.range={a:0,b:song.duration};s.rangeId=0;if(s.transport?.loop)s.transport.loop=null;setRangeScale();sync();}
-// Vertical scale follows the melody near the visible window (whole-song range would otherwise squeeze 4+ octaves into the plot).
-function desiredRange(v){
- const o=effective().octave,targets=[],voice=[];
- for(const n of song.notes){if(n.ignored||n.b<v.a)continue;if(n.a>v.b)break;targets.push(n.m+o);}
- for(const p of activePoints())if(p.songT>=v.a&&p.songT<=v.b&&Number.isFinite(p.m)&&p.confidence>=.8&&p.db>=prefs.gate)voice.push(p.m);
- // Target extremes stay visible. Robust voice bounds prevent a single octave glitch from flattening the whole plot.
- voice.sort((a,b)=>a-b);const vals=targets.slice();if(voice.length)vals.push(voice[Math.floor((voice.length-1)*.05)],voice[Math.ceil((voice.length-1)*.95)]);
- const zoom=Number($('scaleSelect').value)||1,pad=1.5/zoom,minSpan=8/zoom;
- if(!vals.length){const mid=(s.rangeLo+s.rangeHi)/2;return{lo:mid-minSpan/2,hi:mid+minSpan/2};}
- const lo=Math.min(...vals)-pad,hi=Math.max(...vals)+pad,span=Math.max(minSpan,hi-lo),mid=(lo+hi)/2;
- return{lo:mid-span/2,hi:mid+span/2};
+// ── Vertical scale: predictive, hysteretic, eased. ──
+// The band comes from the target notes in the visible window plus a look-ahead, so the plot is already right before the
+// notes arrive. The goal moves only when upcoming notes would leave an inner margin (grow, never shrink), or when the band
+// could shrink by SCALE.shrinkMin semitones for SCALE.shrinkHold seconds; a change is then eased over SCALE.ease seconds and
+// the next one waits SCALE.dwell seconds, except after an explicit seek. Voice enters through a percentile band of confident
+// frames, so single glitches never drive the scale.
+const SCALE={lookahead:4,dwell:2.5,shrinkHold:2,shrinkMin:3,ease:1,inner:.5,pad:1.5,minSpan:8,voiceMin:25,voiceTrail:2};
+const sc={goalLo:48,goalHi:76,fromLo:48,fromHi:76,changedAt:-1e9,shrinkSince:null};
+function scaleZoom(){return Number($('scaleSelect').value)||1;}
+function pointIndex(t){const a=song.points;let lo=0,hi=a.length;while(lo<hi){const m=(lo+hi)>>1;if(a[m][0]<t)lo=m+1;else hi=m;}return lo;}
+// Pitch extremes of the drawn target between a and b: notes always; in contour view the contour too, but only where it stays
+// near the notes (glitches at note edges are not a reason to rescale). Returns {vis, plan} for the visible window and the look-ahead.
+function targetBands(v,opt){
+ const o=opt.octave,plan=v.b+SCALE.lookahead;const acc=(band,m)=>{if(m<band.lo)band.lo=m;if(m>band.hi)band.hi=m;};
+ const vis={lo:Infinity,hi:-Infinity},all={lo:Infinity,hi:-Infinity};
+ for(const n of song.notes){if(n.ignored||n.b<v.a)continue;if(n.a>plan)break;const m=n.m+o;acc(all,m);if(n.a<=v.b)acc(vis,m);}
+ if(opt.view==='contour'){const pts=song.points,near=2.5;for(let i=pointIndex(v.a);i<pts.length&&pts[i][0]<=plan;i++){const p=pts[i];if(p[1]===null)continue;const n=noteAt(p[0]);if(n?.ignored)continue;let m=p[1];if(n?.manual)m+=n.m-(n.originalM??n.m);m+=o;
+   const band=p[0]<=v.b?vis:all;if(!(all.lo<=all.hi)||(m>=all.lo-near&&m<=all.hi+near)){acc(all,m);if(band===vis)acc(vis,m);}}}
+ return{vis:vis.lo<=vis.hi?vis:null,plan:all.lo<=all.hi?all:null};
 }
-function setRangeScale(){const w=desiredRange(view(s.pos));s.rangeLo=w.lo;s.rangeHi=w.hi;s.dirty=true;}
-// Both expansion and contraction are gradual; tiny pitch changes stay within a stable band.
-function followRange(v){const w=desiredRange(v);const k=reduced.matches?1:.08;
- if(Math.abs(w.lo-s.rangeLo)>.15||Math.abs(w.hi-s.rangeHi)>.15){s.rangeLo+=(w.lo-s.rangeLo)*k;s.rangeHi+=(w.hi-s.rangeHi)*k;s.dirty=true;}}
+// Robust band of the singer's voice: 3rd–97th percentile of confident, loud enough frames. While singing only the trailing
+// SCALE.voiceTrail seconds exist; in review the whole visible window counts.
+function voiceBand(v,t){
+ const pts=activePoints();if(!pts.length)return null;const a=s.mode==='singing'?t-SCALE.voiceTrail:v.a,b=s.mode==='singing'?t:v.b,vals=[];
+ let lo=0,hi=pts.length;while(lo<hi){const m=(lo+hi)>>1;if(pts[m].songT<a)lo=m+1;else hi=m;}
+ for(let i=lo;i<pts.length;i++){const p=pts[i];if(p.songT>b)break;if(Number.isFinite(p.m)&&p.confidence>=.8&&p.db>=prefs.gate)vals.push(p.m);}
+ if(vals.length<SCALE.voiceMin)return null;vals.sort((x,y)=>x-y);return{lo:vals[Math.floor((vals.length-1)*.03)],hi:vals[Math.ceil((vals.length-1)*.97)]};
+}
+function mergeBand(x,y){return !x?y:!y?x:{lo:Math.min(x.lo,y.lo),hi:Math.max(x.hi,y.hi)};}
+function goalFor(need){const z=scaleZoom(),pad=SCALE.pad/z,minSpan=SCALE.minSpan/z;const lo=need.lo-pad,hi=need.hi+pad,span=Math.max(minSpan,hi-lo),mid=(lo+hi)/2;return{lo:mid-span/2,hi:mid+span/2};}
+function fitsGoal(band){return band.lo>=sc.goalLo+SCALE.inner&&band.hi<=sc.goalHi-SCALE.inner;}
+// First look-ahead note outside the goal: does it reach the visible window before an eased change could finish?
+function entrySoon(v,opt){const o=opt.octave;for(const n of song.notes){if(n.ignored||n.b<v.b)continue;if(n.a>v.b+SCALE.lookahead)break;const m=n.m+o;if(m<sc.goalLo+SCALE.inner||m>sc.goalHi-SCALE.inner)return n.a-v.b<=SCALE.ease+.25;}return false;}
+function setGoal(g,wall,instant){sc.fromLo=instant?g.lo:s.rangeLo;sc.fromHi=instant?g.hi:s.rangeHi;sc.goalLo=g.lo;sc.goalHi=g.hi;sc.changedAt=instant?-1e9:wall;sc.shrinkSince=null;if(instant){s.rangeLo=g.lo;s.rangeHi=g.hi;}s.dirty=true;}
+function planScale(v,t,wall,instant){
+ const opt=effective(),tb=targetBands(v,opt),voice=voiceBand(v,t),plan=mergeBand(tb.plan,voice),vis=mergeBand(tb.vis,voice);
+ if(!plan)return;// nothing to frame here: keep what is on screen
+ if(instant){setGoal(goalFor(plan),wall,true);return;}
+ if(!fitsGoal(plan)){// grow to cover the upcoming notes; a note already in the visible window cannot wait for the dwell
+  const pad=SCALE.pad/scaleZoom(),need={lo:Math.min(plan.lo,sc.goalLo+pad),hi:Math.max(plan.hi,sc.goalHi-pad)};
+  if((vis&&!fitsGoal(vis))||wall-sc.changedAt>=SCALE.dwell||entrySoon(v,opt))setGoal(goalFor(need),wall,false);return;}
+ const cand=goalFor(plan);
+ if((sc.goalHi-sc.goalLo)-(cand.hi-cand.lo)>=SCALE.shrinkMin){if(sc.shrinkSince===null)sc.shrinkSince=wall;else if(wall-sc.shrinkSince>=SCALE.shrinkHold&&wall-sc.changedAt>=SCALE.dwell)setGoal(cand,wall,false);}
+ else sc.shrinkSince=null;
+}
+function easeScale(wall){if(s.rangeLo===sc.goalLo&&s.rangeHi===sc.goalHi)return;const p=reduced.matches?1:clamp((wall-sc.changedAt)/SCALE.ease,0,1),e=p*p*(3-2*p);
+ if(p>=1){s.rangeLo=sc.goalLo;s.rangeHi=sc.goalHi;}else{s.rangeLo=sc.fromLo+(sc.goalLo-sc.fromLo)*e;s.rangeHi=sc.fromHi+(sc.goalHi-sc.fromHi)*e;}s.dirty=true;}
+// Explicit seek or a new selection: frame the new place at once.
+function setRangeScale(){planScale(view(s.pos),s.pos,performance.now()/1000,true);}
+// Every frame during playback: plan ahead, then glide.
+function followRange(v,t){const wall=performance.now()/1000;planScale(v,t,wall,false);easeScale(wall);}
 function populateSong(){
  $('songTitle').textContent=song.title;$('artistName').textContent=song.artist||'';$('songMeta').textContent=fmt(song.duration)+(prefs.speed!==1?' · '+prefs.speed+'×':'');document.title='Luma · '+song.title;$('timeEnd').textContent=fmt(song.duration);$('timelineWrap').setAttribute('aria-valuemax',song.duration.toFixed(1));
  $('qualityCoverage').textContent=(song.metrics?.comparablePercentOfTrack??0)+'% надійної розмітки';
@@ -107,8 +142,8 @@ function populateSong(){
  baseNotes=structuredClone(song.notes);loadEdits();setRangeScale();sync();
 }
 function sync(){
- s.dirty=true;const active=s.mode!=='idle',singing=s.mode==='singing';$('singBtn').disabled=s.awaitFinish;$('singBtn').classList.toggle('recording',singing);$('singLabel').textContent=s.busy?'Скасувати':singing?'Завершити':'Співати';$('singBtn').querySelector('use').setAttribute('href',singing?'#i-stop':'#i-mic');
- $('listenBtn').disabled=s.busy||s.awaitFinish;$('listenLabel').textContent=active?'Пауза':'Слухати';$('listenBtn').setAttribute('aria-label',active?'Пауза':'Слухати пісню');$('listenIcon').setAttribute('href',active?'#i-pause':'#i-play');$('stopBtn').disabled=!active&&!s.busy&&!s.awaitFinish;
+ s.dirty=true;const active=s.mode!=='idle',singing=s.mode==='singing';$('singBtn').disabled=s.awaitFinish||(s.busy&&s.busyFor!=='sing');$('singBtn').classList.toggle('recording',singing);$('singLabel').textContent=s.busy?(s.busyFor==='sing'?'Скасувати':'Співати'):singing?'Завершити':'Співати';$('singBtn').querySelector('use').setAttribute('href',singing?'#i-stop':'#i-mic');
+ $('listenBtn').disabled=s.busy||s.awaitFinish;$('listenLabel').textContent=s.busy&&s.busyFor==='listen'?'Готую…':singing?'Стоп':active?'Пауза':'Слухати';$('listenBtn').setAttribute('aria-label',singing?'Зупинити запис':active?'Пауза':'Слухати пісню');$('listenIcon').setAttribute('href',singing?'#i-stop':active?'#i-pause':'#i-play');$('stopBtn').disabled=!active&&!s.busy&&!s.awaitFinish;
  for(const id of ['phraseSelect','prevPhrase','nextPhrase','octave','latency','tolerance','rangeA','rangeB','applyRange','editBtn','applyEdit','importBtn','exportTarget','saveVerify','resetEdits','revokeVerify'])$(id).disabled=active||s.busy||s.awaitFinish;
  $('speedSelect').disabled=s.busy||s.awaitFinish||s.mode==='singing'||s.mode==='review';
  $('phraseSelect').value=String(s.rangeId);$('speedSelect').value=String(prefs.speed);$('loopBtn').setAttribute('aria-pressed',String(prefs.loop));$('octave').value=String(prefs.octave);$('gate').value=prefs.gate;$('gateOut').textContent=prefs.gate+' dBFS';$('latency').value=prefs.latency;$('tolerance').value=prefs.tolerance;$('rangeA').value=s.range.a.toFixed(2);$('rangeB').value=s.range.b.toFixed(2);
@@ -176,9 +211,9 @@ function clearSources(){clearTimeout(s.endTimer);s.endTimer=null;for(const n of 
 function addSource(buffer,gain,when,offset,duration,onended){const n=s.ctx.createBufferSource();n.buffer=buffer;n.connect(gain);n.onended=onended||null;const len=Math.min(duration,buffer.duration-offset);if(len>0){n.start(when,Math.max(0,offset),len);s.sources.push(n);}return n;}
 function capacity(){
  const size=s.takes.reduce((a,t)=>a+t.blob.size,0)+(s.undoPunch?.before.blob.size||0),punch=punchTarget();
- const pos=s.pos>=song.duration-.1?0:s.pos,inside=pos>=s.range.a-.01&&pos<s.range.b-.1;
+ const pos=s.pos>=song.duration-.1?0:s.pos,atEnd=atRegionEnd(pos),inside=atEnd||pos>=s.range.a-.01&&pos<s.range.b-.1;
  const end=punch?Math.max(s.range.b,punch.endSong):(inside||prefs.loop&&customRange()?s.range.b:song.duration);
- const start=punch?punch.a:(prefs.loop&&customRange()&&!inside?s.range.a:pos);
+ const start=punch?punch.a:(atEnd||prefs.loop&&customRange()&&!inside?s.range.a:pos);
  // Undo retains the old full WAV. Reserve the full merged replacement, even for a short selected punch region.
  const duration=punch?Math.max(punch.duration,(end-start)/punch.speed):Math.max(0,(end-start)/prefs.speed);
  const bytes=44+Math.ceil(duration*(punch?.sampleRate||s.ctx?.sampleRate||48000))*2;
@@ -200,9 +235,11 @@ function mergeTake(old,meta,m){
  const duration=total/sr;const meta2={...meta,id:old.id,a:old.a,b:Math.max(old.b,meta.b),speed,startedAt:old.startedAt,punches:(old.punches||0)+1,lastPunchAt:meta.a};
  return {meta:meta2,m:{...m,id:old.id,blob,duration,start:0,end:duration,points,gap:0}};
 }
+// The playhead parked at the end of the fragment (where a finished pass leaves it) means: play the fragment again.
+function atRegionEnd(pos=s.pos){return customRange()&&pos>=s.range.b-.1&&pos<=s.range.b+.25;}
 function playRegion(){
- if(prefs.loop&&customRange()){if(s.pos<s.range.a||s.pos>=s.range.b-.1)s.pos=s.range.a;return{...s.range,loop:true};}
- const inside=s.pos>=s.range.a-.01&&s.pos<s.range.b-.1;return inside?{...s.range,loop:false}:{a:0,b:song.duration,loop:false};}
+ if(customRange()&&(atRegionEnd()||prefs.loop&&(s.pos<s.range.a||s.pos>=s.range.b-.1)))s.pos=s.range.a;
+ const inside=s.pos>=s.range.a-.01&&s.pos<s.range.b-.1;return inside?{...s.range,loop:prefs.loop&&customRange()}:{a:0,b:song.duration,loop:false};}
 function takeMeta(offset,end,speed){const L=levelOpt();return{id:++s.takeCounter,a:offset,b:end,speed,octave:prefs.octave,view:prefs.view,tolerance:L.tolerance,slack:L.slack,ratio:L.ratio,octaveFree:L.octaveFree,level:L.level,latency:prefs.latency,referenceId:song.id,rangeId:s.rangeId,verified:structuredClone(s.verified),startedAt:new Date().toISOString()};}
 function scheduleSources(b,when,offset,end,speed,loop,token){
  const duration=(end-offset)/speed;
@@ -212,7 +249,7 @@ function scheduleSources(b,when,offset,end,speed,loop,token){
 async function startTransport(sing,quick=false){
  if(s.awaitFinish)return;if(s.busy){s.cancel++;s.busy=false;await releaseMic();sync();return;}
  if(s.mode!=='idle'){stopTransport('user');return;}
- clearTimeout(s.nextTimer);const token=++s.cancel;s.busy=true;$('errorBanner').hidden=true;sync();
+ clearTimeout(s.nextTimer);const token=++s.cancel;s.busy=true;s.busyFor=sing?'sing':'listen';$('errorBanner').hidden=true;sync();
  try{
   await ensureContext();if(sing&&!capacity())throw Error('Ліміт пам’яті: 10 спроб або 100 МіБ. Збережи й видали стару спробу перед новою.');
   if(sing&&!await ensureMic(token))return;
@@ -289,6 +326,8 @@ function saveWav(t){download(t.blob,takeFilename(t,'wav'));t.saved=true;s.unsave
 function saveCSV(t){const header='take_seconds,song_seconds,frequency_hz,midi,target_midi,cents_from_target,eligible_target,match_state,yin_periodicity,dbfs,speed,target_octave,mic_shift_ms\n';const rows=t.points.map(p=>[p.t.toFixed(5),p.songT.toFixed(5),p.f??'',p.m??'',p.ref??'',p.cents??'',p.eligible?1:0,frameState(t.score,p.songT),p.confidence,p.db,t.speed,t.octave,t.latency].join(','));download(new Blob([header+rows.join('\n')],{type:'text/csv;charset=utf-8'}),takeFilename(t,'csv'));}
 function selectTrace(t){if(s.mode!=='idle'||s.busy||s.awaitFinish)return;s.trace={take:t,points:t.points,score:t.score};s.pos=clamp(s.pos,t.a,t.endSong);if(s.pos<=t.a||s.pos>=t.endSong)s.pos=t.a;setRangeScale();renderTakes();sync();}
 function closeTrace(){s.trace=null;setRangeScale();renderTakes();sync();}
+// Re-score a take under a new view or octave: audio and pitch points stay, only the comparison rules change.
+function rescoreTake(t,patch){Object.assign(t,patch,analyzeTake({...t,...patch},t.points,t.duration));if(s.trace?.take===t)s.trace={take:t,points:t.points,score:t.score};renderTakes();}
 function renderTakes(){const root=$('takesList');root.replaceChildren();for(const t of s.takes){
  const el=document.createElement('div');el.className='take'+(s.trace?.take===t?' current':'');const playing=s.trace?.take===t&&s.mode==='review';const play=document.createElement('button');play.className='play';play.innerHTML=icon(playing?'pause':'play');play.ariaLabel=(playing?'Зупинити':'Прослухати')+' спробу '+t.id;play.title=playing?'Зупинити':'Прослухати свій голос поверх мінусу';play.onclick=()=>playTake(t);
  const title=document.createElement('button');title.className='take-title';title.title='Показати слід цієї спроби на графіку · перемотай усередину і натисни «Дописати», щоб перезаписати з цього місця';title.innerHTML='Спроба '+String(t.id).padStart(2,'0')+' · '+fmt(t.a)+'–'+fmt(t.endSong)+'<small>'+t.speed+'× · '+levelLabel(t.score.opt)+' · '+(t.octave?(t.octave>0?'+':'')+t.octave+' пт · ':'')+(t.sampleRate/1000).toFixed(1)+' kHz'+(t.punches?' · перезаписів: '+t.punches:'')+(t.saved?' · збережено':'')+'</small>';title.onclick=()=>selectTrace(t);
@@ -301,7 +340,7 @@ function renderTakes(){const root=$('takesList');root.replaceChildren();for(cons
  }$('takesPanel').hidden=!s.takes.length;$('takesCount').textContent=s.takes.length;}
 function removeTake(t){if(s.mode!=='idle'||s.awaitFinish||s.busy){toast('Спочатку зупини відтворення або запис.');return;}if(!t.saved&&!confirm('Спробу ще не завантажено. Видалити її з пам’яті?'))return;if(s.undoPunch?.after===t)clearUndoPunch();s.takes=s.takes.filter(x=>x.id!==t.id);URL.revokeObjectURL(t.url);if(s.trace?.take===t)s.trace=null;s.unsaved=s.takes.some(t=>!t.saved);renderTakes();sync();}
 async function playTake(t){
- if(s.busy||s.awaitFinish)return;if(s.mode!=='idle'){stopTransport('user');renderTakes();return;}clearTimeout(s.nextTimer);const token=++s.cancel;s.busy=true;sync();
+ if(s.busy||s.awaitFinish)return;if(s.mode!=='idle'){stopTransport('user');renderTakes();return;}clearTimeout(s.nextTimer);const token=++s.cancel;s.busy=true;s.busyFor='review';sync();
  try{await ensureContext();const b=await buffers(t.speed);if(!t.buffer)t.buffer=await s.ctx.decodeAudioData(await t.blob.arrayBuffer());if(token!==s.cancel)return;
   s.trace={take:t,points:t.points,score:t.score};if(s.pos<t.a||s.pos>=t.endSong-1)s.pos=t.a;// under a second left: replay from the start
   const off=s.pos-t.a,when=s.ctx.currentTime+.15,dur=t.duration-off/t.speed;s.transport={token,when,offset:s.pos,end:t.endSong,speed:t.speed,loop:null};s.mode='review';
@@ -310,7 +349,7 @@ async function playTake(t){
 }
 function resize(){const r=$('chartWrap').getBoundingClientRect(),q=$('timelineWrap').getBoundingClientRect();W=r.width;H=r.height;TW=q.width;TH=q.height;DPR=Math.min(window.devicePixelRatio||1,2);canvas.width=Math.round(W*DPR);canvas.height=Math.round(H*DPR);g.setTransform(DPR,0,0,DPR,0,0);tl.width=Math.round(TW*DPR);tl.height=Math.round(TH*DPR);tg.setTransform(DPR,0,0,DPR,0,0);if(W>0&&H>0){draw(now());s.dirty=false;}else s.dirty=true;requestDraw();}
 function lyricLane(){return 0;}// words are drawn on the melody itself (see drawWords); no separate lane
-function bounds(){const narrow=W<720;const hud=narrow?180:136;return{left:narrow?40:48,right:W-14,top:hud+8,bottom:H-(narrow?128:92),lane:0,laneTop:hud};}
+function bounds(){const narrow=W<720,short=!narrow&&H<330;const hud=narrow?180:short?68:136;return{left:narrow?40:48,right:W-14,top:hud+8,bottom:H-(narrow?128:short?52:92),lane:0,laneTop:hud};}
 // Words ride the melody: each word sits just above the target pitch at its own moment; colliding labels stack upward, none is dropped.
 function drawWords(t,v,x,y,b,opt){
  if(!prefs.lyrics||!song.lyrics.length)return;const font=(W<720?'12px ':'13px ')+getComputedStyle(document.body).getPropertyValue('--sans');g.font=font;g.textAlign='left';g.textBaseline='alphabetic';
@@ -337,7 +376,7 @@ function tracePaths(points,x,y,frames,upTo){
  return paths;
 }
 function draw(t){
- if(!g)return;const b=bounds(),v=view(t);followRange(v);const x=a=>b.left+(a-v.a)/v.span*(b.right-b.left),y=m=>b.bottom-(m-s.rangeLo)/(s.rangeHi-s.rangeLo)*(b.bottom-b.top);const rowH=(b.bottom-b.top)/(s.rangeHi-s.rangeLo);
+ if(!g)return;const b=bounds(),v=view(t);followRange(v,t);const x=a=>b.left+(a-v.a)/v.span*(b.right-b.left),y=m=>b.bottom-(m-s.rangeLo)/(s.rangeHi-s.rangeLo)*(b.bottom-b.top);const rowH=(b.bottom-b.top)/(s.rangeHi-s.rangeLo);
  g.fillStyle='#0e131c';g.fillRect(0,0,W,H);const mono=getComputedStyle(document.body).getPropertyValue('--mono'),sans=getComputedStyle(document.body).getPropertyValue('--sans');
  // piano-roll rows: black-key rows darker, C rows outlined, labels every semitone when rows are tall enough
  const labelStep=rowH>=11?1:2;g.textAlign='right';g.textBaseline='middle';g.font='10px '+mono;
@@ -476,13 +515,13 @@ const stage=$('chartWrap');stage.addEventListener('pointerdown',e=>{if(s.mode===
 stage.addEventListener('pointermove',e=>{if(!s.scrub)return;const b=bounds(),v=view(0),pxPerSec=(b.right-b.left)/v.span,dx=e.clientX-s.scrub.x;if(Math.abs(dx)>2)s.scrub.moved=true;if(s.scrub.moved){const t=clamp(s.scrub.pos-dx/pxPerSec,0,song.duration);if(s.mode==='idle'){s.pos=t;s.dirty=true;requestDraw();}else if(performance.now()-s.scrub.last>150){s.scrub.last=performance.now();applySeek(t);}s.scrub.target=t;}});
 const endScrub=e=>{if(!s.scrub)return;const {moved,target}=s.scrub;s.scrub=null;if(moved)applySeek(target??s.pos);};stage.addEventListener('pointerup',endScrub);stage.addEventListener('pointercancel',endScrub);
 stage.addEventListener('wheel',e=>{if(s.mode==='singing')return;e.preventDefault();const d=(Math.abs(e.deltaX)>Math.abs(e.deltaY)?e.deltaX:e.deltaY)/120;const t=clamp((s.wheelPos??now())+d*.5,0,song.duration);s.wheelPos=t;if(s.mode==='idle'){s.pos=t;s.dirty=true;requestDraw();}clearTimeout(s.wheelTimer);s.wheelTimer=setTimeout(()=>{const p=s.wheelPos;s.wheelPos=null;applySeek(p);},120);},{passive:false});
-$('gate').oninput=()=>{prefs.gate=+$('gate').value;s.worker?.postMessage({type:'settings',gate:prefs.gate});savePrefs();sync();};$('octave').onchange=()=>{prefs.octave=+$('octave').value;s.trace=null;savePrefs();setRangeScale();sync();};
+$('gate').oninput=()=>{prefs.gate=+$('gate').value;s.worker?.postMessage({type:'settings',gate:prefs.gate});savePrefs();sync();};$('octave').onchange=()=>{prefs.octave=+$('octave').value;if(traceShown())rescoreTake(s.trace.take,{octave:prefs.octave});savePrefs();setRangeScale();sync();};
 $('latency').onchange=()=>{const v=+$('latency').value;if(!Number.isFinite(v))return;prefs.latency=clamp(v,-500,1000);savePrefs();sync();};
 $('tolerance').onchange=()=>{const v=+$('tolerance').value;if(!Number.isFinite(v))return;prefs.tolerance=clamp(v,10,100);prefs.level=Object.keys(LEVELS).find(k=>LEVELS[k].tolerance===prefs.tolerance)||'custom';savePrefs();sync();};
-$('micSelect').onchange=()=>{prefs.mic=$('micSelect').value;if(s.stream)releaseMic();};$('micToggle').onclick=async()=>{if(s.stream){await releaseMic();return;}if(s.busy)return;const token=++s.cancel;s.busy=true;sync();try{await ensureMic(token);}catch(e){error(micError(e));}finally{if(token===s.cancel){s.busy=false;sync();}}};
+$('micSelect').onchange=()=>{prefs.mic=$('micSelect').value;if(s.stream)releaseMic();};$('micToggle').onclick=async()=>{if(s.stream){await releaseMic();return;}if(s.busy)return;const token=++s.cancel;s.busy=true;s.busyFor='mic';sync();try{await ensureMic(token);}catch(e){error(micError(e));}finally{if(token===s.cancel){s.busy=false;sync();}}};
 $('applyRange').onclick=()=>{const a=+$('rangeA').value,b=+$('rangeB').value;if(!Number.isFinite(a)||!Number.isFinite(b)||a<0||b>song.duration||b-a<.5){toast('Початок і кінець мають бути в межах пісні; довжина — від 0.5 с.');return;}setRange(a,b);s.pos=a;s.history=[];sync();toast('Фрагмент встановлено.');};
 for(const [id,key]of[['backGain','back'],['foreGain','fore']])$(id).oninput=()=>{prefs[key]=+$(id).value/100;$(id+'Out').textContent=Math.round(prefs[key]*100)+'%';applyMix();};$('originalMix').onclick=()=>{prefs.back=.75;prefs.fore=.75;applyMix();sync();};
-for(const b of document.querySelectorAll('[data-view]'))b.onclick=()=>{prefs.view=b.dataset.view;s.trace=null;s.dirty=true;sync();};
+for(const b of document.querySelectorAll('[data-view]'))b.onclick=()=>{prefs.view=b.dataset.view;if(traceShown())rescoreTake(s.trace.take,{view:prefs.view});savePrefs();s.dirty=true;sync();};
 $('saveVerify').onclick=()=>{if($('confirmTarget').checked){s.verified.push({...s.range});toast('Підтверджено тільки вибраний фрагмент.');}else s.verified=s.verified.filter(r=>r.b<s.range.a||r.a>s.range.b);saveEdits();$('qualityDialog').close();sync();};$('revokeVerify').onclick=()=>{s.verified=s.verified.filter(r=>r.b<s.range.a||r.a>s.range.b);saveEdits();$('qualityDialog').close();sync();};
 $('editNoteSelect').onchange=()=>selectEdit($('editNoteSelect').value);for(const b of document.querySelectorAll('[data-delta]'))b.onclick=()=>{if(!s.edit)return;s.edit.m=clamp(s.edit.m+Number(b.dataset.delta),24,108);$('editNoteName').textContent=name(s.edit.m);};
 $('applyEdit').onclick=()=>{if(!s.edit)return;const a=+$('editStart').value,b=+$('editEnd').value;if(!Number.isFinite(a)||!Number.isFinite(b)||a<0||b>song.duration||b-a<.04){toast('Перевір межі ноти: мінімум 0.04 с, у межах пісні.');return;}if(song.notes.some(n=>n.id!==s.edit.id&&n.a<b-.001&&n.b>a+.001)){toast('Ця нота перекриває сусідню. Спочатку зміни її межі.');return;}const original=song.notes.find(n=>n.id===s.edit.id);s.edit.originalM=original.originalM??original.m;Object.assign(original,s.edit,{a,b,manual:true,ok:true,n:Math.round(s.edit.m),ignored:$('editIgnore').checked});song.notes.sort((a,b)=>a.a-b.a);s.verified=[];saveEdits();setRangeScale();$('editDialog').close();sync();};
@@ -501,7 +540,7 @@ window.Luma={diagnostics:()=>({mode:s.mode,busy:s.busy,pending:s.awaitFinish,tim
   injectTake:({a,b,speed=1,points,tolerance,octave=prefs.octave,view=prefs.view})=>{const duration=(b-a)/speed,meta={...takeMeta(a,b,speed),octave,view};if(tolerance!==undefined){meta.tolerance=tolerance;meta.level='custom';}const id=meta.id;const m={id,blob:silentWav(duration),sampleRate:48000,duration,start:0,end:duration,reason:'end',points:points.filter(p=>p.t>=0&&p.t<duration),gap:0};const t=storeTake(meta,m);s.pos=a;sync();return {id:t.id,pct:scorePct(t.score),frames:t.score.frames.length,points:t.points.length};},
   livePush:(p)=>{handleWorker({type:'pitch',computeMs:0,windowMs:64,...p});},
   seek:t=>seekTo(t,true),applySeek,selectTake:id=>{const t=s.takes.find(t=>t.id===id);if(t)selectTrace(t);},closeTrace,jumpMiss,draw:()=>{draw(now());updateReadout(now());},
-  setLevel:l=>{document.querySelector('[data-level="'+l+'"]').click();return levelOpt();},setRange,clearRange,levelOpt,centsOff,now,punchTarget:()=>punchTarget()?.id??null,gains:()=>s.gains?{back:s.gains.back.gain.value,fore:s.gains.fore.gain.value,vocal:prefs.vocal}:null,takes:()=>s.takes.map(t=>({id:t.id,a:t.a,endSong:t.endSong,duration:t.duration,bytes:t.blob.size,points:t.points.length,punches:t.punches||0,pct:scorePct(t.score)})),
+  setLevel:l=>{document.querySelector('[data-level="'+l+'"]').click();return levelOpt();},viewWindow:t=>view(t),scale:()=>({...SCALE,goalLo:sc.goalLo,goalHi:sc.goalHi}),setRange,clearRange,levelOpt,centsOff,now,punchTarget:()=>punchTarget()?.id??null,gains:()=>s.gains?{back:s.gains.back.gain.value,fore:s.gains.fore.gain.value,vocal:prefs.vocal}:null,takes:()=>s.takes.map(t=>({id:t.id,a:t.a,endSong:t.endSong,duration:t.duration,bytes:t.blob.size,points:t.points.length,punches:t.punches||0,pct:scorePct(t.score)})),
   state:()=>({mode:s.mode,pos:s.pos,time:now(),trace:s.trace?{id:s.trace.take.id,points:s.trace.points.length,frames:s.trace.score.frames.length,pct:scorePct(s.trace.score),missRuns:missRuns(s.trace.score)}:null,liveScore:s.live?{target:s.live.target,hit:s.live.hit,sung:s.live.sung,pct:scorePct(s.live)}:null,history:s.history.length,matchText:$('matchPct').textContent,matchDetail:$('matchDetail').textContent,reviewHidden:$('reviewBar').hidden,missCount:$('missCount').textContent,lyric:$('lyricNow').textContent,liveNote:$('liveNote').textContent,deviation:$('deviation').textContent,range:{...s.range},rangeId:s.rangeId,rangeText:$('rangeText').textContent,loop:prefs.loop,transportLoop:s.transport?.loop??null,level:prefs.level,tolerance:prefs.tolerance,rangeLo:s.rangeLo,rangeHi:s.rangeHi}),
   fakeSing:({a,b,speed=1})=>{// enter singing mode without audio: transport clock driven by a fake context
    if(s.mode!=='idle')return false;const meta=takeMeta(a,b,speed),id=meta.id;if(!s.ctx)s.ctx={currentTime:0,state:'running',sampleRate:48000,resume(){},get _fake(){return true;}};const when=s.ctx.currentTime;s.transport={token:++s.cancel,when,offset:a,end:b,speed,loop:null};s.mode='singing';s.history=[];s.live=newScore(meta);s.pending.set(id,meta);sync();return {id,when};},

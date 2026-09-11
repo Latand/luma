@@ -7,3 +7,4 @@ __pycache__/
 *.pyc
 tests/e2e/shot_*.png
 .DS_Store
+node_modules

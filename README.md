@@ -14,7 +14,7 @@ of your voice, no server after the file is built.
   target are excluded; draft notes count and are labelled as draft. Hit notes turn mint with ✓, misses subdued red with ×.
 - **Three levels.** Легко (±80 ¢, octave errors forgiven), Звично (±50 ¢), Точно (±35 ¢); each also sets timing slack and how
   much of a note must be hit. Details in [docs/SCORING.md](docs/SCORING.md).
-- **Fragment pitch scale.** The vertical range follows notes and confident voice in the visible fragment, including voice-only passages. Use Масштаб → Детальніше for a closer view; live changes settle smoothly.
+- **Fragment pitch scale.** The vertical range frames the notes in view plus the next four seconds, so it is already right when a phrase arrives. It grows only when upcoming notes would leave the margin, shrinks after two quiet seconds, and every change eases over a second. Confident voice enters through a percentile band, so a single glitch never moves the plot. Масштаб → Детальніше halves the minimum span.
 - **Attempts with history.** Every take keeps its WAV, its timestamped pitch trace and per-frame results. Scrub back to see
   where you drifted, jump between misses, play your voice over the backing in sync, export WAV and CSV.
 - **Punch-in.** Seek inside an attempt and "Співати" becomes "Перезаписати з …": the same take is re-recorded from that point. Нова спроба records a separate take; Скасувати перезапис restores the previous version of the last punch.

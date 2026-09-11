@@ -25,6 +25,9 @@ const gap = await p.evaluate(() => {
   return window.Luma.test.state();
 });
 assert(gap.rangeLo < 40 && gap.rangeHi > 40 && gap.rangeHi-gap.rangeLo <= 14, 'target-free fragment frames the recorded E2 closely '+JSON.stringify({lo:gap.rangeLo,hi:gap.rangeHi,pos:gap.pos}));
+await p.locator('[data-view="notes"]').click();state=await p.evaluate(()=>window.Luma.test.state());
+assert(state.trace&&!state.reviewHidden,'switching the view keeps the shown attempt on screen');
+await p.locator('[data-view="contour"]').click();
 await p.setViewportSize({width:1440,height:900});
 await p.evaluate(a => {window.Luma.test.closeTrace();window.Luma.test.setRange(a,a+2);window.Luma.test.seek(a+2);}, win.a);
 await p.locator('#loopBtn').click();await p.locator('#listenBtn').click();
@@ -38,6 +41,18 @@ await p.locator('#loopBtn').click();
 state=await p.evaluate(()=>window.Luma.test.state());
 assert(state.loop&&state.transportLoop&&state.time<win.a+2,'enabling repeat outside its region returns to A during playback');
 await p.locator('#stopBtn').click();
+// A fragment that ended by itself starts again from A, for Listen and for Sing, even with the loop off.
+await p.evaluate(a=>{const t=window.Luma.test;if(t.state().loop)document.getElementById('loopBtn').click();t.setRange(a,a+1.5);t.seek(a);},win.a);
+await p.locator('#listenBtn').click();await p.waitForFunction(()=>window.Luma.test.state().mode==='listen');await p.waitForFunction(()=>window.Luma.test.state().mode==='idle',null,{timeout:8000});
+state=await p.evaluate(()=>window.Luma.test.state());assert(!state.loop&&Math.abs(state.pos-(win.a+1.5))<.15,'fragment ended by itself at B '+JSON.stringify({pos:state.pos,loop:state.loop}));
+await p.locator('#listenBtn').click();await p.waitForFunction(()=>window.Luma.test.state().mode==='listen');await p.waitForTimeout(300);
+state=await p.evaluate(()=>window.Luma.test.state());assert(state.time>=win.a-.05&&state.time<win.a+1.5,'Listen after a natural end restarts the fragment from A '+state.time);
+await p.locator('#stopBtn').click();await p.waitForFunction(()=>window.Luma.test.state().mode==='idle');
+await p.evaluate(a=>window.Luma.test.seek(a+1.5),win.a);
+await p.locator('#singBtn').click();await p.waitForFunction(()=>window.Luma.test.state().mode==='singing',null,{timeout:8000});
+assert(await p.locator('#listenLabel').textContent()==='Стоп','the second button says Стоп while recording');
+state=await p.evaluate(()=>window.Luma.test.state());assert(state.time>=win.a-.05&&state.time<win.a+1.5,'Sing from the fragment end records the fragment again from A '+state.time);
+await p.locator('#stopBtn').click();await p.waitForTimeout(1500);
 await p.setViewportSize({width:390,height:844});
 assert(await p.locator('#listenBtn').getAttribute('aria-label') === 'Слухати пісню', 'mobile listen has an accessible name');
 const dimensions = await p.evaluate(() => ({page:document.documentElement.scrollWidth,view:innerWidth}));
