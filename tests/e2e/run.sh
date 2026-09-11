@@ -18,6 +18,6 @@ export LUMA_URL="http://127.0.0.1:$PORT/Luma_Demo.html"
 export LUMA_STUDIO_URL="http://127.0.0.1:$STUDIO_PORT/"
 RUN=${LUMA_JS:-bun}; command -v "$RUN" >/dev/null || RUN=node
 status=0
-for t in scoring audio ux studio; do echo "== $t"; LUMA_SHOT="tests/e2e/shot_$t.png" "$RUN" "tests/e2e/$t.mjs" || status=1; done
+for t in scoring audio ux studio scale; do echo "== $t"; LUMA_SHOT="tests/e2e/shot_$t.png" "$RUN" "tests/e2e/$t.mjs" || status=1; done
 "$PY" tests/studio_test.py || status=1
 exit $status

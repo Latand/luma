@@ -37,10 +37,14 @@ def guess(name):
     stem = Path(name).stem; m = re.match(r'^(.*?)\s+-\s+(.*)$', stem)
     return (m.group(1).strip(), m.group(2).strip()) if m else (stem.strip(), '')
 
-def stage_info(job: dict, now: float) -> dict | None:
-    """Latest stage marker in the job log, with progress 0..1 and a rough ETA in seconds."""
-    try: lines = Path(job['log']).read_text(errors='replace').splitlines()
+def read_log(job: dict) -> list[str] | None:
+    try: return Path(job['log']).read_text(errors='replace').splitlines()
     except (KeyError, OSError, TypeError): return None
+
+def stage_info(job: dict, now: float, lines: list[str] | None = None) -> dict | None:
+    """Latest stage marker in the job log, with progress 0..1 and a rough ETA in seconds."""
+    if lines is None: lines = read_log(job)
+    if lines is None: return None
     last = None
     for line in lines:
         m = STAGE_RE.match(line)
@@ -56,7 +60,8 @@ def stage_info(job: dict, now: float) -> dict | None:
     return {'n': n, 'total': 8, 'key': key, 'name': name, 'progress': round(progress, 3), 'eta': round(eta), 'stalled': in_stage > weight * pace * 3 + 60}
 
 _meta_cache: dict[str, tuple[tuple[int, float], dict]] = {}
-_META_RE = re.compile(r'window\.LUMA_SONG=\{"schema":"luma\.song\.v1","title":("(?:[^"\\]|\\.)*"),"artist":("(?:[^"\\]|\\.)*"),"duration":([0-9.]+)')
+_HEAD_RE = re.compile(r'window\.LUMA_SONG=\{"schema":"luma\.song\.v1"')
+_STR = r'("(?:[^"\\]|\\.)*")'
 def song_meta(p: Path) -> dict:
     """Title, artist and duration from the head of a trainer file; cached by size and mtime, so /status stays cheap."""
     st = p.stat(); sig = (st.st_size, st.st_mtime); hit = _meta_cache.get(p.name)
@@ -64,8 +69,12 @@ def song_meta(p: Path) -> dict:
     meta = {}
     try:
         with open(p, 'rb') as f: head = f.read(512 * 1024).decode('utf-8', errors='replace')
-        m = _META_RE.search(head)
-        if m: meta = {'title': json.loads(m.group(1)), 'artist': json.loads(m.group(2)), 'duration': float(m.group(3))}
+        m = _HEAD_RE.search(head)
+        if m:
+            # Top-level fields sit at the start of the object, before the long arrays; key order does not matter.
+            obj = head[m.end():m.end() + 4096]; field = lambda key, pat: (re.search(r'"' + key + r'":' + pat, obj) or [None, None])[1]
+            title, artist, duration = field('title', _STR), field('artist', _STR), field('duration', r'([0-9.]+)')
+            if title: meta = {'title': json.loads(title), 'artist': json.loads(artist) if artist else '', 'duration': float(duration) if duration else None}
     except (OSError, ValueError): meta = {}
     _meta_cache[p.name] = (sig, meta); return meta
 
@@ -89,7 +98,6 @@ def worker():
             job['finished'] = time.time(); job['state'] = 'done' if succeeded else 'failed'
             if succeeded: job['html'] = out_html.name
         if job['state'] == 'done':
-            job['html'] = out_html.name
             if COPY_TO:
                 try: COPY_TO.mkdir(parents=True, exist_ok=True); shutil.copy2(out_html, COPY_TO / out_html.name); job['copy'] = str(COPY_TO / out_html.name)
                 except OSError as e: job['copy_error'] = str(e)
@@ -108,16 +116,15 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(404, 'Демо ще не зібрано. Додай готовий тренажер до бібліотеки.', 'text/plain; charset=utf-8')
         if u.path == '/status':
             now = time.time()
-            with lock:
-                js = []
-                for j in jobs:
-                    d = {k: j.get(k) for k in ['id', 'title', 'artist', 'state', 'started', 'finished', 'html', 'copy', 'requestId']}
-                    if j.get('error'): d['tail'] = j['error']
-                    if j.get('log') and j['state'] in ('running', 'failed'):
-                        try: d['tail'] = '\n'.join(Path(j['log']).read_text(errors='replace').splitlines()[-6:])
-                        except OSError: pass
-                        d['stage'] = stage_info(j, now)
-                    js.append(d)
+            with lock: snapshot = [dict(j) for j in jobs]
+            js = []
+            for j in snapshot:  # logs are read outside the lock, once per job
+                d = {k: j.get(k) for k in ['id', 'title', 'artist', 'state', 'started', 'finished', 'html', 'copy', 'requestId']}
+                if j.get('error'): d['tail'] = j['error']
+                if j.get('log') and j['state'] in ('running', 'failed'):
+                    lines = read_log(j)
+                    if lines is not None: d['tail'] = '\n'.join(lines[-6:]); d['stage'] = stage_info(j, now, lines)
+                js.append(d)
             songs = []
             for p in sorted(SONGS.glob('Luma_*.html'), key=lambda p: -p.stat().st_mtime):
                 songs.append({'name': p.name, 'bytes': p.stat().st_size, 'mtime': time.strftime('%Y-%m-%d %H:%M', time.localtime(p.stat().st_mtime)), **song_meta(p)})
@@ -144,7 +151,8 @@ class Handler(BaseHTTPRequestHandler):
                 assets = json.loads(source[b + len(';window.LUMA_ASSETS='):end - len(';</script>')])
                 if not isinstance(assets, dict) or '1' not in assets: raise ValueError('assets')
                 # JSON must not be able to close the enclosing script element.
-                packed = prefix + json.dumps(song, ensure_ascii=False).replace('<', '\\u003c') + ';window.LUMA_ASSETS=' + json.dumps(assets).replace('<', '\\u003c') + ';</script>'
+                # Compact separators, like build_html.build, so the library can read title / artist / duration from the head.
+                packed = prefix + json.dumps(song, ensure_ascii=False, separators=(',', ':')).replace('<', '\\u003c') + ';window.LUMA_ASSETS=' + json.dumps(assets, separators=(',', ':')).replace('<', '\\u003c') + ';</script>'
                 output = SONGS / ('Luma_' + slugify(str(song.get('title', 'song')))[:100] + '_' + uuid.uuid4().hex[:8] + '.html')
                 with output.open('x', encoding='utf-8') as f: f.write(wrap(song, packed))
             except (ValueError, KeyError, TypeError, UnicodeError):

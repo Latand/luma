@@ -61,6 +61,8 @@ class StudioHTTPTests(unittest.TestCase):
         self.assertIn('scaleSelect', content)
         status, _ = self.request('/import?name=bad.html', b'<html>no trainer data</html>', 'PUT')
         self.assertEqual(status, 400)
+        status, body = self.request('/status')
+        self.assertEqual({(s['title'], s['artist'], s['duration']) for s in json.loads(body)['songs']}, {('<img src=x onerror=alert(1)>', 'A', 4.0)}, 'imported trainers keep their metadata in the library')
 
     def test_retry_only_transitions_a_failed_job_once(self):
         self.request('/upload?name=demo.wav', b'fake audio', 'PUT')

@@ -53,6 +53,11 @@ await p.locator('#singBtn').click();await p.waitForFunction(()=>window.Luma.test
 assert(await p.locator('#listenLabel').textContent()==='Стоп','the second button says Стоп while recording');
 state=await p.evaluate(()=>window.Luma.test.state());assert(state.time>=win.a-.05&&state.time<win.a+1.5,'Sing from the fragment end records the fragment again from A '+state.time);
 await p.locator('#stopBtn').click();await p.waitForTimeout(1500);
+// the same parked at B with the loop on: Sing records the fragment from A
+await p.evaluate(a=>{const t=window.Luma.test;if(!t.state().loop)document.getElementById('loopBtn').click();t.seek(a+1.5);},win.a);
+await p.locator('#singBtn').click();await p.waitForFunction(()=>window.Luma.test.state().mode==='singing',null,{timeout:8000});
+state=await p.evaluate(()=>window.Luma.test.state());assert(state.loop&&state.time>=win.a-.05&&state.time<win.a+1.5,'Sing from the fragment end with the loop on records from A '+state.time);
+await p.locator('#stopBtn').click();await p.waitForTimeout(1500);await p.evaluate(()=>{if(window.Luma.test.state().loop)document.getElementById('loopBtn').click();});
 await p.setViewportSize({width:390,height:844});
 assert(await p.locator('#listenBtn').getAttribute('aria-label') === 'Слухати пісню', 'mobile listen has an accessible name');
 const dimensions = await p.evaluate(() => ({page:document.documentElement.scrollWidth,view:innerWidth}));

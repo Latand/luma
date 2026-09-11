@@ -26,7 +26,8 @@ function noteHTML(m){if(!Number.isFinite(m))return '—';const n=Math.round(m);r
 function icon(id){return '<svg><use href="#i-'+id+'"/></svg>';}
 function say(text){$('srStatus').textContent=text;}
 function toast(text){$('toast').textContent=text;$('toast').classList.add('show');clearTimeout(s.toastTimer);s.toastTimer=setTimeout(()=>$('toast').classList.remove('show'),5000);}
-function error(text){$('errorText').textContent=text;$('errorBanner').hidden=false;$('studioLink').hidden=location.protocol!=='file:';$('errorSettings').hidden=location.protocol==='file:';if($('settingsDialog').open)$('settingsDialog').close();updateStatus();say(text);}
+// kind 'mic': microphone trouble, so the banner offers the microphone settings (or the Studio link on file://). Other errors get no action.
+function error(text,kind=''){$('errorText').textContent=text;$('errorBanner').hidden=false;const file=location.protocol==='file:';$('studioLink').hidden=!(kind==='mic'&&file);$('errorSettings').hidden=!(kind==='mic'&&!file);if($('settingsDialog').open)$('settingsDialog').close();updateStatus();say(text);}
 function savePrefs(){try{localStorage.setItem('luma.trainer.settings',JSON.stringify(prefs));}catch(_){}}
 function saveEdits(){try{localStorage.setItem('luma.target.'+song.id,JSON.stringify({notes:song.notes,verified:s.verified}));}catch(_){toast('Не вдалося зберегти правки у браузері. Завантаж JSON цілі.');}}
 function loadEdits(){s.verified=[];try{const d=JSON.parse(localStorage.getItem('luma.target.'+song.id)||'null');if(d&&validNotes(d.notes,song.duration)){song.notes=d.notes;s.verified=(d.verified||[]).filter(r=>Number.isFinite(r.a)&&Number.isFinite(r.b)&&r.a>=0&&r.b<=song.duration&&r.b>r.a);}}catch(_){}}
@@ -76,8 +77,8 @@ function chooseRange(id){
  if(s.rangeId===-1)return;
  const p=song.phrases.find(p=>p.id===s.rangeId);s.range=p?{a:p.a,b:p.b}:{a:0,b:song.duration};s.pos=s.range.a;s.history=[];s.current=null;setRangeScale();sync();
 }
-function setRange(a,b,id=-1){a=clamp(a,0,song.duration);b=clamp(b,0,song.duration);if(b-a<.5)return false;s.range={a,b};s.rangeId=id;if(s.transport?.loop){s.transport.loop={a,b};}setRangeScale();sync();return true;}
-function clearRange(){s.range={a:0,b:song.duration};s.rangeId=0;if(s.transport?.loop)s.transport.loop=null;setRangeScale();sync();}
+function setRange(a,b,id=-1){a=clamp(a,0,song.duration);b=clamp(b,0,song.duration);if(b-a<.5)return false;s.range={a,b};s.rangeId=id;if(s.transport?.loop){s.transport.loop={a,b};}sync();return true;}
+function clearRange(){s.range={a:0,b:song.duration};s.rangeId=0;if(s.transport?.loop)s.transport.loop=null;sync();}
 // ── Vertical scale: predictive, hysteretic, eased. ──
 // The band comes from the target notes in the visible window plus a look-ahead, so the plot is already right before the
 // notes arrive. The goal moves only when upcoming notes would leave an inner margin (grow, never shrink), or when the band
@@ -85,7 +86,7 @@ function clearRange(){s.range={a:0,b:song.duration};s.rangeId=0;if(s.transport?.
 // the next one waits SCALE.dwell seconds, except after an explicit seek. Voice enters through a percentile band of confident
 // frames, so single glitches never drive the scale.
 const SCALE={lookahead:4,dwell:2.5,shrinkHold:2,shrinkMin:3,ease:1,inner:.5,pad:1.5,minSpan:8,voiceMin:25,voiceTrail:2};
-const sc={goalLo:48,goalHi:76,fromLo:48,fromHi:76,changedAt:-1e9,shrinkSince:null};
+const sc={goalLo:48,goalHi:76,fromLo:48,fromHi:76,changedAt:-1e9,shrinkSince:null,lastEase:0};
 function scaleZoom(){return Number($('scaleSelect').value)||1;}
 function pointIndex(t){const a=song.points;let lo=0,hi=a.length;while(lo<hi){const m=(lo+hi)>>1;if(a[m][0]<t)lo=m+1;else hi=m;}return lo;}
 // Pitch extremes of the drawn target between a and b: notes always; in contour view the contour too, but only where it stays
@@ -123,7 +124,9 @@ function planScale(v,t,wall,instant){
  if((sc.goalHi-sc.goalLo)-(cand.hi-cand.lo)>=SCALE.shrinkMin){if(sc.shrinkSince===null)sc.shrinkSince=wall;else if(wall-sc.shrinkSince>=SCALE.shrinkHold&&wall-sc.changedAt>=SCALE.dwell)setGoal(cand,wall,false);}
  else sc.shrinkSince=null;
 }
-function easeScale(wall){if(s.rangeLo===sc.goalLo&&s.rangeHi===sc.goalHi)return;const p=reduced.matches?1:clamp((wall-sc.changedAt)/SCALE.ease,0,1),e=p*p*(3-2*p);
+function easeScale(wall){if(s.rangeLo===sc.goalLo&&s.rangeHi===sc.goalHi){sc.lastEase=wall;return;}
+ if(wall-(sc.lastEase||0)>.25&&!reduced.matches){sc.fromLo=s.rangeLo;sc.fromHi=s.rangeHi;sc.changedAt=wall;}// frames were not running: resume the glide from the current plot
+ sc.lastEase=wall;const p=reduced.matches?1:clamp((wall-sc.changedAt)/SCALE.ease,0,1),e=p*p*(3-2*p);
  if(p>=1){s.rangeLo=sc.goalLo;s.rangeHi=sc.goalHi;}else{s.rangeLo=sc.fromLo+(sc.goalLo-sc.fromLo)*e;s.rangeHi=sc.fromHi+(sc.goalHi-sc.fromHi)*e;}s.dirty=true;}
 // Explicit seek or a new selection: frame the new place at once.
 function setRangeScale(){planScale(view(s.pos),s.pos,performance.now()/1000,true);}
@@ -178,12 +181,14 @@ async function ensureContext(){
 function applyMix(){if(s.gains){s.gains.back.gain.setTargetAtTime(prefs.back,s.ctx.currentTime,.02);s.gains.fore.gain.setTargetAtTime(prefs.vocal?prefs.fore:0,s.ctx.currentTime,.02);}savePrefs();}
 async function decodeBase64(data){if(typeof data!=='string'||data.length<40)throw Error('У пакеті бракує аудіодоріжки.');const raw=atob(data),a=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)a[i]=raw.charCodeAt(i);return s.ctx.decodeAudioData(a.buffer);}
 async function buffers(speed){const key=String(speed);if(s.bufs.has(key))return s.bufs.get(key);const a=assets[key];if(!a)throw Error('Цю швидкість не підготовлено.');const [back,fore]=await Promise.all([decodeBase64(a.backing),decodeBase64(a.foreground)]);if(Math.abs(back.duration-fore.duration)>.1)throw Error('Доріжки мають різну довжину: пакет потребує повторної підготовки.');const b={back,fore};s.bufs.set(key,b);return b;}
-function micError(e){return ({NotAllowedError:'Доступ до мікрофона заборонено. Дозволь його для цієї сторінки через значок налаштувань біля адреси, потім натисни «Співати» знову. Прослуховування доступне.',NotFoundError:'Мікрофон не знайдено. Підключи пристрій, вибери його в налаштуваннях і спробуй знову. Поки можна слухати пісню.',NotReadableError:'Мікрофон зайнятий або недоступний. Перевір пристрій у системі та закрий програму, яка використовує його, потім спробуй знову.',OverconstrainedError:'Обраний мікрофон недоступний. У налаштуваннях вибери системний або інший підключений пристрій.'})[e.name]||e.message||'Не вдалося підключити мікрофон.';}
+const MIC_ERRORS={NotAllowedError:'Доступ до мікрофона заборонено. Дозволь його для цієї сторінки через значок налаштувань біля адреси, потім натисни «Співати» знову. Прослуховування доступне.',NotFoundError:'Мікрофон не знайдено. Підключи пристрій, вибери його в налаштуваннях і спробуй знову. Поки можна слухати пісню.',NotReadableError:'Мікрофон зайнятий або недоступний. Перевір пристрій у системі та закрий програму, яка використовує його, потім спробуй знову.',OverconstrainedError:'Обраний мікрофон недоступний. У налаштуваннях вибери системний або інший підключений пристрій.'};
+function micError(e){return MIC_ERRORS[e.name]||e.message||'Не вдалося підключити мікрофон.';}
+function errorKind(e){return e&&(e.name in MIC_ERRORS||e.mic)?'mic':'';}
 async function releaseMic(){s.micGeneration++;const w=s.worker,c=s.capture,m=s.micSource,stream=s.stream;s.worker=null;s.capture=null;s.micSource=null;s.stream=null;try{c?.disconnect();c?.port.close();m?.disconnect();}catch(_){}stream?.getTracks().forEach(t=>{t.onended=null;t.stop();});w?.terminate();s.current=null;s.liveSmooth=null;$('micState').textContent='Мікрофон вимкнено';sync();}
 async function ensureMic(token){
- if(location.protocol==='file:')throw Error('Запис голосу працює через Luma Studio. Відкрий цю пісню з бібліотеки Studio та натисни «Співати».');
+ if(location.protocol==='file:')throw Object.assign(Error('Запис голосу працює через Luma Studio. Відкрий цю пісню з бібліотеки Studio та натисни «Співати».'),{mic:true});
  if(s.stream&&s.worker)return true;
- if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia)throw Error('Мікрофон потребує окремої вкладки і localhost / HTTPS. Вбудований перегляд може його блокувати.');
+ if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia)throw Object.assign(Error('Мікрофон потребує окремої вкладки і localhost / HTTPS. Вбудований перегляд може його блокувати.'),{mic:true});
  const ctx=await ensureContext();const stream=await navigator.mediaDevices.getUserMedia({audio:{deviceId:prefs.mic?{exact:prefs.mic}:undefined,channelCount:1,echoCancellation:false,noiseSuppression:false,autoGainControl:false},video:false});
  if(token!==s.cancel){stream.getTracks().forEach(t=>t.stop());return false;}const gen=++s.micGeneration;s.stream=stream;
  const wu=URL.createObjectURL(new Blob([$('worker-source').textContent],{type:'text/javascript'})),cu=URL.createObjectURL(new Blob([$('capture-source').textContent],{type:'text/javascript'}));
@@ -192,7 +197,7 @@ async function ensureMic(token){
   const worker=s.worker;const ready=new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Аудіоаналізатор не відповідає.')),6000);worker.onmessage=e=>{if(gen!==s.micGeneration)return;if(e.data.type==='ready'){clearTimeout(timer);resolve();}handleWorker(e.data);};worker.onerror=e=>{clearTimeout(timer);reject(Error(e.message||'Помилка аналізатора'));if(s.mode==='singing'){stopTransport('worker');error('Аудіоаналізатор зупинився. Незавершений запис може бути втрачений.');}};});
   const node=new AudioWorkletNode(ctx,'luma-capture',{numberOfInputs:1,numberOfOutputs:1,outputChannelCount:[1]}),src=ctx.createMediaStreamSource(stream),channel=new MessageChannel();s.capture=node;s.micSource=src;
   worker.postMessage({type:'connect',sampleRate:ctx.sampleRate,port:channel.port1},[channel.port1]);node.port.postMessage({type:'connect',port:channel.port2},[channel.port2]);worker.postMessage({type:'settings',gate:prefs.gate});src.connect(node);node.connect(ctx.destination);await ready;
-  stream.getTracks().forEach(t=>t.onended=()=>{stopTransport('device');error('Мікрофон від’єднався. Поточну спробу завершено.');setTimeout(()=>releaseMic(),500);});
+  stream.getTracks().forEach(t=>t.onended=()=>{stopTransport('device');error('Мікрофон від’єднався. Поточну спробу завершено.','mic');setTimeout(()=>releaseMic(),500);});
   $('micState').textContent=stream.getAudioTracks()[0]?.label||'Мікрофон увімкнено';populateMics();requestDraw();return true;
  }catch(e){await releaseMic();throw e;}finally{URL.revokeObjectURL(wu);URL.revokeObjectURL(cu);}
 }
@@ -210,12 +215,9 @@ function handleWorker(m){
 function clearSources(){clearTimeout(s.endTimer);s.endTimer=null;for(const n of s.sources){n.onended=null;try{n.stop();n.disconnect();}catch(_){}}s.sources=[];}
 function addSource(buffer,gain,when,offset,duration,onended){const n=s.ctx.createBufferSource();n.buffer=buffer;n.connect(gain);n.onended=onended||null;const len=Math.min(duration,buffer.duration-offset);if(len>0){n.start(when,Math.max(0,offset),len);s.sources.push(n);}return n;}
 function capacity(){
- const size=s.takes.reduce((a,t)=>a+t.blob.size,0)+(s.undoPunch?.before.blob.size||0),punch=punchTarget();
- const pos=s.pos>=song.duration-.1?0:s.pos,atEnd=atRegionEnd(pos),inside=atEnd||pos>=s.range.a-.01&&pos<s.range.b-.1;
- const end=punch?Math.max(s.range.b,punch.endSong):(inside||prefs.loop&&customRange()?s.range.b:song.duration);
- const start=punch?punch.a:(atEnd||prefs.loop&&customRange()&&!inside?s.range.a:pos);
+ const size=s.takes.reduce((a,t)=>a+t.blob.size,0)+(s.undoPunch?.before.blob.size||0),seg=nextSegment(true),punch=seg.punch;
  // Undo retains the old full WAV. Reserve the full merged replacement, even for a short selected punch region.
- const duration=punch?Math.max(punch.duration,(end-start)/punch.speed):Math.max(0,(end-start)/prefs.speed);
+ const duration=punch?Math.max(punch.duration,(seg.end-punch.a)/punch.speed):Math.max(0,(seg.end-seg.start)/seg.speed);
  const bytes=44+Math.ceil(duration*(punch?.sampleRate||s.ctx?.sampleRate||48000))*2;
  return (punch||s.takes.length<10)&&size+bytes<100*1024*1024;
 }
@@ -235,11 +237,17 @@ function mergeTake(old,meta,m){
  const duration=total/sr;const meta2={...meta,id:old.id,a:old.a,b:Math.max(old.b,meta.b),speed,startedAt:old.startedAt,punches:(old.punches||0)+1,lastPunchAt:meta.a};
  return {meta:meta2,m:{...m,id:old.id,blob,duration,start:0,end:duration,points,gap:0}};
 }
-// The playhead parked at the end of the fragment (where a finished pass leaves it) means: play the fragment again.
-function atRegionEnd(pos=s.pos){return customRange()&&pos>=s.range.b-.1&&pos<=s.range.b+.25;}
-function playRegion(){
- if(customRange()&&(atRegionEnd()||prefs.loop&&(s.pos<s.range.a||s.pos>=s.range.b-.1)))s.pos=s.range.a;
- const inside=s.pos>=s.range.a-.01&&s.pos<s.range.b-.1;return inside?{...s.range,loop:prefs.loop&&customRange()}:{a:0,b:song.duration,loop:false};}
+// Where the next Listen or Sing pass runs, without touching state. The A–B fragment applies from inside it and from its
+// end (a finished pass parks the playhead there); with the loop on, from anywhere; otherwise the song plays on to its end.
+// A punch-in re-records the shown take from the playhead. capacity() reads this, startTransport() applies it.
+function nextSegment(sing){
+ const speed=prefs.speed,punch=sing?punchTarget():null;let pos=s.pos>=song.duration-.1?0:s.pos;
+ if(punch)return{start:pos,end:Math.max(s.range.b,punch.endSong),speed,loop:null,punch};
+ const cr=customRange(),atEnd=cr&&pos>=s.range.b-.1&&pos<=s.range.b+.25;
+ if(cr&&(atEnd||prefs.loop&&(pos<s.range.a||pos>=s.range.b-.1)))pos=s.range.a;
+ const inside=pos>=s.range.a-.01&&pos<s.range.b-.1;
+ return inside?{start:Math.max(pos,s.range.a),end:s.range.b,speed,loop:!sing&&prefs.loop&&cr?{a:s.range.a,b:s.range.b}:null,punch:null}:{start:pos,end:song.duration,speed,loop:null,punch:null};
+}
 function takeMeta(offset,end,speed){const L=levelOpt();return{id:++s.takeCounter,a:offset,b:end,speed,octave:prefs.octave,view:prefs.view,tolerance:L.tolerance,slack:L.slack,ratio:L.ratio,octaveFree:L.octaveFree,level:L.level,latency:prefs.latency,referenceId:song.id,rangeId:s.rangeId,verified:structuredClone(s.verified),startedAt:new Date().toISOString()};}
 function scheduleSources(b,when,offset,end,speed,loop,token){
  const duration=(end-offset)/speed;
@@ -254,14 +262,14 @@ async function startTransport(sing,quick=false){
   await ensureContext();if(sing&&!capacity())throw Error('Ліміт пам’яті: 10 спроб або 100 МіБ. Збережи й видали стару спробу перед новою.');
   if(sing&&!await ensureMic(token))return;
   const b=await buffers(prefs.speed);if(token!==s.cancel)return;await s.ctx.resume();
-  const punch=sing?punchTarget():null;if(sing&&!punch)s.trace=null;setRangeScale();if(s.pos>=song.duration-.1)s.pos=0;const region=punch?{a:s.pos,b:Math.max(s.range.b,punch.endSong),loop:false}:playRegion();if(s.pos<region.a)s.pos=region.a;
-  const speed=prefs.speed,when=s.ctx.currentTime+(sing?(quick?.6:2.1):.12),offset=s.pos,end=punch?Math.max(region.b,punch.endSong):region.b,loop=!sing&&region.loop?{a:region.a,b:region.b}:null;
+  const seg=nextSegment(sing),punch=seg.punch;if(sing&&!punch)s.trace=null;if(seg.start!==s.pos){s.pos=seg.start;setRangeScale();}// only a moved playhead is framed at once; otherwise the eased planner takes over
+  const speed=seg.speed,when=s.ctx.currentTime+(sing?(quick?.6:2.1):.12),offset=seg.start,end=seg.end,loop=seg.loop;
   s.transport={token,when,offset,end,speed,loop};s.mode=sing?'singing':'listen';s.history=punch?punch.points.filter(p=>p.songT<offset).map(p=>({...p,raw:p.m})):[];s.current=null;s.liveSmooth=null;s.busy=false;s.live=null;
   const duration=scheduleSources(b,when,offset,end,speed,loop,token);
   if(sing){const lag=prefs.latency/1000,meta=takeMeta(offset,end,speed);if(punch){meta.punchInto=punch.id;s.trace=null;}s.pending.set(meta.id,meta);s.live=newScore(meta);s.worker.postMessage({type:'record',id:meta.id,start:when+lag,end:when+duration+lag});if(punch)say('Перезапис спроби '+punch.id+' від '+fmt(offset));}
   if(!loop)s.endTimer=setTimeout(()=>{if(s.transport?.token===token){if(s.mode==='singing'){s.worker?.postMessage({type:'stop',time:when+duration+prefs.latency/1000,reason:'end'});}else naturalEnd(token);}},(when-s.ctx.currentTime+duration+1.1)*1000);
   sync();say(sing?'Запис почнеться після відліку.':loop?'Повтор фрагмента без пауз.':'Відтворення.');
- }catch(e){if(token===s.cancel){error(micError(e));await releaseMic();}}
+ }catch(e){if(token===s.cancel){error(micError(e),errorKind(e));await releaseMic();}}
  finally{if(token===s.cancel){s.busy=false;sync();}}
 }
 // Live seek while listening or reviewing: rebuild the sources at the new position on the same transport token.
@@ -342,12 +350,12 @@ function removeTake(t){if(s.mode!=='idle'||s.awaitFinish||s.busy){toast('Спо�
 async function playTake(t){
  if(s.busy||s.awaitFinish)return;if(s.mode!=='idle'){stopTransport('user');renderTakes();return;}clearTimeout(s.nextTimer);const token=++s.cancel;s.busy=true;s.busyFor='review';sync();
  try{await ensureContext();const b=await buffers(t.speed);if(!t.buffer)t.buffer=await s.ctx.decodeAudioData(await t.blob.arrayBuffer());if(token!==s.cancel)return;
-  s.trace={take:t,points:t.points,score:t.score};if(s.pos<t.a||s.pos>=t.endSong-1)s.pos=t.a;// under a second left: replay from the start
+  const changed=s.trace?.take!==t||s.pos<t.a||s.pos>=t.endSong-1;s.trace={take:t,points:t.points,score:t.score};if(s.pos<t.a||s.pos>=t.endSong-1)s.pos=t.a;// under a second left: replay from the start
   const off=s.pos-t.a,when=s.ctx.currentTime+.15,dur=t.duration-off/t.speed;s.transport={token,when,offset:s.pos,end:t.endSong,speed:t.speed,loop:null};s.mode='review';
-  addSource(b.back,s.gains.back,when,s.pos/t.speed,dur);addSource(b.fore,s.gains.fore,when,s.pos/t.speed,dur);addSource(t.buffer,s.gains.voice,when,off/t.speed,dur,()=>{naturalEnd(token);});setRangeScale();
+  addSource(b.back,s.gains.back,when,s.pos/t.speed,dur);addSource(b.fore,s.gains.fore,when,s.pos/t.speed,dur);addSource(t.buffer,s.gains.voice,when,off/t.speed,dur,()=>{naturalEnd(token);});if(changed)setRangeScale();
  }catch(e){error(e.message);}finally{if(token===s.cancel){s.busy=false;sync();renderTakes();}}
 }
-function resize(){const r=$('chartWrap').getBoundingClientRect(),q=$('timelineWrap').getBoundingClientRect();W=r.width;H=r.height;TW=q.width;TH=q.height;DPR=Math.min(window.devicePixelRatio||1,2);canvas.width=Math.round(W*DPR);canvas.height=Math.round(H*DPR);g.setTransform(DPR,0,0,DPR,0,0);tl.width=Math.round(TW*DPR);tl.height=Math.round(TH*DPR);tg.setTransform(DPR,0,0,DPR,0,0);if(W>0&&H>0){draw(now());s.dirty=false;}else s.dirty=true;requestDraw();}
+function resize(){const r=$('chartWrap').getBoundingClientRect(),q=$('timelineWrap').getBoundingClientRect();W=r.width;H=r.height;TW=q.width;TH=q.height;DPR=Math.min(window.devicePixelRatio||1,2);canvas.width=Math.round(W*DPR);canvas.height=Math.round(H*DPR);g.setTransform(DPR,0,0,DPR,0,0);tl.width=Math.round(TW*DPR);tl.height=Math.round(TH*DPR);tg.setTransform(DPR,0,0,DPR,0,0);if(W>0&&H>0){s.dirty=false;draw(now());}else s.dirty=true;requestDraw();}
 function lyricLane(){return 0;}// words are drawn on the melody itself (see drawWords); no separate lane
 function bounds(){const narrow=W<720,short=!narrow&&H<330;const hud=narrow?180:short?68:136;return{left:narrow?40:48,right:W-14,top:hud+8,bottom:H-(narrow?128:short?52:92),lane:0,laneTop:hud};}
 // Words ride the melody: each word sits just above the target pitch at its own moment; colliding labels stack upward, none is dropped.
@@ -518,7 +526,7 @@ stage.addEventListener('wheel',e=>{if(s.mode==='singing')return;e.preventDefault
 $('gate').oninput=()=>{prefs.gate=+$('gate').value;s.worker?.postMessage({type:'settings',gate:prefs.gate});savePrefs();sync();};$('octave').onchange=()=>{prefs.octave=+$('octave').value;if(traceShown())rescoreTake(s.trace.take,{octave:prefs.octave});savePrefs();setRangeScale();sync();};
 $('latency').onchange=()=>{const v=+$('latency').value;if(!Number.isFinite(v))return;prefs.latency=clamp(v,-500,1000);savePrefs();sync();};
 $('tolerance').onchange=()=>{const v=+$('tolerance').value;if(!Number.isFinite(v))return;prefs.tolerance=clamp(v,10,100);prefs.level=Object.keys(LEVELS).find(k=>LEVELS[k].tolerance===prefs.tolerance)||'custom';savePrefs();sync();};
-$('micSelect').onchange=()=>{prefs.mic=$('micSelect').value;if(s.stream)releaseMic();};$('micToggle').onclick=async()=>{if(s.stream){await releaseMic();return;}if(s.busy)return;const token=++s.cancel;s.busy=true;s.busyFor='mic';sync();try{await ensureMic(token);}catch(e){error(micError(e));}finally{if(token===s.cancel){s.busy=false;sync();}}};
+$('micSelect').onchange=()=>{prefs.mic=$('micSelect').value;if(s.stream)releaseMic();};$('micToggle').onclick=async()=>{if(s.stream){await releaseMic();return;}if(s.busy)return;const token=++s.cancel;s.busy=true;s.busyFor='mic';sync();try{await ensureMic(token);}catch(e){error(micError(e),errorKind(e));}finally{if(token===s.cancel){s.busy=false;sync();}}};
 $('applyRange').onclick=()=>{const a=+$('rangeA').value,b=+$('rangeB').value;if(!Number.isFinite(a)||!Number.isFinite(b)||a<0||b>song.duration||b-a<.5){toast('Початок і кінець мають бути в межах пісні; довжина — від 0.5 с.');return;}setRange(a,b);s.pos=a;s.history=[];sync();toast('Фрагмент встановлено.');};
 for(const [id,key]of[['backGain','back'],['foreGain','fore']])$(id).oninput=()=>{prefs[key]=+$(id).value/100;$(id+'Out').textContent=Math.round(prefs[key]*100)+'%';applyMix();};$('originalMix').onclick=()=>{prefs.back=.75;prefs.fore=.75;applyMix();sync();};
 for(const b of document.querySelectorAll('[data-view]'))b.onclick=()=>{prefs.view=b.dataset.view;if(traceShown())rescoreTake(s.trace.take,{view:prefs.view});savePrefs();s.dirty=true;sync();};
@@ -546,5 +554,5 @@ window.Luma={diagnostics:()=>({mode:s.mode,busy:s.busy,pending:s.awaitFinish,tim
    if(s.mode!=='idle')return false;const meta=takeMeta(a,b,speed),id=meta.id;if(!s.ctx)s.ctx={currentTime:0,state:'running',sampleRate:48000,resume(){},get _fake(){return true;}};const when=s.ctx.currentTime;s.transport={token:++s.cancel,when,offset:a,end:b,speed,loop:null};s.mode='singing';s.history=[];s.live=newScore(meta);s.pending.set(id,meta);sync();return {id,when};},
   fakeTick:(ctxTime)=>{if(s.ctx&&'_fake' in s.ctx)s.ctx.currentTime=ctxTime;const t=now();if(s.mode==='singing'&&s.live&&s.transport)scoreAdvance(s.live,s.history,Math.min(t-.18*s.transport.speed,s.transport.end));draw(t);updateReadout(t);return t;},
   fakeFinish:()=>{const id=s.takeCounter,meta=s.pending.get(id);if(!meta)return null;const pts=s.history.map(p=>({t:(p.songT-meta.a)/meta.speed,f:p.f,confidence:p.confidence,db:p.db,rms:p.rms??0,peak:p.peak??0}));s.pending.delete(id);const duration=(s.pos=now())-meta.a;s.transport=null;s.mode='idle';s.live=null;const m={id,blob:silentWav(duration/meta.speed),sampleRate:48000,duration:duration/meta.speed,start:0,end:duration/meta.speed,reason:'end',points:pts,gap:0};const t=storeTake(meta,m);sync();return {id:t.id,pct:scorePct(t.score)};}}};
-populateSong();resize();updateReadout(s.pos);
+populateSong();resize();setRangeScale();updateReadout(s.pos);
 })();
