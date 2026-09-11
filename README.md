@@ -8,10 +8,12 @@ of your voice, no server after the file is built.
 
 ## What the trainer does
 
-- **Melody on a piano roll.** Contour or notes view, lyrics sit right above the melody at the moment they are sung, the
-  current line is shown at the top.
+- **Melody on a piano roll.** Contour or notes view on a lit stage with named C lines. Words sit right above the melody at
+  the moment they are sung, and the current and next line ride in a band of their own; on a phone that band is a full row,
+  so nothing ever covers the readout.
 - **Live match score.** Hits ÷ frames with a target, counted once per 20 ms. Silence under a note is a miss; frames with no
-  target are excluded; draft notes count and are labelled as draft. Hit notes turn mint with ✓, misses subdued red with ×.
+  target are excluded; draft notes count and are labelled as draft. Hit notes turn mint with ✓, misses hatched red with ×,
+  so the two differ in pattern as well as colour.
 - **Three levels.** Легко (±80 ¢, octave errors forgiven), Звично (±50 ¢), Точно (±35 ¢); each also sets timing slack and how
   much of a note must be hit. Details in [docs/SCORING.md](docs/SCORING.md).
 - **Fragment pitch scale.** The vertical range frames the notes in view plus the next four seconds, so it is already right when a phrase arrives. It grows only when upcoming notes would leave the margin, shrinks after two quiet seconds, and every change eases over a second. Confident voice enters through a percentile band, so a single glitch never moves the plot. Масштаб → Детальніше halves the minimum span.

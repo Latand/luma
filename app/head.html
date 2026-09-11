@@ -1,85 +1,287 @@
 <!doctype html><html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0b0e15"><title>Luma · {{TITLE}}</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='12' fill='%23131823'/%3E%3Cpath d='M8 23Q13 23 15 14T20 21T26 24T32 14' fill='none' stroke='%239fe8d6' stroke-width='2.5'/%3E%3C/svg%3E">
 <style>
-:root{color-scheme:dark;--bg:#0b0e15;--panel:#111722;--stage:#0e131c;--text:#e9edf5;--muted:#94a0b3;--dim:#95a3b8;--border:#ffffff10;--mint:#a1eed8;--violet:#b4a2eb;--amber:#d3b88f;--rose:#f3a1b5;--miss:#c9707a;--mono:'SFMono-Regular','JetBrains Mono',Consolas,monospace;--sans:'Manrope',Inter,'Segoe UI',system-ui,sans-serif}
-*{box-sizing:border-box}html,body{height:100%}body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 var(--sans);min-width:320px;-webkit-font-smoothing:antialiased;overflow:auto}
-button,input,select{font:inherit}button{cursor:pointer;border:0;background:none;color:inherit;padding:0}button:disabled{opacity:.38;cursor:not-allowed}button:hover:not(:disabled){filter:brightness(1.16)}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--mint);outline-offset:3px}button,input{-webkit-tap-highlight-color:transparent}
-button svg,.icon{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round;flex:none}[hidden]{display:none!important}button[aria-pressed=true]{color:var(--mint);border-color:#a1eed83b;background:#a1eed80a}::selection{background:#6f6096;color:white}
+/* Design tokens shared with Luma Studio (studio/studio.html), so the library and the trainers read as one instrument.
+   Layout rule of the stage: the head, the lyric band and the rail are normal flow items; the canvas is painted behind
+   them and its plot rectangle is measured from those elements, so nothing can ever overlap the piano roll. */
+:root{color-scheme:dark;
+ --bg:#0b0e15;--panel:#111722;--stage:#0e131c;--rail:#0c1018;--sunk:#141c29;--line:#30394d;
+ --text:#e9edf5;--muted:#94a0b3;--dim:#95a3b8;--border:#ffffff10;--hair:#ffffff0d;
+ --mint:#a1eed8;--violet:#b4a2eb;--amber:#d3b88f;--rose:#f3a1b5;--miss:#c9707a;
+ --ink-1:#dde5f1;--ink-2:#b3c0d2;--ink-3:#a3b1c6;
+ --mono:'SFMono-Regular','JetBrains Mono',Consolas,monospace;--sans:'Manrope',Inter,'Segoe UI',system-ui,sans-serif;
+ --r-xs:6px;--r-sm:8px;--r-md:10px;--r-lg:14px;
+ --tap:34px;--tap-sm:28px;--gutter:56px;--ease:cubic-bezier(.22,1,.36,1)}
+*{box-sizing:border-box}html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 var(--sans);min-width:320px;-webkit-font-smoothing:antialiased;overflow:auto}
+button,input,select{font:inherit}
+button{cursor:pointer;border:0;background:none;color:inherit;padding:0}
+button:disabled{opacity:.42;cursor:not-allowed}
+button:hover:not(:disabled){filter:brightness(1.13)}
+button:active:not(:disabled){transform:translateY(.5px)}
+button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible,summary:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--mint);outline-offset:3px}
+button,input{-webkit-tap-highlight-color:transparent}
+button svg,.icon{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+[hidden]{display:none!important}
+button[aria-pressed=true]{color:var(--mint);border-color:#a1eed840;background:#a1eed80d}
+::selection{background:#4c4070;color:#fff}
+kbd{font:12px var(--mono);color:#8e9db3}
 .app{display:flex;flex-direction:column;height:100dvh;min-height:0}
-/* ── top bar ── */
-.bar{flex:none;display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1px solid var(--border);background:#0c1018}
-.brand{display:flex;gap:8px;align-items:center;font-size:19px;letter-spacing:-.6px;color:#e4ecf6}.brand svg{width:24px;height:24px;color:var(--mint)}
-.song{display:flex;align-items:baseline;gap:8px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.song b{font-weight:600;font-size:14px;letter-spacing:-.2px}.song span{color:var(--muted);font-size:12px}.song .sep{color:#3c4658}
-.quality{font-size:10px;border:1px solid #d3b88f2a;background:#d3b88f08;color:var(--amber);border-radius:7px;display:inline-flex;align-items:center;gap:6px;padding:5px 9px;white-space:nowrap}.quality i{width:5px;height:5px;border-radius:50%;background:var(--amber)}.quality.ok{color:var(--mint);border-color:#a1eed82a;background:#a1eed808}.quality.ok i{background:var(--mint)}
-.spacer{flex:1}
-.status{display:inline-flex;align-items:center;gap:6px;font-size:9px;letter-spacing:1px;color:var(--muted);padding:5px 8px;border:1px solid var(--border);border-radius:6px;white-space:nowrap}.status i{width:5px;height:5px;border-radius:50%;background:var(--dim)}.status.live{color:var(--mint)}.status.live i{background:var(--mint)}.status.rec{color:var(--rose)}.status.rec i{background:var(--rose);animation:blink 1.3s infinite}
-.icon-btn{width:34px;height:34px;border:1px solid var(--border);border-radius:10px;background:#ffffff03;display:inline-grid;place-items:center;flex:none;color:#c5cfdf}.icon-btn.sm{width:30px;height:30px;border-radius:8px}
-.banner{flex:none;background:#6f463526;border-bottom:1px solid #cd976a40;padding:9px 16px;font-size:12px;color:#e2bd9f;display:flex;gap:12px;align-items:center}.banner button{color:#f3d9c1;text-decoration:underline;margin-left:auto}
-/* ── stage ── */
-.stage{flex:1;min-height:260px;position:relative;background:var(--stage);touch-action:none}.stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
-.stage.scrub{cursor:grab}.stage.scrub:active{cursor:grabbing}
-.hud{position:absolute;pointer-events:none;z-index:2}.hud button,.hud select{pointer-events:auto}
-.hud-voice{left:56px;top:12px;display:flex;align-items:center;gap:12px}.big-note{font-size:54px;letter-spacing:-3px;line-height:1;font-weight:500;color:#c9f1e8;text-shadow:0 0 30px #a1eed822;font-variant-numeric:tabular-nums;min-width:74px}.big-note small{font-size:24px;letter-spacing:-1px;color:#9ec5c3}.big-note.miss{color:#e3a9b0;text-shadow:none}.big-note.empty{color:#3a475b;text-shadow:none;font-size:34px;letter-spacing:0}
-.mic-state{position:absolute;left:56px;top:100px;font:9px var(--mono);color:var(--dim);max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.voice-meta{font-size:11px;color:#cbd6e1;line-height:1.35}.voice-meta .kicker{font-size:8.5px;text-transform:uppercase;letter-spacing:1.4px;color:var(--dim)}.voice-meta .freq{font:10px var(--mono);color:var(--dim)}
-.hud-target{left:56px;top:74px;font-size:11px;color:var(--muted);display:flex;align-items:center;gap:9px}.hud-target b{font:16px var(--mono);font-weight:400;color:#c3b5ed}.deviation{font-size:11px;color:var(--mint);min-width:96px}.micro-tuner{width:120px;height:9px;position:relative;border-bottom:1px solid #b4a2eb22}.micro-tuner:before{content:'';height:9px;border-left:1px solid var(--violet);position:absolute;left:50%;top:0}.micro-tuner i{display:block;width:6px;height:6px;position:absolute;left:50%;top:4px;border-radius:50%;background:var(--mint);box-shadow:0 0 8px #a1eed850;opacity:0;transform:translateX(-50%)}
-.hud-score{right:16px;top:10px;text-align:right}.hud-score .pct{font:500 44px/1 var(--sans);letter-spacing:-2px;color:#e2ebf5;font-variant-numeric:tabular-nums}.hud-score .pct.good{color:var(--mint)}.hud-score .pct.low{color:#d9a3aa}.hud-score .lbl{font-size:8.5px;letter-spacing:1.4px;text-transform:uppercase;color:var(--dim);margin-top:3px}.hud-score .detail{font-size:10px;color:var(--muted);margin-top:4px;max-width:230px;margin-left:auto;line-height:1.35}.hud-score .detail button{color:var(--dim);text-decoration:underline dotted;font-size:10px}
-.meter{width:120px;height:3px;background:#273244;margin:8px 0 0 auto;border-radius:3px;overflow:hidden}.meter span{display:block;height:100%;width:0;background:var(--mint);transition:width .1s}
-.hud-tools{left:56px;bottom:4px;display:flex;align-items:center;gap:12px;font-size:10px;color:var(--muted)}.legend{display:flex;gap:11px;align-items:center;flex-wrap:wrap}.legend span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}.legend i{width:13px;height:3px;border-radius:3px;background:var(--mint)}.legend i.target{background:#b4a2eb55;border:1px solid #c3b3f0aa;height:7px}.legend i.draft{height:5px;background:#9a94b41a;border:1px dashed #a29dbb99}.legend i.hit{background:#a1eed855;border:1px solid #bdf6e6;height:7px}.legend i.miss{background:#c9707a22;border:1px solid #c9707aaa;height:7px}.legend .glyph{font:10px var(--mono);color:#bdf6e6}.legend .glyph.x{color:#d99aa2}
-.hud-right{right:14px;bottom:4px;display:flex;align-items:center;gap:8px}.segmented{display:flex;border:1px solid var(--border);border-radius:7px;padding:2px;gap:2px;background:#0b0f17aa}.segmented button{padding:3px 8px;border-radius:5px;font-size:10px;color:var(--dim)}.segmented button.active{background:#273044;color:#d5ddec}.ghost{font-size:10px;color:var(--muted);padding:4px 8px;border:1px solid var(--border);border-radius:7px;background:#0b0f17aa;white-space:nowrap}.ghost[aria-pressed=true]{color:var(--mint)}
-.lyric-now{position:absolute;left:24%;right:24%;top:30px;text-align:center;pointer-events:none;z-index:2;font-size:clamp(15px,1.9vw,22px);letter-spacing:-.2px;color:#8f9bb0;line-height:1.3;text-shadow:0 2px 12px #0b0e15}.lyric-now span{transition:color .08s}.lyric-now .past{color:#5e6a80}.lyric-now .on{color:#eef6ff;font-weight:600}.lyric-now .soon{color:#5a6577;font-size:.85em}.lyric-now:empty{display:none}
-.countdown{position:absolute;inset:0;display:grid;place-content:center;pointer-events:none;text-align:center;background:radial-gradient(ellipse,#101722c8,transparent 62%);z-index:3}.countdown b{font:64px var(--mono);color:var(--mint);font-weight:300;line-height:1.2}.countdown span{font-size:11px;color:#c0d0d5}
-/* ── transport ── */
-.transport{flex:none;display:flex;align-items:center;gap:8px;padding:9px 16px;border-top:1px solid var(--border);background:#0c1018}
-.primary{height:38px;border-radius:10px;background:#c9bbed;color:#211a30;font-size:12px;font-weight:600;padding:0 16px;display:inline-flex;align-items:center;justify-content:center;gap:7px;white-space:nowrap}.primary.recording{background:#3a2635;color:#ffd5df;border:1px solid #f3a1b535}
-.secondary{height:36px;display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#c5cfdf;padding:0 11px;border:1px solid var(--border);border-radius:10px;white-space:nowrap}
-.time{font:12px var(--mono);margin-left:4px;color:#bdc7d8;white-space:nowrap}.time small{font-size:10px;color:var(--dim)}
-.review{display:flex;align-items:center;gap:4px;margin-left:10px;padding:3px 4px 3px 10px;border:1px solid #a1eed824;border-radius:10px;background:#a1eed806;font-size:11px;color:#bfd3cf;white-space:nowrap}.review b{font:12px var(--mono);font-weight:400;color:var(--mint);margin-right:4px}.review .icon-btn{border:0;width:28px;height:28px}.review .cnt{font:10px var(--mono);color:var(--dim);margin:0 2px}
-.extras{display:flex;gap:7px;align-items:center;margin-left:auto}.extras select,.select{background:#141c29;border:1px solid #30394d;color:#cbd3e2;border-radius:8px;padding:6px 8px;font-size:11px;max-width:100%}.compact{width:auto;padding:0 9px;gap:6px;display:inline-flex;font-size:10px;color:var(--muted)}
-/* ── strip ── */
-.strip{flex:none;display:flex;gap:12px;align-items:center;padding:6px 16px 9px;background:#0c1018}.timeline{position:relative;height:42px;cursor:pointer;touch-action:none;min-width:0;flex:1;border-radius:6px}.timeline canvas{display:block;width:100%;height:100%}
-.strip-meta{font:9px var(--mono);color:var(--dim);white-space:nowrap}.strip-meta.on{color:var(--violet)}.ghost.sm{padding:3px 7px;font-size:9px}.phrase-nav{display:flex;gap:6px;align-items:center;min-width:0}.phrase-nav .select{flex:1;min-width:0}
-/* ── takes ── */
-.takes{flex:none;display:flex;flex-direction:column;border-top:1px solid var(--border);background:#0b0f16;max-height:38vh;min-height:0}.takes-head{display:flex;align-items:center;gap:10px;padding:6px 16px;font-size:10px;letter-spacing:1px;color:var(--muted);flex:none}.takes-head button{display:flex;align-items:center;gap:8px;color:inherit;font-size:inherit;letter-spacing:inherit}.takes-head .chev{transition:transform .2s}.takes[data-open="0"] .chev{transform:rotate(-90deg)}.takes-head .hint{margin-left:auto;font-size:9px;letter-spacing:0;color:var(--dim)}
-.takes-list{overflow:auto;padding:0 10px 8px;min-height:0}.takes[data-open="0"] .takes-list{display:none}
-.take{display:grid;grid-template-columns:30px minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:6px 8px;border-radius:9px;border:1px solid transparent}.take:hover{background:#ffffff04}.take.current{border-color:#a1eed835;background:#a1eed807}.take .play{width:28px;height:28px;display:grid;place-items:center;border:1px solid #a1eed834;border-radius:50%;color:var(--mint)}
-.take-title{font-size:12px;color:#d2dbea;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;width:100%}.take-title small{color:var(--dim);font-size:10px;margin-left:6px}
-.take-stats{display:flex;gap:14px;font-size:10px;color:var(--muted);white-space:nowrap}.take-stats strong{font:12px var(--mono);font-weight:400;color:#d6e6e1;margin-right:3px}.take-stats .none{color:var(--dim)}
-.take-actions{display:flex;gap:5px;align-items:center}.take-actions button{font-size:10px;padding:5px 8px;border-radius:6px;border:1px solid var(--border);color:#bac5d7}
-/* ── dialogs ── */
-dialog{max-width:min(560px,calc(100vw - 28px));width:560px;padding:0;color:var(--text);background:#121925;border:1px solid #354158;border-radius:18px;max-height:calc(100dvh - 35px);overflow:auto;box-shadow:0 30px 120px #0009}dialog::backdrop{background:#050911bb;backdrop-filter:blur(5px)}.dialog-body{padding:22px 26px}.dialog-head{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-bottom:16px}.dialog-head h2{font-size:19px;font-weight:500;margin:0;letter-spacing:-.4px}.dialog-head .icon-btn{width:30px;height:30px}
-.field{margin:16px 0}.field label,.field .label{display:flex;align-items:center;justify-content:space-between;font-size:12px;color:#c9d4e2;margin-bottom:7px;gap:20px}.field p,dialog p{font-size:12px;line-height:1.7;color:#94a2b8;margin:8px 0}.field small{color:var(--dim);font-size:10px}.field output{font:11px var(--mono);color:var(--mint)}.field input[type=number]{width:100%;background:#192232;border:1px solid #354057;border-radius:8px;color:var(--text);padding:7px 9px;font-size:12px}.field select{width:100%;padding:9px}.row{display:flex;gap:16px}.row>*{flex:1;min-width:0}.field input[type=range]{width:100%;accent-color:var(--mint);height:4px;margin:10px 0;cursor:pointer}.check{display:flex;gap:8px;align-items:flex-start;font-size:12px;color:#c1cbdc}.check input{accent-color:var(--mint);margin-top:5px}
-.dialog-foot{border-top:1px solid var(--border);margin-top:20px;padding-top:16px;display:flex;justify-content:space-between;gap:12px;align-items:center}.dialog-foot .primary{height:36px}.quality-note{padding:11px 13px;border:1px solid #d3b88f25;border-radius:10px;font-size:11px;color:#c6af90;line-height:1.7}.diag{white-space:pre-line;font:10px/1.7 var(--mono);color:var(--dim);padding:12px;background:#080e1870;border-radius:9px;margin-top:14px}.help-code{font:11px/1.6 var(--mono);padding:10px 13px;background:#090e18;border-radius:9px;overflow:auto}.subtle-btn{font-size:11px;color:var(--muted);padding:6px 0}
-.note-controls{display:flex;gap:7px;align-items:center;justify-content:center;margin:14px 0}.note-controls output{font:26px var(--mono);color:var(--violet);min-width:85px;text-align:center}.note-controls button{font:12px var(--mono);border:1px solid #b4a2eb30;border-radius:8px;padding:7px}
-dialog h3{font-size:12px;letter-spacing:1px;text-transform:uppercase;color:var(--dim);margin:18px 0 4px;font-weight:500}
-.toast{position:fixed;bottom:22px;left:50%;transform:translate(-50%,15px);max-width:calc(100vw - 30px);width:max-content;background:#243042;border:1px solid #4b5d77;border-radius:12px;padding:11px 16px;font-size:12px;box-shadow:0 12px 35px #0006;opacity:0;pointer-events:none;transition:.2s;z-index:100}.toast.show{opacity:1;transform:translate(-50%,0)}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
-@keyframes blink{50%{opacity:.35}}@media(prefers-reduced-motion:reduce){*,*:before{animation:none!important;transition:none!important}}
-@media(max-width:900px){.song .meta{display:none}.hud-score .pct{font-size:36px}.big-note{font-size:44px;min-width:60px}.big-note small{font-size:20px}.hud-target{top:64px}.mic-state{top:88px}.lyric-now{left:20%;right:20%;top:26px}}
-@media(max-width:560px){.legend{display:none}}
-@media(max-width:720px){.bar{padding:7px 10px;gap:8px}.brand{font-size:16px}.brand svg{width:20px;height:20px}.status{display:none}.quality span{max-width:90px;overflow:hidden;text-overflow:ellipsis}.hud-voice{left:44px;top:8px;gap:8px}.big-note{font-size:38px;min-width:52px;letter-spacing:-2px}.big-note small{font-size:17px}.voice-meta{font-size:10px}.voice-meta .freq{display:none}.hud-target{left:44px;top:54px;font-size:10px;gap:6px}.deviation{min-width:70px;font-size:10px}.micro-tuner{width:80px}.hud-score{right:10px;top:8px}.hud-score .pct{font-size:30px;letter-spacing:-1px}.hud-score .detail{font-size:9px;max-width:150px}.meter{width:80px}.hud-tools{left:44px;bottom:3px}.legend{gap:8px;font-size:9px}.hud-right{right:8px;bottom:3px}.lyric-now{left:8px;right:8px;top:72px;font-size:13px;line-height:1.2}.mic-state{display:none}
-.transport{flex-wrap:wrap;padding:8px 10px;gap:6px}.primary{height:36px;padding:0 12px;font-size:11px}.secondary{height:34px;font-size:11px;padding:0 9px}.secondary span{display:none}.time{font-size:11px}.review{margin-left:0;width:100%;justify-content:space-between;order:5}.extras{gap:5px}.extras .compact span{display:none}
-.strip{padding:4px 10px 8px;gap:8px;flex-wrap:wrap}.timeline{flex-basis:100%;height:36px}#qualityCoverage{display:none}.segmented#levelSeg button{padding:3px 6px}
-.takes{max-height:34vh}.takes-head{padding:5px 10px}.take{grid-template-columns:28px minmax(0,1fr) auto;gap:6px;padding:5px}.take-stats{grid-column:2/-1;gap:10px;font-size:9px}.take-actions{gap:3px}.take-actions button{font-size:9px;padding:4px 6px}.dialog-body{padding:18px}}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
 
-/* Readable controls and a dedicated lyric lane at narrow widths. */
-button:focus-visible,a:focus-visible,summary:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--mint);outline-offset:3px}
-.stage{min-height:420px}
-.onboarding{padding:9px 16px;background:#161d2b;color:#c5d1e1;font-size:12px;flex:none}
-.banner{flex-wrap:wrap}.banner button{min-height:32px;margin-left:0}.banner #dismissError{margin-left:auto;min-width:32px}.banner a{color:var(--mint)}
-.hud-score .lbl,.voice-meta .kicker{font-size:11px;letter-spacing:.4px}.hud-score .detail{font-size:12px;max-width:270px}.mic-state{font-size:11px}
-.lyric-now{color:#b6c1d4}.lyric-now .past,.lyric-now .soon{color:#9aa8be}
-.legend{font-size:11px}.legend i{min-width:13px}.hud-tools{bottom:42px}.hud-right{left:56px;right:14px;justify-content:flex-end;flex-wrap:wrap;gap:8px}
-.segmented button,.ghost{font-size:12px;min-height:32px}.icon-btn{min-width:36px;min-height:36px}.compact{width:auto}.compact kbd{font-size:10px}
-.scale-control{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px}.scale-control select{padding:6px;background:#141c29;color:var(--text);border:1px solid #354158;border-radius:7px;min-height:34px}
-.transport{flex-wrap:wrap}.extras{flex-wrap:wrap}.next-level{font-size:11px;color:var(--muted);max-width:110px}.primary,.secondary{min-height:40px}.secondary span{display:inline}
-.strip{flex-wrap:wrap}.timeline{flex-basis:100%;height:58px;order:-1}.range-actions{display:flex;gap:6px;flex-wrap:wrap}.strip-meta{font-size:11px}.take-title small{font-size:11px}.takes-head{flex-wrap:wrap;letter-spacing:.3px}.takes-head .hint{font-size:11px}.take-stats{flex-wrap:wrap;white-space:normal;font-size:12px}.take-actions button{min-height:32px;min-width:32px}.review .icon-btn{min-width:32px;min-height:32px}.review .cnt{font-size:11px}
-.field small{font-size:12px}dialog h3{font-size:13px}dialog summary{cursor:pointer;padding:10px 0}kbd{font:11px var(--mono);opacity:.85}
-/* Landscape phone: little height, full width. Keep the transport and the wave on screen. */
-@media(max-height:520px) and (min-width:721px){.stage{min-height:230px}.onboarding{display:none}.hud-voice{top:6px}.big-note{font-size:34px;min-width:52px;letter-spacing:-1px}.big-note small{font-size:16px}.voice-meta .freq,.mic-state,.hud-tools,.hud-score .detail,.meter{display:none}.hud-target{top:44px}.hud-score{top:4px}.hud-score .pct{font-size:28px;letter-spacing:-1px}.hud-score .lbl{font-size:9px}.lyric-now{top:8px;left:26%;right:26%;font-size:15px}.hud-right{bottom:2px;right:10px;left:auto}.scale-control{font-size:11px}.timeline{height:40px}.takes{max-height:22vh}.strip{padding:4px 16px 6px}}
+/* ── top bar: matte housing, recedes ── */
+.bar{flex:none;display:flex;align-items:center;gap:14px;padding:9px 18px;border-bottom:1px solid var(--border);background:var(--rail)}
+.brand{display:flex;gap:9px;align-items:center;font-size:19px;letter-spacing:-.6px;color:#e4ecf6}
+.brand svg{width:24px;height:24px;color:var(--mint)}
+.song{display:flex;align-items:baseline;gap:9px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.song b{font-weight:600;font-size:15px;letter-spacing:-.2px}
+.song span{color:var(--ink-3);font-size:13px}
+.song .sep{color:#76839b}
+.song .meta{font:12px var(--mono);color:var(--ink-3)}
+.quality{font-size:12px;border:1px solid #d3b88f38;background:#d3b88f0d;color:var(--amber);border-radius:var(--r-sm);display:inline-flex;align-items:center;gap:8px;padding:0 11px;min-height:var(--tap);white-space:nowrap}
+.quality i{width:6px;height:6px;border-radius:50%;background:var(--amber);flex:none}
+.quality.ok{color:var(--mint);border-color:#a1eed838;background:#a1eed80d}.quality.ok i{background:var(--mint)}
+.spacer{flex:1}
+.status{display:inline-flex;align-items:center;gap:7px;font-size:12px;letter-spacing:1.1px;color:var(--ink-3);padding:0 11px;min-height:var(--tap);border:1px solid var(--border);border-radius:var(--r-sm);white-space:nowrap}
+.status i{width:6px;height:6px;border-radius:50%;background:#8493ab;flex:none}
+.status.live{color:var(--mint)}.status.live i{background:var(--mint)}
+.status.rec{color:var(--rose)}.status.rec i{background:var(--rose);animation:blink 1.3s infinite}
+.icon-btn{width:var(--tap);height:var(--tap);min-width:var(--tap);min-height:var(--tap);border:1px solid var(--border);border-radius:var(--r-md);background:#ffffff05;display:inline-grid;place-items:center;flex:none;color:#c9d3e3}
+.icon-btn.sm{width:var(--tap-sm);height:var(--tap-sm);min-width:var(--tap-sm);min-height:var(--tap-sm);border-radius:var(--r-sm)}
+.onboarding{flex:none;padding:10px 18px;background:#131a27;border-bottom:1px solid var(--hair);color:#c5d1e2;font-size:13px}
+.banner{flex:none;background:#6f463533;border-bottom:1px solid #cd976a4d;padding:9px 18px;font-size:13px;color:#e9c8ab;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.banner button{color:#f7ddc7;text-decoration:underline;min-height:var(--tap-sm)}
+.banner #dismissError{margin-left:auto;min-width:var(--tap-sm);text-decoration:none;font-size:17px}
+.banner a{color:var(--mint)}
+
+/* ── stage: the piano roll is the hero, everything around it is flow, never an overlay ── */
+.stage{flex:1;min-height:420px;position:relative;background:var(--stage);touch-action:none;display:flex;flex-direction:column;overflow:hidden}
+.stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.stage.scrub{cursor:grab}.stage.scrub:active{cursor:grabbing}
+.stage>:not(canvas){position:relative;z-index:2}
+.stage-head{display:flex;align-items:flex-start;justify-content:space-between;gap:22px;padding:14px 18px 0 var(--gutter)}
+.readout{display:flex;align-items:flex-start;gap:16px;min-width:0}
+.big-note{font:300 clamp(40px,4vw,58px)/1 var(--sans);letter-spacing:-.045em;color:#cdf3ea;text-shadow:0 0 34px #a1eed829;font-variant-numeric:tabular-nums;min-width:80px;text-align:center}
+.big-note small{font-size:.45em;letter-spacing:-.02em;color:#a7cbc9}
+.big-note.miss{color:#f0b5bb;text-shadow:none}
+.big-note.empty{color:#7f8da8;text-shadow:none;font-size:clamp(28px,2.4vw,34px);letter-spacing:0}
+.kicker{font-size:12px;text-transform:uppercase;letter-spacing:1.3px;color:var(--ink-3);margin-bottom:3px}
+.voice-meta,.target-meta{font-size:13px;color:var(--ink-1);line-height:1.45;padding-top:4px;min-width:0}
+.voice-meta .freq,.mic-state{font:12px var(--mono);color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:22ch}
+.readout-sep{width:1px;align-self:stretch;background:#ffffff14;flex:none;margin:4px 2px}
+.target-meta b{font:16px var(--mono);font-weight:400;color:#cabcf3;letter-spacing:.5px}
+.deviation{font-size:12px;color:var(--mint);min-height:1.45em}
+.micro-tuner{display:block;width:120px;height:11px;position:relative;margin-top:5px;border-bottom:1px solid #b4a2eb33}
+.micro-tuner:before{content:'';height:11px;border-left:1px solid var(--violet);position:absolute;left:50%;top:0}
+.micro-tuner i{display:block;width:7px;height:7px;position:absolute;left:50%;top:4px;border-radius:50%;background:var(--mint);box-shadow:0 0 9px #a1eed866;opacity:0;transform:translateX(-50%);transition:left .08s linear}
+.score{text-align:right;flex:none;max-width:min(330px,40%)}
+.score .lbl{font-size:12px;letter-spacing:1.3px;text-transform:uppercase;color:var(--ink-3);margin-bottom:2px}
+.score .pct{font:500 clamp(42px,4.4vw,60px)/1 var(--sans);letter-spacing:-.05em;color:#eaf1fa;font-variant-numeric:tabular-nums}
+.score .pct.good{color:#b7f3e1}
+.score .pct.low{color:#f0b5bb}
+.score .detail{font-size:12px;color:var(--ink-3);margin-top:7px;line-height:1.45;margin-left:auto}
+.meter{width:132px;height:3px;background:#26324a;margin:9px 0 0 auto;border-radius:3px;overflow:hidden}
+.meter span{display:block;height:100%;width:0;background:var(--mint);transition:width .1s linear}
+
+/* ── lyrics: their own band, always in flow, so they can never sit on the HUD ── */
+.lyric-band{padding:10px 18px 0;text-align:center;pointer-events:none}
+.lyric-line{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 2px 14px #0b0e15}
+.lyric-line:empty{visibility:hidden}
+.lyric-line.now{font-size:clamp(17px,1.7vw,21px);line-height:1.35;letter-spacing:-.2px;color:var(--ink-2)}
+.lyric-line.now span{transition:color .09s linear}
+.lyric-line.now .past,.lyric-line.now .soon{color:#98a6bc}
+.lyric-line.now .on{color:#f2f8ff;font-weight:600}
+.lyric-line.next{font-size:16px;line-height:1.4;color:#96a4ba;margin-top:3px}
+
+/* ── stage rail: legend on the left, view controls on the right ── */
+.stage-rail{margin-top:auto;display:flex;align-items:center;gap:14px;padding:9px 16px;background:#0b0f17;border-top:1px solid var(--hair);flex-wrap:wrap}
+.legend{display:flex;gap:15px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--ink-3);min-width:0}
+.legend span{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.legend i{width:17px;height:4px;border-radius:3px;background:var(--mint);flex:none}
+.legend i.target{background:#b4a2eb4d;border:1px solid #c6b6f2;height:9px}
+.legend i.draft{height:9px;background:#9a94b422;border:1px dashed #aba5c7}
+.legend i.hit{background:#a1eed85e;border:1px solid #c4f9eb;height:9px}
+.legend i.miss{background:#c9707a26;border:1px dashed #dd8f97;height:9px}
+.legend .glyph{font:12px var(--mono);color:#bff7e8}
+.legend .glyph.x{color:#eea8af}
+.stage-tools{display:flex;align-items:center;gap:9px;margin-left:auto;flex-wrap:wrap}
+.segmented{display:flex;border:1px solid var(--border);border-radius:var(--r-md);padding:3px;gap:3px;background:#0e141ecc}
+.segmented button{padding:0 12px;min-height:var(--tap-sm);border-radius:var(--r-xs);font-size:12px;color:var(--ink-3)}
+.segmented button.active{background:#2b3549;color:#e5ecf7}
+.ghost{font-size:12px;color:var(--ink-2);padding:0 12px;min-height:var(--tap);display:inline-flex;align-items:center;gap:7px;border:1px solid var(--border);border-radius:var(--r-md);background:#ffffff05;white-space:nowrap}
+.ghost.sm{min-height:var(--tap-sm);padding:0 10px}
+.ghost[aria-pressed=true]{color:var(--mint)}
+.scale-control{display:flex;align-items:center;gap:8px;color:var(--ink-3);font-size:12px}
+.scale-control select,.extras select{background:var(--sunk);border:1px solid var(--line);color:#d4dce9;border-radius:var(--r-sm);padding:0 9px;min-height:var(--tap);font-size:12px;max-width:100%}
+.countdown{position:absolute;inset:0;display:grid;place-content:center;pointer-events:none;text-align:center;background:radial-gradient(ellipse at center,#0f1723e0,#0b0f1700 64%);z-index:4}
+.countdown b{font:300 72px/1.15 var(--mono);color:var(--mint);letter-spacing:-.03em}
+.countdown span{font-size:13px;color:#c8d8dc}
+
+/* ── transport: one bar, primary action first, secondary controls recede to the right ── */
+.transport{flex:none;display:flex;align-items:center;gap:10px;padding:10px 16px;border-top:1px solid var(--border);background:var(--rail);flex-wrap:wrap}
+.primary{min-height:40px;border-radius:var(--r-md);background:#c9bbed;color:#211a30;font-size:13px;font-weight:600;padding:0 18px;display:inline-flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap}
+.primary.recording{background:#3b2736;color:#ffdae3;border:1px solid #f3a1b552}
+.secondary{min-height:38px;display:inline-flex;align-items:center;gap:7px;font-size:13px;color:#c8d2e2;padding:0 14px;border:1px solid #ffffff1c;border-radius:var(--r-md);background:#ffffff05;white-space:nowrap}
+.time{font:13px var(--mono);font-variant-numeric:tabular-nums;color:#c4cede;white-space:nowrap}
+.time small{font-size:12px;color:var(--ink-3)}
+.divider{width:1px;align-self:stretch;min-height:26px;background:#ffffff14;flex:none}
+.review{display:flex;align-items:center;gap:5px;padding:3px 5px 3px 12px;border:1px solid #a1eed833;border-radius:var(--r-md);background:#a1eed80a;font-size:12px;color:#c3d6d2;white-space:nowrap}
+.review b{font:13px var(--mono);font-weight:400;color:var(--mint);margin-right:4px}
+.review .icon-btn{border:0;background:none;border-radius:var(--r-sm)}
+.review .cnt{font:12px var(--mono);color:var(--ink-3);margin:0 3px}
+.extras{display:flex;gap:9px;align-items:center;margin-left:auto;flex-wrap:wrap}
+.next-level{font-size:12px;color:var(--ink-3)}
+.compact{width:auto;padding:0 11px;gap:7px;display:inline-flex;font-size:12px;color:var(--ink-2)}
+
+/* ── strip: waveform, A–B region ── */
+.strip{flex:none;display:flex;gap:12px;align-items:center;padding:8px 16px 10px;background:var(--rail);border-top:1px solid var(--hair);flex-wrap:wrap}
+.timeline{flex:1 0 100%;order:-1}
+.range-actions{display:flex;gap:8px;flex-wrap:wrap}
+.timeline{position:relative;height:52px;cursor:pointer;touch-action:none;min-width:0;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--hair)}
+.timeline canvas{display:block;width:100%;height:100%}
+.strip-meta{font:12px var(--mono);color:var(--ink-3);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.strip-meta.on{color:#c6b8f2}
+
+/* ── attempts ── */
+.takes{flex:none;display:flex;flex-direction:column;border-top:1px solid var(--border);background:#0a0e15;max-height:38vh;min-height:0}
+.takes-head{display:flex;align-items:center;gap:12px;padding:7px 16px;font-size:12px;letter-spacing:1.2px;color:var(--ink-3);flex:none}
+.takes-head #takesToggle{display:flex;align-items:center;gap:9px;color:inherit;font-size:inherit;letter-spacing:inherit;min-height:var(--tap-sm)}
+.takes-head .chev{transition:transform .2s var(--ease)}
+.takes[data-open="0"] .chev{transform:rotate(-90deg)}
+.takes-head .hint{margin-left:auto;font-size:12px;letter-spacing:0;color:var(--ink-3)}
+.takes-list{overflow:auto;padding:0 10px 10px;min-height:0}
+.take{display:grid;grid-template-columns:34px minmax(0,1fr) auto auto;gap:12px;align-items:center;padding:8px;border-radius:var(--r-md);border:1px solid transparent;box-shadow:inset 0 -1px 0 var(--hair)}
+.takes-list .take:last-child{box-shadow:none}
+.take:hover{background:#ffffff05}
+.take.current{border-color:#a1eed83b;background:#a1eed80a;box-shadow:none}
+.take .play{width:34px;height:34px;display:grid;place-items:center;border:1px solid #a1eed840;border-radius:50%;color:var(--mint)}
+.take-title{font-size:13px;color:#d6deed;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;width:100%;min-height:var(--tap-sm)}
+.take-title small{color:var(--ink-3);font-size:12px;margin-left:8px}
+.take-stats{display:flex;gap:16px;font-size:12px;color:var(--ink-3);white-space:nowrap}
+.take-stats strong{font:13px var(--mono);font-weight:400;color:#dae9e4;margin-right:4px}
+.take-stats .none{color:var(--ink-3)}
+.take-actions{display:flex;gap:6px;align-items:center}
+.take-actions button{font-size:12px;padding:0 10px;min-width:var(--tap-sm);min-height:var(--tap-sm);border-radius:var(--r-sm);border:1px solid var(--border);color:#bfcadb;background:#ffffff05}
+
+/* ── dialogs ── */
+dialog{max-width:min(580px,calc(100vw - 28px));width:580px;padding:0;color:var(--text);background:var(--panel);border:1px solid #2f394e;border-radius:16px;max-height:calc(100dvh - 36px);overflow:auto;box-shadow:0 28px 90px #00000085}
+dialog::backdrop{background:#050911cc}
+.dialog-body{padding:24px 26px}
+.dialog-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:18px}
+.dialog-head h2{font-size:20px;font-weight:500;margin:0;letter-spacing:-.4px}
+.field{margin:18px 0}
+.field label,.field .label{display:flex;align-items:center;justify-content:space-between;font-size:13px;color:#c9d4e2;margin-bottom:8px;gap:20px}
+.field p,dialog p{font-size:13px;line-height:1.7;color:var(--ink-3);margin:9px 0}
+.field small{color:var(--ink-3);font-size:12px}
+.field output{font:12px var(--mono);color:var(--mint)}
+.field input[type=number]{width:100%;background:var(--sunk);border:1px solid var(--line);border-radius:var(--r-sm);color:var(--text);padding:9px 11px;font-size:13px}
+.field input[type=number]:focus{border-color:#5d7195}
+.select,.field select{width:100%;background:var(--sunk);border:1px solid var(--line);color:#d4dce9;border-radius:var(--r-sm);padding:10px;font-size:13px}
+.row{display:flex;gap:16px}.row>*{flex:1;min-width:0}
+.field input[type=range]{width:100%;accent-color:var(--mint);height:4px;margin:12px 0;cursor:pointer}
+.check{display:flex;gap:10px;align-items:flex-start;font-size:13px;color:#c5cfde}
+.check input{accent-color:var(--mint);margin-top:4px;width:16px;height:16px;flex:none}
+.dialog-foot{border-top:1px solid var(--border);margin-top:22px;padding-top:18px;display:flex;justify-content:space-between;gap:12px;align-items:center}
+.dialog-foot .primary{min-height:38px}
+.quality-note{padding:12px 14px;border:1px solid #d3b88f33;border-radius:var(--r-md);background:#d3b88f08;font-size:12px;color:#d2bb9e;line-height:1.7}
+.diag{white-space:pre-line;font:12px/1.7 var(--mono);color:var(--ink-3);padding:13px;background:#080d16;border-radius:var(--r-md);margin-top:16px}
+.help-code{font:12px/1.6 var(--mono);padding:11px 14px;background:#080d16;border-radius:var(--r-md);overflow:auto;color:#c5d0e1}
+.subtle-btn{font-size:12px;color:var(--ink-3);padding:0 2px;min-height:var(--tap-sm);text-align:left}
+.note-controls{display:flex;gap:8px;align-items:center;justify-content:center;margin:16px 0}
+.note-controls output{font:26px var(--mono);color:#cabcf3;min-width:92px;text-align:center}
+.note-controls button{font:13px var(--mono);border:1px solid #b4a2eb42;border-radius:var(--r-sm);padding:0 12px;min-height:var(--tap);background:#ffffff05}
+dialog h3{font-size:12px;letter-spacing:1.2px;text-transform:uppercase;color:var(--ink-3);margin:22px 0 6px;font-weight:600}
+dialog summary{cursor:pointer;padding:9px 0;color:var(--ink-3);font-size:13px}
+dialog details{font-size:13px;color:var(--ink-3)}
+.phrase-nav{display:flex;gap:8px;align-items:center;min-width:0}
+.phrase-nav .select{flex:1;min-width:0}
+.toast{position:fixed;bottom:24px;left:50%;transform:translate(-50%,16px);max-width:calc(100vw - 30px);width:max-content;background:#1c2534;border:1px solid #3d4b63;border-radius:var(--r-lg);padding:12px 18px;font-size:13px;box-shadow:0 16px 44px #00000078;opacity:0;pointer-events:none;transition:opacity .22s var(--ease),transform .22s var(--ease);z-index:100}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+@keyframes blink{50%{opacity:.32}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}button:active:not(:disabled){transform:none}}
+
+/* ── narrower desktops ── */
+@media(max-width:1100px){.score{max-width:min(270px,38%)}.voice-meta .freq,.mic-state{max-width:17ch}}
+@media(max-width:900px){.song .meta{display:none}.readout{gap:12px}.big-note{min-width:66px}.micro-tuner{width:96px}}
+
+/* ── phones: the lyric band takes a full row, every target grows to 40 px ── */
 @media(max-width:720px){
- .app{height:auto;min-height:100dvh}.bar{flex-wrap:wrap}.song{order:3;flex:1 0 100%;width:100%}.song b{flex-shrink:0;max-width:70%;overflow:hidden;text-overflow:ellipsis}.quality{order:2}.bar .spacer{display:none}.stage{flex:none;height:520px;min-height:520px}
- .onboarding{font-size:13px;padding:10px}.hud-voice{top:10px;left:44px}.hud-score{top:10px}.hud-score .detail{font-size:11px;max-width:155px}.hud-target{top:83px}.lyric-now{top:116px;left:12px;right:12px;font-size:19px;line-height:1.4}.hud-score .lbl{font-size:10px;max-width:155px;margin-left:auto;line-height:1.3}.hud-tools{left:12px;bottom:90px}.legend{display:flex;font-size:11px;gap:9px}.legend span{white-space:normal}.hud-right{left:12px;right:12px;bottom:8px;justify-content:flex-start}.scale-control{flex-basis:100%}
- .transport{gap:8px}.extras{margin:0;width:100%;gap:8px}.extras .compact span{display:inline}.extras .compact kbd{display:none}.next-level{max-width:none}.segmented#levelSeg button{padding:5px 9px;min-height:36px}.primary,.secondary,.icon-btn{min-height:44px}.icon-btn{min-width:40px}.secondary span{display:inline}.strip-meta{white-space:normal}.timeline{height:58px}.take{grid-template-columns:32px minmax(0,1fr)}.take-actions{grid-column:2;flex-wrap:wrap}.take-title{white-space:normal}.take-stats{grid-column:2;font-size:12px}.takes{max-height:none}.takes-head .hint{margin-left:0;width:100%;font-size:12px}.takes-list{overflow:visible}.take .play{width:32px;height:36px}
+ :root{--tap:44px;--tap-sm:40px;--gutter:12px}
+ .app{height:auto;min-height:100dvh}
+ .bar{padding:8px 12px;gap:8px 10px;flex-wrap:wrap}
+ .brand{font-size:17px}.brand svg{width:21px;height:21px}
+ .song{order:3;flex:1 1 50%;min-width:0}.song b{max-width:52vw;overflow:hidden;text-overflow:ellipsis}
+ .quality{order:4;margin-left:auto}.status{display:none}
+ .onboarding{padding:10px 12px}
+ .stage{flex:none;height:620px;min-height:620px}
+ .stage-head{padding:10px 12px 0;gap:9px;flex-direction:column}
+ .readout{width:100%;flex-wrap:wrap;gap:4px 12px}
+ .readout-sep{display:none}
+ .big-note{font-size:42px;min-width:58px}
+ .voice-meta,.target-meta{font-size:12px;padding-top:2px}
+ .voice-meta .freq{max-width:18ch}
+ .target-meta{flex:1 0 100%;display:flex;align-items:center;gap:4px 10px;flex-wrap:wrap}
+ .target-meta .kicker,.deviation{margin:0}
+ .micro-tuner{width:96px;margin:0}
+ .score{width:100%;max-width:none;text-align:left;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:end;gap:0 12px}
+ .score .lbl{grid-column:2;grid-row:1;margin:0 0 7px}
+ .score .pct{grid-column:1;grid-row:1;font-size:38px}
+ .score .detail{grid-column:1/-1;margin:5px 0 0}
+ .meter{grid-column:1/-1;width:148px;margin:7px 0 0}
+ .mic-state{display:none}
+ .scale-control{flex:1 0 100%}
+ .scale-control select{flex:1;max-width:220px}
+ .lyric-band{padding:10px 12px 0;text-align:left}
+ .lyric-line.now{font-size:18px;color:#c8d4e4}
+ .lyric-line.next{font-size:16px}
+ .stage-rail{padding:8px 12px;gap:8px 10px}
+ .legend{gap:6px 12px;width:100%}
+ .stage-tools{margin-left:0;width:100%}
+ .countdown b{font-size:56px}
+ .transport{padding:10px 12px;gap:8px}
+ .primary{min-height:48px;padding:0 16px}
+ .secondary{min-height:44px}
+ .divider{display:none}
+ .review{width:100%;justify-content:space-between;order:5;padding:4px 6px 4px 12px}
+ .extras{margin-left:0;width:100%}
+ .extras .compact kbd{display:none}
+ .strip{padding:8px 12px 10px}
+ .timeline{height:58px}
+ #qualityCoverage{display:none}
+ .takes{max-height:none}
+ .takes-head{padding:7px 12px;flex-wrap:wrap}
+ .takes-head .hint{margin-left:0;width:100%}
+ .takes-list{overflow:visible}
+ .take{grid-template-columns:40px minmax(0,1fr);gap:8px 10px}
+ .take .play{width:40px;height:40px}
+ .take-title{white-space:normal}
+ .take-stats{grid-column:2;flex-wrap:wrap;white-space:normal;gap:6px 14px}
+ .take-actions{grid-column:2;flex-wrap:wrap}
+ .dialog-body{padding:18px}
+ .row{flex-direction:column;gap:0}
+}
+
+/* ── phone held sideways: little height, so the readout loses its second rank ── */
+@media(max-height:560px) and (min-width:721px){
+ .app{height:auto;min-height:100dvh}
+ .onboarding{display:none}
+ .stage{flex:none;height:330px;min-height:330px}
+ .stage-head{padding:9px 16px 0 var(--gutter);gap:14px}
+ .big-note{font-size:36px;min-width:62px}
+ .voice-meta .freq,.mic-state,.score .detail,.meter{display:none}
+ .score .pct{font-size:34px}
+ .target-meta{display:flex;align-items:center;gap:9px}
+ .target-meta .kicker,.deviation{margin:0}
+ .micro-tuner{width:84px;margin:0}
+ .lyric-band{padding:7px 16px 0}
+ .lyric-line.now{font-size:16px}
+ .lyric-line.next{display:none}
+ .stage-rail{padding:6px 14px;gap:8px}
+ .legend{gap:11px}
+ .scale-control>span{display:none}
+ .scale-control select{max-width:112px}
+ .timeline{height:40px}
+ .takes{max-height:30vh}
 }
 </style></head><body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
@@ -97,16 +299,17 @@ button:focus-visible,a:focus-visible,summary:focus-visible,[tabindex]:focus-visi
 <div class="onboarding" id="onboarding">Почни з «Слухати», потім заспівай фразу. Після запису можна переглянути й повторити складне місце.</div>
 <div class="banner" id="errorBanner" hidden role="alert"><span id="errorText"></span><button id="errorSettings">Налаштувати мікрофон</button><a id="studioLink" href="http://127.0.0.1:8792/" target="_blank" rel="noopener" hidden>Відкрити Studio</a><button id="dismissError" aria-label="Закрити помилку">×</button></div>
 <main class="stage" id="chartWrap"><canvas id="chart" aria-label="Мелодія-ціль, слова пісні і твій голос. Ліворуч — минуле, праворуч — наступні ноти." role="img"></canvas>
-<div class="hud hud-voice"><div class="big-note" id="liveNote">—</div><div class="voice-meta"><div class="kicker">Твій голос</div><div id="liveDesc">Час заспівати</div><div class="freq" id="liveFreq">Мікрофон вимкнено</div></div></div>
-<div class="hud hud-target">Ціль <b id="targetNote">—</b><span class="deviation" id="deviation">Слухай. Потім повтори.</span><span class="micro-tuner" aria-hidden="true"><i id="needle"></i></span></div>
-<div class="hud hud-score"><div class="pct" id="matchPct">—</div><div class="lbl" id="scoreLabel">Збіг із мелодією</div><div class="detail" id="matchDetail">Заспівай фрагмент — рахую по намальованих нотах</div><div class="meter" aria-hidden="true"><span id="level"></span></div></div>
-<div class="hud mic-state" id="micState">Аудіо лише на твоєму пристрої</div>
-<div class="lyric-now" id="lyricNow" aria-live="off"></div>
-<div class="hud hud-tools"><div class="legend"><span><i class="target"></i>Мелодія</span><span><i class="draft"></i>Непевна мелодія</span><span><i></i>Ти</span><span><i class="hit"></i><span class="glyph">✓</span>влучив</span><span><i class="miss"></i><span class="glyph x">×</span>промах</span></div></div>
-<div class="hud hud-right"><label class="scale-control">Масштаб <select id="scaleSelect" aria-label="Масштаб висоти нот"><option value="1">Фрагмент</option><option value="2">Детальніше</option><option value="0.5">Ширше</option></select></label><button class="ghost" id="lyricsBtn" aria-pressed="true" title="Показувати слова пісні">Слова</button><div class="segmented" aria-label="Вигляд цілі"><button data-view="contour" class="active" aria-pressed="true" title="Плавний рух висоти голосу">Контур</button><button data-view="notes" aria-pressed="false" title="Окремі ноти та позначки влучань">Ноти</button></div><button class="ghost" id="editBtn" title="Змінити ноту, межі або виключити її">✎ Ціль</button></div>
+<div class="stage-head" id="stageHead">
+<div class="readout"><div class="big-note" id="liveNote">—</div>
+<div class="voice-meta"><div class="kicker">Твій голос</div><div id="liveDesc">Час заспівати</div><div class="freq" id="liveFreq">Мікрофон вимкнено</div><div class="mic-state" id="micState">Аудіо лише на твоєму пристрої</div></div>
+<div class="readout-sep" aria-hidden="true"></div>
+<div class="target-meta"><div class="kicker">Ціль</div><div><b id="targetNote">—</b></div><div class="deviation" id="deviation">Слухай. Потім повтори.</div><span class="micro-tuner" aria-hidden="true"><i id="needle"></i></span></div></div>
+<div class="score"><div class="lbl" id="scoreLabel">Збіг із мелодією</div><div class="pct" id="matchPct">—</div><div class="detail" id="matchDetail">Заспівай фрагмент — рахую по намальованих нотах</div><div class="meter" aria-hidden="true"><span id="level"></span></div></div></div>
+<div class="lyric-band" id="lyricBand"><div class="lyric-line now" id="lyricNow" aria-live="off"></div><div class="lyric-line next" id="lyricNext" aria-hidden="true"></div></div>
+<div class="stage-rail" id="stageRail"><div class="legend"><span><i class="target"></i>Мелодія</span><span><i class="draft"></i>Непевна мелодія</span><span><i></i>Ти</span><span><i class="hit"></i><span class="glyph">✓</span>влучив</span><span><i class="miss"></i><span class="glyph x">×</span>промах</span></div><div class="stage-tools"><label class="scale-control"><span>Масштаб</span> <select id="scaleSelect" aria-label="Масштаб висоти нот"><option value="1">Фрагмент</option><option value="2">Детальніше</option><option value="0.5">Ширше</option></select></label><button class="ghost" id="lyricsBtn" aria-pressed="true" title="Показувати слова пісні">Слова</button><div class="segmented" aria-label="Вигляд цілі"><button data-view="contour" class="active" aria-pressed="true" title="Плавний рух висоти голосу">Контур</button><button data-view="notes" aria-pressed="false" title="Окремі ноти та позначки влучань">Ноти</button></div><button class="ghost" id="editBtn" title="Змінити ноту, межі або виключити її">✎ Ціль</button></div></div>
 <div class="countdown" id="countdown" hidden><b id="countNumber">2</b><span>Приготуйся. Вдихни спокійно.</span></div></main>
-<div class="transport"><button class="primary" id="singBtn"><svg><use href="#i-mic"/></svg><span id="singLabel">Співати</span></button><button class="secondary" id="newTakeBtn" hidden>Нова спроба</button><button class="secondary" id="listenBtn" aria-label="Слухати пісню" title="Слухати / пауза (пробіл)"><svg><use id="listenIcon" href="#i-play"/></svg><span id="listenLabel">Слухати</span></button><button class="icon-btn" id="stopBtn" disabled aria-label="Зупинити і зберегти спробу" title="Зупинити (Esc)"><svg><use href="#i-stop"/></svg></button><span class="time"><span id="timeNow">00:00</span> <small>/ <span id="timeEnd">04:49</span></small></span>
-<div class="review" id="reviewBar" hidden><span id="reviewLabel">Спроба 01</span><b id="reviewPct">—</b><button class="icon-btn" id="prevMiss" title="Попередній промах" aria-label="Попередній промах"><svg><use href="#i-skipl"/></svg></button><span class="cnt" id="missCount">0 промахів</span><button class="icon-btn" id="nextMiss" title="Наступний промах" aria-label="Наступний промах"><svg><use href="#i-skipr"/></svg></button><button class="icon-btn" id="closeReview" title="Сховати запис із графіка" aria-label="Сховати запис"><svg><use href="#i-close"/></svg></button></div>
+<div class="transport"><button class="primary" id="singBtn"><svg><use href="#i-mic"/></svg><span id="singLabel">Співати</span></button><button class="secondary" id="newTakeBtn" hidden>Нова спроба</button><button class="secondary" id="listenBtn" aria-label="Слухати пісню" title="Слухати / пауза (пробіл)"><svg><use id="listenIcon" href="#i-play"/></svg><span id="listenLabel">Слухати</span></button><button class="icon-btn" id="stopBtn" disabled aria-label="Зупинити і зберегти спробу" title="Зупинити (Esc)"><svg><use href="#i-stop"/></svg></button><span class="divider" aria-hidden="true"></span><span class="time"><span id="timeNow">00:00</span> <small>/ <span id="timeEnd">04:49</span></small></span>
+<span class="divider" id="reviewDivider" aria-hidden="true" hidden></span><div class="review" id="reviewBar" hidden><span id="reviewLabel">Спроба 01</span><b id="reviewPct">—</b><button class="icon-btn" id="prevMiss" title="Попередній промах" aria-label="Попередній промах"><svg><use href="#i-skipl"/></svg></button><span class="cnt" id="missCount">0 промахів</span><button class="icon-btn" id="nextMiss" title="Наступний промах" aria-label="Наступний промах"><svg><use href="#i-skipr"/></svg></button><button class="icon-btn" id="closeReview" title="Сховати запис із графіка" aria-label="Сховати запис"><svg><use href="#i-close"/></svg></button></div>
 <div class="extras"><span class="next-level" id="levelContext">Рівень</span><div class="segmented" id="levelSeg" aria-label="Рівень складності" title="Коридор і суворість оцінки"><button data-level="easy" aria-pressed="false">Легко</button><button data-level="normal" class="active" aria-pressed="true">Звично</button><button data-level="strict" aria-pressed="false">Точно</button></div><button class="icon-btn compact" id="vocalBtn" aria-pressed="true" title="Оригінальний вокал: увімкнено (V)"><svg><use href="#i-headphones"/></svg><span id="vocalLabel">Вокал</span><kbd>V</kbd></button><button class="icon-btn compact" id="loopBtn" aria-pressed="false" title="Повторювати виділений фрагмент без пауз (L)"><svg><use href="#i-loop"/></svg><span>Повтор</span><kbd>L</kbd></button><select id="speedSelect" aria-label="Швидкість зі збереженням висоти"><option value="1">1×</option><option value="0.8">0.8×</option></select><button class="icon-btn" id="mixBtn" aria-label="Гучність акомпанементу та голосу" title="Мікс · акомпанемент у навушниках, у мікрофоні лише твій голос"><svg><use href="#i-mix"/></svg></button></div></div>
 <div class="strip"><div class="range-actions"><button class="ghost" id="markA" title="Позначити початок фрагмента (A)">Початок <kbd>A</kbd></button><button class="ghost" id="markB" title="Позначити кінець фрагмента (B)">Кінець <kbd>B</kbd></button><button class="ghost" id="rangeSettings" title="Ввести точний час початку й кінця">Час A–B</button></div><div class="timeline" id="timelineWrap" role="slider" tabindex="0" aria-label="Позиція у пісні; нижня смужка — виділення повтору" aria-valuemin="0" aria-valuemax="289" aria-valuenow="0"><canvas id="timeline" aria-hidden="true"></canvas></div><span class="strip-meta" id="rangeText">Вся пісня</span><button class="ghost sm" id="clearRange" hidden title="Зняти повтор, грати всю пісню">✕ повтор</button><span class="strip-meta" id="qualityCoverage" title="Частка треку з надійною розміткою"></span></div>
 <section class="takes" id="takesPanel" aria-label="Записані спроби" hidden data-open="1"><div class="takes-head"><button id="takesToggle" aria-expanded="true"><svg class="chev"><use href="#i-chev"/></svg>СПРОБИ <span id="takesCount">0</span></button><button class="ghost" id="repeatMissBtn" hidden>Повторити складну фразу</button><button class="ghost" id="undoPunchBtn" hidden>Скасувати перезапис</button><span class="hint">Збережи WAV перед закриттям вкладки</span></div><div class="takes-list" id="takesList"></div></section>
