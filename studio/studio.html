@@ -8,7 +8,8 @@
 button,input{font:inherit}button{cursor:pointer;border:0;background:none;color:inherit;padding:0}button:disabled{opacity:.45;cursor:not-allowed}button:hover:not(:disabled){filter:brightness(1.12)}
 button:focus-visible,input:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var(--mint);outline-offset:3px}[hidden]{display:none!important}a{color:var(--mint)}
 .bar{display:flex;align-items:center;gap:12px;padding:10px 24px;border-bottom:1px solid var(--border);background:#0c1018}.brand{display:flex;gap:8px;align-items:center;font-size:19px;letter-spacing:-.6px;color:#e4ecf6}.brand svg{width:24px;height:24px;color:var(--mint)}.brand span{color:var(--muted);font-size:14px;letter-spacing:0;margin-left:2px}
-.bar .status{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:10px;letter-spacing:1px;color:var(--muted);padding:5px 9px;border:1px solid var(--border);border-radius:6px;white-space:nowrap}.status i{width:5px;height:5px;border-radius:50%;background:var(--dim)}.status.live{color:var(--mint)}.status.live i{background:var(--mint)}.status.busy{color:var(--amber)}.status.busy i{background:var(--amber);animation:blink 1.3s infinite}
+.bar .add{margin-left:auto}
+.bar .status{display:inline-flex;align-items:center;gap:6px;font-size:10px;letter-spacing:1px;color:var(--muted);padding:5px 9px;border:1px solid var(--border);border-radius:6px;white-space:nowrap}.status i{width:5px;height:5px;border-radius:50%;background:var(--dim)}.status.live{color:var(--mint)}.status.live i{background:var(--mint)}.status.busy{color:var(--amber)}.status.busy i{background:var(--amber);animation:blink 1.3s infinite}
 .wrap{max-width:960px;margin:0 auto;padding:26px 24px 48px}h2{font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted);margin:30px 0 12px;font-weight:500;display:flex;align-items:center;gap:10px}h2 .count{font:12px var(--mono);color:var(--dim);letter-spacing:0;text-transform:none}
 .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:16px 18px}
 .lead{color:var(--muted);margin:0 0 18px;font-size:14px}
@@ -23,41 +24,60 @@ button:focus-visible,input:focus-visible,a:focus-visible,summary:focus-visible{o
 .stage{display:flex;justify-content:space-between;gap:12px;font-size:13px;color:#cbd6e1;flex-wrap:wrap}.stage .eta{font:12px var(--mono);color:var(--muted)}.bar-track{height:5px;border-radius:5px;background:#273244;overflow:hidden}.bar-fill{height:100%;background:var(--mint);width:0;transition:width .6s ease}.bar-fill.stalled{background:var(--amber)}
 .job p{margin:0;font-size:13px;color:var(--muted)}.job .actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 details{font-size:12px;color:var(--muted)}summary{cursor:pointer;padding:6px 0;color:var(--dim)}pre{font:11px/1.6 var(--mono);color:#b1bdd0;background:#080e18;border-radius:8px;padding:10px 12px;max-height:220px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;margin:6px 0 0}
-.song{display:flex;flex-direction:column;gap:8px;min-height:120px}.song .title{font-size:16px;font-weight:600;letter-spacing:-.2px;overflow-wrap:anywhere}.song .artist{color:var(--muted);font-size:13px}.song .meta{font:11px var(--mono);color:var(--dim);margin-top:auto}.song .actions{display:flex;gap:8px;margin-top:6px}
+.song{display:flex;flex-direction:column;gap:8px;min-height:120px}.song .title{font-size:16px;font-weight:600;letter-spacing:-.2px;overflow-wrap:anywhere}.song .artist{color:var(--muted);font-size:13px}
+/* One line of what a singer cares about — duration first, and room for the best score once a trainer reports one. */
+.song .facts{display:flex;flex-wrap:wrap;gap:4px 6px;font-size:13px;color:#c7d2e2;margin-top:auto}.song .facts span+span::before{content:'· ';color:var(--dim)}.song .facts .len{font-variant-numeric:tabular-nums}
+.song .actions{display:flex;gap:8px}.song details{margin-top:2px}.song .meta{font:11px var(--mono);color:var(--dim);margin:4px 0 0}
+.lesson .head{display:flex;gap:10px;align-items:baseline;justify-content:space-between}.lesson .chip{flex:none}.lesson .chip.easy{color:var(--mint)}.lesson .chip.easy i{background:var(--mint)}.lesson .chip.normal{color:var(--violet)}.lesson .chip.normal i{background:var(--violet)}.lesson .chip.strict{color:var(--amber)}.lesson .chip.strict i{background:var(--amber)}
+.lesson .goal{color:#cbd6e6;font-size:13.5px}.lesson p{margin:0;color:var(--muted);font-size:13px;line-height:1.65}
+.upload{margin-top:18px;padding:14px 18px;font-size:14px;color:var(--text)}.upload>summary{color:var(--text);font-size:15px;font-weight:600;padding:2px 0}.upload>summary small{color:var(--muted);font-weight:400;font-size:13px;margin-left:8px}.upload[open]>summary{margin-bottom:12px}
 .empty{padding:18px;border:1px dashed #3a4760;border-radius:14px;color:var(--muted);font-size:13px;grid-column:1/-1}.st{color:var(--muted);font-size:13px}
-.library-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 12px}
+.library-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0 0}
 .note{font-size:12px;color:var(--dim);margin-top:26px;line-height:1.6}.note summary{padding:4px 0}
 @keyframes blink{50%{opacity:.35}}@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 @media(max-width:560px){.bar{padding:10px 14px}.wrap{padding:18px 14px 40px}.row{flex-direction:column;align-items:stretch}.row label,.row .primary{width:100%}.card{padding:14px}.lib{grid-template-columns:1fr}.bar .status{display:none}}
 </style></head><body>
-<header class="bar"><div class="brand"><svg viewBox="0 0 34 34" fill="none" aria-hidden="true"><path d="M3 22c5 0 4-14 8-14s3 19 7 19 3-13 7-13 3 5 5 5" stroke="currentColor" stroke-width="1.8"/></svg>luma<span>studio</span></div><div class="status" id="serverStatus"><i></i><span id="serverStatusText">ПІДКЛЮЧАЮСЬ</span></div></header>
+<header class="bar"><div class="brand"><svg viewBox="0 0 34 34" fill="none" aria-hidden="true"><path d="M3 22c5 0 4-14 8-14s3 19 7 19 3-13 7-13 3 5 5 5" stroke="currentColor" stroke-width="1.8"/></svg>luma<span>studio</span></div><button class="secondary add" id="addSong" type="button">Додати пісню</button><div class="status" id="serverStatus"><i></i><span id="serverStatusText">ПІДКЛЮЧАЮСЬ</span></div></header>
 <main class="wrap">
-<p class="lead">Додай пісню, щоб тренувати голос. Studio відокремить вокал і визначить мелодію на цьому комп’ютері.</p>
-<section class="card" aria-labelledby="newSongTitle"><h2 id="newSongTitle" style="margin-top:0">Нова пісня</h2>
+<p class="lead">Почни з уроку або відкрий пісню з бібліотеки — і співай.</p>
+<div class="notice" id="connectionNotice" hidden role="status"><p>Зв’язок зі Studio втрачено. Показано останні отримані дані; перевіряємо з’єднання.</p><button class="secondary" id="refreshBtn" type="button">Перевірити знову</button></div>
+<section id="jobsSection" hidden aria-labelledby="jobsTitle">
+<h2 id="jobsTitle">Черга <span class="count" id="jobsCount"></span></h2>
+<div class="jobs" id="jobs"></div>
+</section>
+<section id="lessonsSection" hidden aria-labelledby="lessonsTitle">
+<h2 id="lessonsTitle">Уроки <span class="count" id="lessonsCount"></span></h2>
+<p class="st" style="margin:0 0 12px">Вбудовані розспівки. Голос-провідник співає саме ту мелодію, яку показує тренажер, тому оцінка точна з першої спроби.</p>
+<div class="lib" id="lessons"></div>
+</section>
+<h2>Бібліотека <span class="count" id="libCount"></span></h2>
+<div class="lib" id="lib"><p class="st">Завантажуємо бібліотеку…</p></div>
+<div class="library-actions"><button class="secondary" id="importTrainer" type="button">Додати готовий тренажер</button><a class="secondary" href="/demo" target="_blank" rel="noopener">Спробувати демо</a><input id="trainerFile" type="file" accept=".html" hidden></div>
+<details class="card upload" id="uploadPanel"><summary>Додати свою пісню<small>вокал і мелодію Studio визначить на цьому комп’ютері</small></summary>
 <div class="drop" id="drop"><b id="fileName">Перетягни аудіофайл сюди</b><button class="secondary" id="choose" type="button">Вибрати аудіофайл</button><small>m4a, mp3, flac, wav, ogg · до 10 хв · до 200 МБ · назва «Пісня - Виконавець» заповнює поля сама</small><input type="file" id="file" accept="audio/*,.m4a,.mp3,.flac,.wav,.ogg" hidden></div>
 <form id="prepareForm" class="row"><label for="title">Назва пісні<input id="title" autocomplete="off"></label><label for="artist">Виконавець<input id="artist" autocomplete="off"></label><button class="primary" id="go" disabled>Підготувати</button></form>
 <div class="notice" id="uploadNotice" hidden role="alert"></div>
-<div class="notice" id="connectionNotice" hidden role="status"><p>Зв’язок зі Studio втрачено. Показано останні отримані дані; перевіряємо з’єднання.</p><button class="secondary" id="refreshBtn" type="button">Перевірити знову</button></div>
-</section>
-<h2>Черга <span class="count" id="jobsCount"></span></h2><div class="jobs" id="jobs"><p class="st">Отримуємо стан підготовки…</p></div>
-<h2>Бібліотека <span class="count" id="libCount"></span></h2>
-<div class="library-actions"><button class="secondary" id="importTrainer" type="button">Додати готовий тренажер</button><a class="secondary" href="/demo" target="_blank" rel="noopener">Спробувати демо</a><input id="trainerFile" type="file" accept=".html" hidden></div>
-<div class="lib" id="lib"><p class="st">Завантажуємо бібліотеку…</p></div>
+</details>
 <div class="note">Відкривай пісні з бібліотеки: так працює запис голосу. Готові тренажери зберігаються в каталозі songs цього проєкту; HTML з іншого місця можна додати кнопкою вище.
 <details><summary>Час підготовки та приватність</summary><p>Одна пісня потребує кількох хвилин на GPU; на CPU підготовка триває довше. Demucs, CREPE та pYIN працюють локально. Якщо налаштовано ключ Soniox, аудіо надсилається цьому сервісу для розпізнавання слів. Записи твого голосу залишаються у вкладці тренажера.</p></details></div>
 </main>
 <script>
 const $=id=>document.getElementById(id);
-let file=null, requestId=null, busy=false, timer=null, refreshing=false, jobsKey='', songsKey='';
+let file=null, requestId=null, busy=false, timer=null, refreshing=false, jobsKey='', songsKey='', lessonsKey='', lessons=null, lessonsFor=null;
 const fmt=t=>{t=Math.max(0,Math.round(t||0));return t>=3600?Math.floor(t/3600)+' год '+Math.floor(t%3600/60)+' хв':t>=60?Math.floor(t/60)+' хв '+String(t%60).padStart(2,'0')+' с':t+' с';};
 const clock=t=>{t=Math.max(0,Math.round(t||0));return Math.floor(t/60)+':'+String(t%60).padStart(2,'0');};
 function message(text){$('uploadNotice').textContent=text;$('uploadNotice').hidden=!text;}
 function syncForm(){for(const id of ['go','choose','title','artist','importTrainer'])$(id).disabled=busy||(id==='go'&&!file);$('go').textContent=busy?'Завантажуємо…':'Підготувати';}
 function pick(f){if(busy)return;if(f.size>200*1024*1024){message('Файл завеликий. Вибери аудіо до 200 МБ.');return;}file=f;requestId=crypto.randomUUID();const stem=f.name.replace(/\.[^.]+$/,''),m=stem.match(/^(.*?)\s+-\s+(.*)$/);$('title').value=m?m[1].trim():stem;$('artist').value=m?m[2].trim():'';$('fileName').textContent=f.name;message('');syncForm();}
 $('choose').onclick=()=>$('file').click();$('file').onchange=()=>{if($('file').files[0])pick($('file').files[0]);$('file').value='';};
-$('drop').ondragover=e=>{e.preventDefault();$('drop').classList.add('over');};$('drop').ondragleave=()=>$('drop').classList.remove('over');$('drop').ondrop=e=>{e.preventDefault();$('drop').classList.remove('over');if(e.dataTransfer.files[0])pick(e.dataTransfer.files[0]);};
+// The form lives at the bottom, folded: the first screen is for singing. The header button and a file dropped anywhere open it.
+function openUpload(focus){const panel=$('uploadPanel');const wasOpen=panel.open;panel.open=true;if(!wasOpen)panel.scrollIntoView({block:'center',behavior:'smooth'});if(focus&&!busy)$('choose').focus();}
+$('addSong').onclick=()=>openUpload(true);
+$('drop').ondragover=e=>{e.preventDefault();$('drop').classList.add('over');};$('drop').ondragleave=()=>$('drop').classList.remove('over');$('drop').ondrop=e=>{e.preventDefault();e.stopPropagation();$('drop').classList.remove('over');if(e.dataTransfer.files[0])pick(e.dataTransfer.files[0]);};
+document.addEventListener('dragover',e=>e.preventDefault());
+document.addEventListener('drop',e=>{e.preventDefault();const f=e.dataTransfer&&e.dataTransfer.files[0];if(f){openUpload(false);pick(f);}});
 $('prepareForm').onsubmit=async e=>{e.preventDefault();if(!file||busy)return;busy=true;syncForm();message('');
- try{const q=new URLSearchParams({name:file.name,title:$('title').value.trim()||file.name,artist:$('artist').value.trim(),requestId});const r=await fetch('/upload?'+q,{method:'PUT',body:file});if(!r.ok)throw Error(await r.text());file=null;requestId=null;$('fileName').textContent='Перетягни аудіофайл сюди';message('Пісню додано до черги. Стан підготовки показано нижче.');await refresh();}
+ try{const q=new URLSearchParams({name:file.name,title:$('title').value.trim()||file.name,artist:$('artist').value.trim(),requestId});const r=await fetch('/upload?'+q,{method:'PUT',body:file});if(!r.ok)throw Error(await r.text());file=null;requestId=null;$('fileName').textContent='Перетягни аудіофайл сюди';message('Пісню додано до черги. Стан підготовки — у розділі «Черга» вгорі.');await refresh();}
  catch(e){message('Не вдалося підтвердити завантаження. Перевір чергу та з’єднання. Вибраний файл збережено у формі. '+(e instanceof TypeError?'Сервер зараз недоступний.':e.message));}
  finally{busy=false;syncForm();}
 };
@@ -70,7 +90,7 @@ $('trainerFile').onchange=async()=>{const f=$('trainerFile').files[0];$('trainer
 function el(tag,text,className){const n=document.createElement(tag);if(text!==undefined&&text!==null)n.textContent=text;if(className)n.className=className;return n;}
 const STATES={queued:'У черзі',uploading:'Завантаження',running:'Готуємо',done:'Готово',failed:'Не вдалося'};
 function renderJobs(jobs){const key=JSON.stringify(jobs);if(key===jobsKey)return;jobsKey=key;const root=$('jobs');root.replaceChildren();const active=jobs.filter(j=>['running','queued'].includes(j.state)).length;$('jobsCount').textContent=active?active+' в роботі':'';
- if(!jobs.length)root.append(el('p','Немає пісень у черзі. Можна відкрити готову пісню з бібліотеки.','st'));
+ $('jobsSection').hidden=!jobs.length;   // an empty queue is nothing to look at; it appears when a song is being prepared
  const now=Date.now()/1000;
  for(const j of jobs.slice().reverse()){const card=el('article',null,'card job'),head=el('div',null,'head'),name=el('div',j.title,'name');if(j.artist)name.append(el('small',j.artist));const chip=el('span',null,'chip '+j.state);chip.append(el('i'),el('span',STATES[j.state]||'Уточнюємо стан'));head.append(name,chip);card.append(head);
   if(j.state==='running'){const st=j.stage,elapsed=j.started?now-j.started:0,line=el('div',null,'stage');line.append(el('span',st?'Етап '+st.n+' з '+st.total+' · '+st.name:'Запускаємо підготовку…'));const eta=el('span',null,'eta');eta.textContent=fmt(elapsed)+(st&&st.eta!=null?' · ще ≈ '+fmt(st.eta):'');line.append(eta);const track=el('div',null,'bar-track'),fill=el('div',null,'bar-fill');fill.style.width=Math.round(100*(st?st.progress:0))+'%';if(st&&st.stalled)fill.classList.add('stalled');track.append(fill);track.setAttribute('role','progressbar');track.setAttribute('aria-valuemin','0');track.setAttribute('aria-valuemax','100');track.setAttribute('aria-valuenow',String(Math.round(100*(st?st.progress:0))));track.setAttribute('aria-label','Прогрес підготовки');card.append(line,track);}
@@ -79,14 +99,40 @@ function renderJobs(jobs){const key=JSON.stringify(jobs);if(key===jobsKey)return
   if(j.state==='failed'){card.append(el('p',(j.stage?'Зупинилося на етапі '+j.stage.n+' з '+j.stage.total+' («'+j.stage.name+'»). ':'Підготовка зупинилася. ')+'Вихідний файл залишився у Studio. Переглянь причину нижче; після її усунення можна повторити підготовку.'));const acts=el('div',null,'actions'),retry=el('button','Повторити підготовку','secondary');retry.type='button';retry.onclick=async()=>{retry.disabled=true;try{const r=await fetch('/retry?id='+encodeURIComponent(j.id),{method:'POST'});if(!r.ok)throw Error(await r.text());await refresh();}catch(e){message('Не вдалося повторити підготовку. '+e.message);retry.disabled=false;}};acts.append(retry);card.append(acts);}
   if(j.tail){const details=el('details');details.append(el('summary','Технічні подробиці'),el('pre',j.tail));card.append(details);}root.append(card);}
 }
+// Built-in lessons: lessons/build_lessons.py writes the catalogue next to the trainers it generates. The library server
+// serves .html only, hence the file name; the JSON sits in a script tag inside it.
+const LESSON_FILE=/^Luma_Lesson_\d+_/, LESSON_TAG='<script type="application/json" id="luma-lessons">';
+const LEVELS={'Легко':'easy','Звично':'normal','Точно':'strict'};
+async function loadLessons(files){
+ try{const r=await fetch('/song/lessons.index.html');if(!r.ok)throw Error('index');const text=await r.text();const i=text.indexOf(LESSON_TAG);if(i<0)throw Error('format');
+  const d=JSON.parse(text.slice(i+LESSON_TAG.length,text.indexOf('</'+'script>',i)));lessons=Array.isArray(d.lessons)?d.lessons.slice().sort((a,b)=>a.order-b.order):[];lessonsFor=files;}
+ catch(e){lessons=null;}  // unreadable catalogue: the lessons stay visible as ordinary library entries, and the next poll retries
+}
+function renderLessons(list){const key=JSON.stringify(list);if(key===lessonsKey)return;lessonsKey=key;
+ $('lessonsSection').hidden=!list.length;$('lessonsCount').textContent=list.length?String(list.length):'';const root=$('lessons');root.replaceChildren();
+ for(const l of list){const card=el('article',null,'card song lesson'),head=el('div',null,'head');
+  head.append(el('div',l.title,'title'));const chip=el('span',null,'chip '+(LEVELS[l.level]||''));chip.title='Рекомендований рівень оцінювання';chip.append(el('i'),el('span',l.level));head.append(chip);
+  // The card answers «що це і скільки триває»; the method, the tempo and the note count wait behind «Як виконувати».
+  const facts=el('div',null,'facts');if(l.duration)facts.append(el('span',clock(l.duration),'len'));if(l.repetitions)facts.append(el('span',l.repetitions+' повторів'));
+  card.append(head,el('div',l.summary,'goal'),facts);
+  const acts=el('div',null,'actions'),a=el('a','Відкрити урок','primary');a.href='/song/'+encodeURIComponent(l.html);a.target='_blank';a.rel='noopener';acts.append(a);card.append(acts);
+  const more=el('details');more.append(el('summary','Як виконувати'),el('p',l.description),el('p',[l.bpm?l.bpm+' BPM':null,l.range,l.notes+' нот'].filter(Boolean).join(' · '),'meta'));
+  card.append(more);root.append(card);}}
 function renderSongs(songs){const key=JSON.stringify(songs);if(key===songsKey)return;songsKey=key;const root=$('lib');root.replaceChildren();$('libCount').textContent=songs.length?String(songs.length):'';
- if(!songs.length){root.append(el('p','Тут поки немає пісень. Додай готовий тренажер, підготуй аудіофайл або відкрий демо.','empty'));return;}
- for(const s of songs){const card=el('article',null,'card song'),title=el('div',s.title||s.name.replace(/^Luma_|\.html$/g,'').replace(/_/g,' '),'title');card.append(title);if(s.artist)card.append(el('div',s.artist,'artist'));
-  card.append(el('div',[s.duration?clock(s.duration):null,(s.bytes/1048576).toFixed(0)+' МБ',s.mtime].filter(Boolean).join(' · '),'meta'));
-  const acts=el('div',null,'actions'),a=el('a','Відкрити тренажер','primary');a.href='/song/'+encodeURIComponent(s.name);a.target='_blank';a.rel='noopener';acts.append(a);card.append(acts);root.append(card);}}
+ if(!songs.length){root.append(el('p','Тут поки немає пісень. Додай свою пісню кнопкою вгорі, постав готовий тренажер або відкрий демо.','empty'));return;}
+ for(const s of songs){const card=el('article',null,'card song'),title=el('div',s.title||s.name.replace(/^Luma_|\.html$/g,'').replace(/_/g,' '),'title');card.append(title);card.append(el('div',s.artist||'Виконавця не вказано','artist'));
+  // What a singer chooses by: how long it is, whose it is. The best score joins this row once a trainer reports one.
+  const facts=el('div',null,'facts');if(s.duration)facts.append(el('span',clock(s.duration),'len'));card.append(facts);
+  const acts=el('div',null,'actions'),a=el('a','Відкрити тренажер','primary');a.href='/song/'+encodeURIComponent(s.name);a.target='_blank';a.rel='noopener';acts.append(a);card.append(acts);
+  const more=el('details');more.append(el('summary','Подробиці файлу'),el('p',[(s.bytes/1048576).toFixed(0)+' МБ',s.mtime?'зібрано '+s.mtime:null,s.name].filter(Boolean).join(' · '),'meta'));
+  card.append(more);root.append(card);}}
 function setStatus(kind,text){const el=$('serverStatus');el.className='status'+(kind?' '+kind:'');$('serverStatusText').textContent=text;}
 async function refresh(){clearTimeout(timer);if(refreshing)return;refreshing=true;let delay=5000;
- try{const r=await fetch('/status');if(!r.ok)throw Error('status');const d=await r.json();if(!Array.isArray(d.jobs)||!Array.isArray(d.songs))throw Error('format');$('connectionNotice').hidden=true;renderJobs(d.jobs);renderSongs(d.songs);const working=d.jobs.some(j=>['running','queued'].includes(j.state));setStatus(working?'busy':'live',working?'ГОТУЄМО ПІСНЮ':'STUDIO ПРАЦЮЄ');delay=working?2000:15000;}
+ try{const r=await fetch('/status');if(!r.ok)throw Error('status');const d=await r.json();if(!Array.isArray(d.jobs)||!Array.isArray(d.songs))throw Error('format');$('connectionNotice').hidden=true;renderJobs(d.jobs);
+  const files=d.songs.map(s=>s.name).filter(n=>LESSON_FILE.test(n)).sort().join('|');
+  if(files&&files!==lessonsFor)await loadLessons(files);   // first poll, and again whenever a lesson is added, renamed or removed
+  const built=new Set(d.songs.map(s=>s.name)),shown=(lessons||[]).filter(l=>built.has(l.html));
+  renderLessons(shown);renderSongs(d.songs.filter(s=>!shown.some(l=>l.html===s.name)));const working=d.jobs.some(j=>['running','queued'].includes(j.state));setStatus(working?'busy':'live',working?'ГОТУЄМО ПІСНЮ':'STUDIO ПРАЦЮЄ');delay=working?2000:15000;}
  catch(e){$('connectionNotice').hidden=false;setStatus('','НЕМАЄ ЗВ’ЯЗКУ');}
  finally{refreshing=false;timer=setTimeout(refresh,delay);}
 }
