@@ -388,8 +388,11 @@ function tracePaths(points,x,y,frames,upTo){
   last=p;}
  return paths;
 }
+// A hit is the only solid bar on the roll, so the ✓ and the note name on it are dark ink on mint, the same pairing as the
+// contour marker. At the old 33 % wash the dark label measured 2.2:1 against its own bar.
+const HIT_FILL='#a1eed899',HIT_CUR='#a1eed8d6',HIT_INK='#0d2620';
 // Diagonal hatch behind a missed note: hit and miss stay apart for an eye that does not read the colours.
-let missPat=null;
+let missPat=null,probe=null;
 function missHatch(){if(missPat)return missPat;const c=document.createElement('canvas');c.width=c.height=7;const h=c.getContext('2d');
  h.strokeStyle='#dd8f9759';h.lineWidth=1.2;h.beginPath();h.moveTo(-2,7);h.lineTo(7,-2);h.moveTo(1,10);h.lineTo(10,1);h.stroke();missPat=g.createPattern(c,'repeat');return missPat;}
 function draw(t){
@@ -423,18 +426,22 @@ function draw(t){
    // tolerance corridor behind the bar
    if(!n.ignored){g.fillStyle=kind==='hit'?'#a1eed812':kind?'#c9707a10':ok?'#b4a2eb14':'#9a94b40c';g.fillRect(xx,yy-tolH/2,ww,tolH);}
    // outline and fill carry the state on their own: solid + filled = hit, solid + hatched = miss, dashed = draft or ignored
-   let fill,stroke,dash=[],glyph='';
-   if(n.ignored){fill='#7f89900c';stroke='#6b768747';dash=[2,3];}
-   else if(kind==='hit'){fill=cur&&curState===1?'#a1eed88f':'#a1eed854';stroke='#c8fbee';glyph='✓';}
-   else if(missed){fill='#c9707a14';stroke='#dd8f97';dash=kind==='silent'?[2,3]:[];glyph='×';}
-   else{fill=ok?'#b4a2eb3a':'#9a94b41c';stroke=ok?'#c9baf4':'#aaa4c4';dash=ok?[]:[4,3];if(cur&&curState===1){fill='#a1eed87a';stroke='#d8fff4';}else if(cur&&curState===2){fill='#c9707a45';stroke='#e6a0a8';}}
-   g.globalAlpha=n.b<t&&!kind?.55:1;
+   let fill,stroke,dash=[],glyph='',ink;
+   if(n.ignored){fill='#7f89900c';stroke='#6b768747';dash=[2,3];ink='#aab4c5';}
+   else if(kind==='hit'){fill=cur&&curState===1?HIT_CUR:HIT_FILL;stroke='#c8fbee';glyph='✓';ink=HIT_INK;}
+   else if(missed){fill='#c9707a14';stroke='#dd8f97';dash=kind==='silent'?[2,3]:[];glyph='×';ink='#ffdbdf';}
+   else{fill=ok?'#b4a2eb3a':'#9a94b41c';stroke=ok?'#c9baf4':'#aaa4c4';dash=ok?[]:[4,3];ink=ok?'#f2edff':'#dcd8ea';
+    if(cur&&curState===1){fill=HIT_CUR;stroke='#d8fff4';ink=HIT_INK;}else if(cur&&curState===2){fill='#c9707a45';stroke='#e6a0a8';ink='#ffdbdf';}}
+   // a spent note recedes, but not so far that its own name stops reading against it
+   g.globalAlpha=n.b<t&&!kind?.75:1;
    g.beginPath();g.roundRect(xx,yy-barH/2,ww,barH,Math.min(4,ww/2,barH/2));g.fillStyle=fill;g.fill();
    if(missed){g.fillStyle=missHatch();g.fill();}
    g.strokeStyle=stroke;g.lineWidth=cur?1.7:1.1;g.setLineDash(dash);g.stroke();g.setLineDash([]);
    if(cur&&curState===1&&s.mode!=='idle'){g.shadowColor='#a1eed8';g.shadowBlur=16;g.strokeStyle='#d8fff4';g.stroke();g.shadowBlur=0;}
-   if(ww>=32&&barH>=10&&!n.ignored){g.font='11px '+mono;g.textAlign='left';g.textBaseline='middle';g.fillStyle=kind==='hit'?'#0d2620':missed?'#ffdbdf':ok?'#f2edff':'#c2bed4';g.fillText(glyph?glyph+' '+name(n.m+opt.octave):name(n.m+opt.octave),xx+6,yy);}
-   else if(glyph&&ww>=12){g.font='600 11px '+sans;g.textAlign='center';g.textBaseline='middle';g.fillStyle=kind==='hit'?'#0d2620':'#ffdbdf';g.fillText(glyph,xx+ww/2,yy);}
+   if(ww>=32&&barH>=10&&!n.ignored){const label=glyph?glyph+' '+name(n.m+opt.octave):name(n.m+opt.octave);g.font='11px '+mono;g.textAlign='left';g.textBaseline='middle';g.fillStyle=ink;g.fillText(label,xx+6,yy);
+    if(probe)probe.push({id:n.id,kind:kind||(ok?'target':'draft'),cur:cur&&curState>0,x:xx,y:yy,w:ww,h:barH,label,ink,tx:xx+6,tw:g.measureText(label).width,alpha:g.globalAlpha});}
+   else if(glyph&&ww>=12){g.font='600 11px '+sans;g.textAlign='center';g.textBaseline='middle';g.fillStyle=ink;g.fillText(glyph,xx+ww/2,yy);
+    if(probe)probe.push({id:n.id,kind,cur:cur&&curState>0,x:xx,y:yy,w:ww,h:barH,label:glyph,ink,tx:xx+ww/2-g.measureText(glyph).width/2,tw:g.measureText(glyph).width,alpha:g.globalAlpha});}
   }g.globalAlpha=1;
  }else{
   g.lineCap='round';g.lineJoin='round';
@@ -445,7 +452,8 @@ function draw(t){
   // Hit and miss stay readable in contour mode too: a filled disc against a dashed ring, each with its own glyph.
   let lastMark=-Infinity;g.textAlign='center';g.textBaseline='middle';
   for(const n of song.notes){if(n.a>v.b)break;if(n.b<v.a||n.ignored)continue;const kind=noteKind(sc,n.id),xx=x((n.a+n.b)/2);if(!kind||xx-lastMark<21)continue;lastMark=xx;
-   const yy=clamp(y(n.m+opt.octave)+19,b.top+10,b.bottom-10),hit=kind==='hit';
+   // the marker sits under its note, or above it when the plot floor is close; the clamp is a last resort, not the usual place
+   const yv=y(n.m+opt.octave),yy=yv+19<=b.bottom-10?yv+19:yv-19>=b.top+10?yv-19:clamp(yv,b.top+10,b.bottom-10),hit=kind==='hit';
    g.beginPath();g.arc(xx,yy,8,0,Math.PI*2);
    if(hit){g.fillStyle='#a1eed8';g.fill();}
    else{g.fillStyle='#0d121b';g.fill();g.strokeStyle='#dd8f97';g.lineWidth=1.3;g.setLineDash([3,2.4]);g.stroke();g.setLineDash([]);}
@@ -588,7 +596,8 @@ window.Luma={diagnostics:()=>({mode:s.mode,busy:s.busy,pending:s.awaitFinish,tim
   injectTake:({a,b,speed=1,points,tolerance,octave=prefs.octave,view=prefs.view})=>{const duration=(b-a)/speed,meta={...takeMeta(a,b,speed),octave,view};if(tolerance!==undefined){meta.tolerance=tolerance;meta.level='custom';}const id=meta.id;const m={id,blob:silentWav(duration),sampleRate:48000,duration,start:0,end:duration,reason:'end',points:points.filter(p=>p.t>=0&&p.t<duration),gap:0};const t=storeTake(meta,m);s.pos=a;sync();return {id:t.id,pct:scorePct(t.score),frames:t.score.frames.length,points:t.points.length};},
   livePush:(p)=>{handleWorker({type:'pitch',computeMs:0,windowMs:64,...p});},
   seek:t=>seekTo(t,true),applySeek,selectTake:id=>{const t=s.takes.find(t=>t.id===id);if(t)selectTrace(t);},closeTrace,jumpMiss,draw:()=>{draw(now());updateReadout(now());},
-  setLevel:l=>{document.querySelector('[data-level="'+l+'"]').click();return levelOpt();},viewWindow:t=>view(t),plot:()=>({...bounds()}),scale:()=>({...SCALE,goalLo:sc.goalLo,goalHi:sc.goalHi}),setRange,clearRange,levelOpt,centsOff,now,punchTarget:()=>punchTarget()?.id??null,gains:()=>s.gains?{back:s.gains.back.gain.value,fore:s.gains.fore.gain.value,vocal:prefs.vocal}:null,takes:()=>s.takes.map(t=>({id:t.id,a:t.a,endSong:t.endSong,duration:t.duration,bytes:t.blob.size,points:t.points.length,punches:t.punches||0,pct:scorePct(t.score)})),
+  setLevel:l=>{document.querySelector('[data-level="'+l+'"]').click();return levelOpt();},viewWindow:t=>view(t),plot:()=>({...bounds()}),dpr:()=>DPR,// one frame drawn with the label rectangles recorded, so a test can read the real canvas pixels behind the type
+  noteBoxes:()=>{probe=[];draw(now());const r=probe;probe=null;return r;},scale:()=>({...SCALE,goalLo:sc.goalLo,goalHi:sc.goalHi}),setRange,clearRange,levelOpt,centsOff,now,punchTarget:()=>punchTarget()?.id??null,gains:()=>s.gains?{back:s.gains.back.gain.value,fore:s.gains.fore.gain.value,vocal:prefs.vocal}:null,takes:()=>s.takes.map(t=>({id:t.id,a:t.a,endSong:t.endSong,duration:t.duration,bytes:t.blob.size,points:t.points.length,punches:t.punches||0,pct:scorePct(t.score)})),
   state:()=>({mode:s.mode,pos:s.pos,time:now(),trace:s.trace?{id:s.trace.take.id,points:s.trace.points.length,frames:s.trace.score.frames.length,pct:scorePct(s.trace.score),missRuns:missRuns(s.trace.score)}:null,liveScore:s.live?{target:s.live.target,hit:s.live.hit,sung:s.live.sung,pct:scorePct(s.live)}:null,history:s.history.length,matchText:$('matchPct').textContent,matchDetail:$('matchDetail').textContent,reviewHidden:$('reviewBar').hidden,missCount:$('missCount').textContent,lyric:$('lyricNow').textContent,liveNote:$('liveNote').textContent,deviation:$('deviation').textContent,range:{...s.range},rangeId:s.rangeId,rangeText:$('rangeText').textContent,loop:prefs.loop,transportLoop:s.transport?.loop??null,level:prefs.level,tolerance:prefs.tolerance,rangeLo:s.rangeLo,rangeHi:s.rangeHi}),
   fakeSing:({a,b,speed=1})=>{// enter singing mode without audio: transport clock driven by a fake context
    if(s.mode!=='idle')return false;const meta=takeMeta(a,b,speed),id=meta.id;if(!s.ctx)s.ctx={currentTime:0,state:'running',sampleRate:48000,resume(){},get _fake(){return true;}};const when=s.ctx.currentTime;s.transport={token:++s.cancel,when,offset:a,end:b,speed,loop:null};s.mode='singing';s.history=[];s.live=newScore(meta);s.pending.set(id,meta);sync();return {id,when};},
