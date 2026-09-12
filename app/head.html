@@ -21,7 +21,6 @@ button:hover:not(:disabled){filter:brightness(1.13)}
 button:active:not(:disabled){transform:translateY(.5px)}
 button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible,summary:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--mint);outline-offset:3px}
 button,input{-webkit-tap-highlight-color:transparent}
-kbd{font:12px var(--mono);color:#8e9db3}
 button svg,.icon{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
 [hidden]{display:none!important}
 button[aria-pressed=true]{color:var(--mint);border-color:#a1eed840;background:#a1eed80d}
@@ -48,7 +47,6 @@ button[aria-pressed=true]{color:var(--mint);border-color:#a1eed840;background:#a
 .status.rec{color:var(--rose)}.status.rec i{background:var(--rose);animation:blink 1.3s infinite}
 .icon-btn{width:var(--tap);height:var(--tap);min-width:var(--tap);min-height:var(--tap);border:1px solid var(--border);border-radius:var(--r-md);background:#ffffff05;display:inline-grid;place-items:center;flex:none;color:#c9d3e3}
 .icon-btn.sm{width:var(--tap-sm);height:var(--tap-sm);min-width:var(--tap-sm);min-height:var(--tap-sm);border-radius:var(--r-sm)}
-.onboarding{flex:none;padding:10px 18px;background:#131a27;border-bottom:1px solid var(--hair);color:#c5d1e2;font-size:13px}
 .banner{flex:none;background:#6f463533;border-bottom:1px solid #cd976a4d;padding:9px 18px;font-size:13px;color:#e9c8ab;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .banner button{color:#f7ddc7;text-decoration:underline;min-height:var(--tap-sm)}
 .banner #dismissError{margin-left:auto;min-width:var(--tap-sm);text-decoration:none;font-size:17px}
@@ -67,7 +65,8 @@ button[aria-pressed=true]{color:var(--mint);border-color:#a1eed840;background:#a
 .big-note.empty{color:#7f8da8;text-shadow:none;font-size:clamp(28px,2.4vw,34px);letter-spacing:0}
 .kicker{font-size:12px;text-transform:uppercase;letter-spacing:1.3px;color:var(--ink-3);margin-bottom:3px}
 .voice-meta,.target-meta{font-size:13px;color:var(--ink-1);line-height:1.45;padding-top:4px;min-width:0}
-.voice-meta .freq,.mic-state{font:12px var(--mono);color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:22ch}
+.voice-meta .freq{font:12px var(--mono);color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:26ch}
+.mic-state{font:12px var(--mono);color:var(--ink-3);margin:8px 0 0;overflow-wrap:anywhere}
 .readout-sep{width:1px;align-self:stretch;background:#ffffff14;flex:none;margin:4px 2px}
 .target-meta b{font:16px var(--mono);font-weight:400;color:#cabcf3;letter-spacing:.5px}
 .deviation{font-size:12px;color:var(--mint);min-height:1.45em}
@@ -97,6 +96,9 @@ button[aria-pressed=true]{color:var(--mint);border-color:#a1eed840;background:#a
 /* Before the first take there is nothing to meter, so the readout gives way to one sentence (the target note keeps its place).
    When the stage itself is short — a small laptop, the attempt list open, a phone — the readout folds into a single line and the
    second lyric line steps aside, so the piano roll keeps the height instead of the head. Both flags are set in measureStage(). */
+.invite{margin:0;font-size:clamp(15px,1.4vw,17px);line-height:1.5;color:var(--ink-2);max-width:78ch}
+.invite b{color:#dceaf6;font-weight:600}
+.stage[data-intro="1"] .readout,.stage[data-intro="1"] .score{display:none}
 .stage[data-dense="1"] .stage-head{padding:9px 16px 0 var(--gutter);gap:16px;align-items:center}
 .stage[data-dense="1"] .readout{align-items:center;gap:12px}
 .stage[data-dense="1"] .voice-meta,.stage[data-dense="1"] .target-meta{display:flex;align-items:baseline;gap:2px 9px;padding-top:0;flex-wrap:wrap}
@@ -109,6 +111,7 @@ button[aria-pressed=true]{color:var(--mint);border-color:#a1eed840;background:#a
 .stage[data-dense="1"] .lyric-band{padding:7px 18px 0}
 .stage[data-dense="1"] .lyric-line.now{font-size:20px}
 .stage[data-dense="1"] .lyric-line.next{font-size:17px;margin-top:2px}
+.stage[data-dense="1"] .invite{font-size:15px}
 
 /* ── stage rail: legend on the left, view controls on the right ── */
 .stage-rail{margin-top:auto;display:flex;align-items:center;gap:14px;padding:9px 16px;background:#0b0f17;border-top:1px solid var(--hair);flex-wrap:wrap}
@@ -217,7 +220,7 @@ dialog details{font-size:13px;color:var(--ink-3)}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}button:active:not(:disabled){transform:none}}
 
 /* ── narrower desktops ── */
-@media(max-width:1100px){.score{max-width:min(270px,38%)}.voice-meta .freq,.mic-state{max-width:17ch}}
+@media(max-width:1100px){.score{max-width:min(270px,38%)}.voice-meta .freq{max-width:20ch}}
 @media(max-width:900px){.song .meta{display:none}.readout{gap:12px}.big-note{min-width:66px}.micro-tuner{width:96px}}
 
 /* ── phones: the lyric band takes a full row, every target grows to 40 px ── */
@@ -225,7 +228,6 @@ dialog details{font-size:13px;color:var(--ink-3)}
  :root{--tap:44px;--tap-sm:40px;--gutter:12px}
  .app{height:auto;min-height:100dvh}
  .bar{padding:8px 12px;gap:8px 10px;flex-wrap:wrap}
- .onboarding{padding:10px 12px}
  .brand{font-size:17px}.brand svg{width:21px;height:21px}
  .song{order:3;flex:1 1 50%;min-width:0}.song b{max-width:52vw;overflow:hidden;text-overflow:ellipsis}
  .quality{order:4;margin-left:auto}.status{display:none}
@@ -236,13 +238,13 @@ dialog details{font-size:13px;color:var(--ink-3)}
  .big-note,.stage[data-dense="1"] .big-note{font-size:36px;min-width:54px}
  .voice-meta,.target-meta{font-size:12px;padding-top:0}
  .voice-meta .freq{display:none}
- .mic-state{display:none}
  .target-meta,.stage[data-dense="1"] .target-meta{display:flex;align-items:center;gap:2px 9px;flex-wrap:wrap}
  .micro-tuner{width:84px;margin:0}
  .score{max-width:none;display:flex;align-items:baseline;gap:9px;text-align:left}
  .score .lbl{margin:0}
  .score .pct,.stage[data-dense="1"] .score .pct{font-size:30px}
  .score .detail,.meter{display:none}
+ .invite,.stage[data-dense="1"] .invite{font-size:15px;max-width:none}
  .scale-control>span{display:none}
  .scale-control select{max-width:104px}
  .lyric-band,.stage[data-dense="1"] .lyric-band{padding:9px 12px 0;text-align:left}
@@ -262,7 +264,6 @@ dialog details{font-size:13px;color:var(--ink-3)}
  .divider{display:none}
  .review{width:100%;justify-content:space-between;order:5;padding:4px 6px 4px 12px}
  .extras{margin-left:0;width:100%}
- .extras .compact kbd{display:none}
  .strip{padding:8px 12px 10px}
  .timeline{height:58px}
  #qualityCoverage{display:none}
@@ -285,14 +286,14 @@ dialog details{font-size:13px;color:var(--ink-3)}
 /* ── phone held sideways: little height, so the readout loses its second rank ── */
 @media(max-height:560px) and (min-width:721px){
  .app{height:auto;min-height:100dvh}
- .onboarding{display:none}
  .bar{padding:6px 14px;gap:10px}
  .stage{flex:none;height:var(--stage-h,300px);min-height:200px}
  .stage-head,.stage[data-dense="1"] .stage-head{padding:5px 16px 0 var(--gutter);gap:14px}
  .big-note,.stage[data-dense="1"] .big-note{font-size:28px;min-width:54px}
- .voice-meta .freq,.mic-state,.score .detail,.meter{display:none}
+ .voice-meta .freq,.score .detail,.meter{display:none}
  .score .pct,.stage[data-dense="1"] .score .pct{font-size:26px}
  .micro-tuner{width:84px;margin:0}
+ .invite,.stage[data-dense="1"] .invite{font-size:13px;max-width:none}
  .lyric-band,.stage[data-dense="1"] .lyric-band{padding:5px 16px 0}
  .lyric-line.now,.stage[data-dense="1"] .lyric-line.now{font-size:16px}
  .lyric-line.next{display:none}
@@ -321,26 +322,26 @@ dialog details{font-size:13px;color:var(--ink-3)}
 <button class="icon-btn" id="importBtn" title="Інша пісня · імпорт пакета або цілі" aria-label="Інша пісня"><svg><use href="#i-import"/></svg></button>
 <button class="icon-btn" id="helpBtn" title="Як тренуватися" aria-label="Як тренуватися"><svg><use href="#i-info"/></svg></button>
 <button class="icon-btn" id="settingsBtn" title="Налаштування" aria-label="Налаштування"><svg><use href="#i-settings"/></svg></button></header>
-<div class="onboarding" id="onboarding">Почни з «Слухати», потім заспівай фразу. Після запису можна переглянути й повторити складне місце.</div>
 <div class="banner" id="errorBanner" hidden role="alert"><span id="errorText"></span><button id="errorSettings">Налаштувати мікрофон</button><a id="studioLink" href="http://127.0.0.1:8792/" target="_blank" rel="noopener" hidden>Відкрити Studio</a><button id="dismissError" aria-label="Закрити помилку">×</button></div>
 <main class="stage" id="chartWrap"><canvas id="chart" aria-label="Мелодія-ціль, слова пісні і твій голос. Ліворуч — минуле, праворуч — наступні ноти." role="img"></canvas>
 <div class="stage-head" id="stageHead">
 <div class="readout"><div class="big-note" id="liveNote">—</div>
-<div class="voice-meta"><div class="kicker">Твій голос</div><div id="liveDesc">Час заспівати</div><div class="freq" id="liveFreq">Мікрофон вимкнено</div><div class="mic-state" id="micState">Аудіо лише на твоєму пристрої</div></div>
+<div class="voice-meta"><div class="kicker">Твій голос</div><div id="liveDesc">Час заспівати</div><div class="freq" id="liveFreq">Мікрофон вимкнено</div></div>
 <div class="readout-sep" aria-hidden="true"></div>
 <div class="target-meta"><div class="kicker">Ціль</div><div><b id="targetNote">—</b></div><div class="deviation" id="deviation">Слухай. Потім повтори.</div><span class="micro-tuner" aria-hidden="true"><i id="needle"></i></span></div></div>
-<div class="score"><div class="lbl" id="scoreLabel">Збіг із мелодією</div><div class="pct" id="matchPct">—</div><div class="detail" id="matchDetail">Заспівай фрагмент — рахую по намальованих нотах</div><div class="meter" aria-hidden="true"><span id="level"></span></div></div></div>
+<div class="score"><div class="lbl" id="scoreLabel">Збіг із мелодією</div><div class="pct" id="matchPct">—</div><div class="detail" id="matchDetail">Заспівай фрагмент — рахую по намальованих нотах</div><div class="meter" aria-hidden="true"><span id="level"></span></div></div>
+<p class="invite" id="invite" hidden><b>Натисни «Слухати»</b>, щоб почути мелодію, потім «Співати» — твій голос ляже поверх неї, а влучені ноти засвітяться. Після запису спробу можна переглянути й повторити складне місце.</p></div>
 <div class="lyric-band" id="lyricBand"><div class="lyric-line now" id="lyricNow" aria-live="off"></div><div class="lyric-line next" id="lyricNext" aria-hidden="true"></div></div>
 <div class="stage-rail" id="stageRail"><div class="legend"><span><i class="target"></i>Мелодія</span><span><i class="draft"></i>Непевна мелодія</span><span><i></i>Ти</span><span><i class="hit"></i><span class="glyph">✓</span>влучив</span><span><i class="miss"></i><span class="glyph x">×</span>промах</span></div><div class="stage-tools"><label class="scale-control"><span>Масштаб</span> <select id="scaleSelect" aria-label="Масштаб висоти нот"><option value="1">Фрагмент</option><option value="2">Детальніше</option><option value="0.5">Ширше</option></select></label><button class="ghost" id="lyricsBtn" aria-pressed="true" title="Показувати слова пісні">Слова</button><div class="segmented" aria-label="Вигляд цілі"><button data-view="contour" class="active" aria-pressed="true" title="Плавний рух висоти голосу">Контур</button><button data-view="notes" aria-pressed="false" title="Окремі ноти та позначки влучань">Ноти</button></div><button class="ghost" id="editBtn" title="Змінити ноту, межі або виключити її">✎ Ціль</button></div></div>
 <div class="countdown" id="countdown" hidden><b id="countNumber">2</b><span>Приготуйся. Вдихни спокійно.</span></div></main>
 <div class="transport"><button class="primary" id="singBtn"><svg><use href="#i-mic"/></svg><span id="singLabel">Співати</span></button><button class="secondary" id="newTakeBtn" hidden>Нова спроба</button><button class="secondary" id="listenBtn" aria-label="Слухати пісню" title="Слухати / пауза (пробіл)"><svg><use id="listenIcon" href="#i-play"/></svg><span id="listenLabel">Слухати</span></button><button class="icon-btn" id="stopBtn" disabled aria-label="Зупинити і зберегти спробу" title="Зупинити (Esc)"><svg><use href="#i-stop"/></svg></button><span class="divider" aria-hidden="true"></span><span class="time"><span id="timeNow">00:00</span> <small>/ <span id="timeEnd">04:49</span></small></span>
 <span class="divider" id="reviewDivider" aria-hidden="true" hidden></span><div class="review" id="reviewBar" hidden><span id="reviewLabel">Спроба 01</span><b id="reviewPct">—</b><button class="icon-btn" id="prevMiss" title="Попередній промах" aria-label="Попередній промах"><svg><use href="#i-skipl"/></svg></button><span class="cnt" id="missCount">0 промахів</span><button class="icon-btn" id="nextMiss" title="Наступний промах" aria-label="Наступний промах"><svg><use href="#i-skipr"/></svg></button><button class="icon-btn" id="closeReview" title="Сховати запис із графіка" aria-label="Сховати запис"><svg><use href="#i-close"/></svg></button></div>
-<div class="extras"><span class="next-level" id="levelContext">Рівень</span><div class="segmented" id="levelSeg" aria-label="Рівень складності" title="Коридор і суворість оцінки"><button data-level="easy" aria-pressed="false">Легко</button><button data-level="normal" class="active" aria-pressed="true">Звично</button><button data-level="strict" aria-pressed="false">Точно</button></div><button class="icon-btn compact" id="vocalBtn" aria-pressed="true" title="Оригінальний вокал: увімкнено (V)"><svg><use href="#i-headphones"/></svg><span id="vocalLabel">Вокал</span><kbd>V</kbd></button><button class="icon-btn compact" id="loopBtn" aria-pressed="false" title="Повторювати виділений фрагмент без пауз (L)"><svg><use href="#i-loop"/></svg><span>Повтор</span><kbd>L</kbd></button><select id="speedSelect" aria-label="Швидкість зі збереженням висоти"><option value="1">1×</option><option value="0.8">0.8×</option></select><button class="icon-btn" id="mixBtn" aria-label="Гучність акомпанементу та голосу" title="Мікс · акомпанемент у навушниках, у мікрофоні лише твій голос"><svg><use href="#i-mix"/></svg></button></div></div>
-<div class="strip"><div class="range-actions"><button class="ghost" id="markA" title="Позначити початок фрагмента (A)">Початок <kbd>A</kbd></button><button class="ghost" id="markB" title="Позначити кінець фрагмента (B)">Кінець <kbd>B</kbd></button><button class="ghost" id="rangeSettings" title="Ввести точний час початку й кінця">Час A–B</button></div><div class="timeline" id="timelineWrap" role="slider" tabindex="0" aria-label="Позиція у пісні; нижня смужка — виділення повтору" aria-valuemin="0" aria-valuemax="289" aria-valuenow="0"><canvas id="timeline" aria-hidden="true"></canvas></div><span class="strip-meta" id="rangeText">Вся пісня</span><button class="ghost sm" id="clearRange" hidden title="Зняти повтор, грати всю пісню">✕ повтор</button><span class="strip-meta" id="qualityCoverage" title="Частка треку з надійною розміткою"></span></div>
+<div class="extras"><span class="next-level" id="levelContext">Рівень</span><div class="segmented" id="levelSeg" aria-label="Рівень складності" title="Коридор і суворість оцінки"><button data-level="easy" aria-pressed="false">Легко</button><button data-level="normal" class="active" aria-pressed="true">Звично</button><button data-level="strict" aria-pressed="false">Точно</button></div><button class="icon-btn compact" id="vocalBtn" aria-pressed="true" title="Оригінальний вокал: увімкнено (V)"><svg><use href="#i-headphones"/></svg><span id="vocalLabel">Вокал</span></button><button class="icon-btn compact" id="loopBtn" aria-pressed="false" title="Повторювати виділений фрагмент без пауз · клавіша L"><svg><use href="#i-loop"/></svg><span>Повторювати</span></button><select id="speedSelect" aria-label="Швидкість зі збереженням висоти"><option value="1">1×</option><option value="0.8">0.8×</option></select><button class="icon-btn" id="mixBtn" aria-label="Гучність акомпанементу та голосу" title="Мікс · акомпанемент у навушниках, у мікрофоні лише твій голос"><svg><use href="#i-mix"/></svg></button></div></div>
+<div class="strip"><div class="range-actions"><button class="ghost" id="markA" title="Почати фрагмент тут · клавіша A">Від сюди</button><button class="ghost" id="markB" title="Закінчити фрагмент тут · клавіша B">До сюди</button><button class="ghost" id="rangeSettings" title="Ввести точний час початку й кінця фрагмента">Точні межі</button></div><div class="timeline" id="timelineWrap" role="slider" tabindex="0" aria-label="Позиція у пісні; нижня смужка — виділення повтору" aria-valuemin="0" aria-valuemax="289" aria-valuenow="0"><canvas id="timeline" aria-hidden="true"></canvas></div><span class="strip-meta" id="rangeText">Вся пісня</span><button class="ghost sm" id="clearRange" hidden title="Зняти повтор, грати всю пісню">✕ повтор</button><span class="strip-meta" id="qualityCoverage" title="Частка треку з надійною розміткою"></span></div>
 <section class="takes" id="takesPanel" aria-label="Записані спроби" hidden data-open="1"><div class="takes-head"><button id="takesToggle" aria-expanded="true"><svg class="chev"><use href="#i-chev"/></svg>СПРОБИ <span id="takesCount">0</span></button><button class="ghost" id="repeatMissBtn" hidden>Повторити складну фразу</button><button class="ghost" id="undoPunchBtn" hidden>Скасувати перезапис</button><span class="hint">Збережи WAV перед закриттям вкладки</span></div><div class="takes-list" id="takesList"></div></section>
 </div>
 <dialog id="settingsDialog" aria-labelledby="settingsDialogTitle"><div class="dialog-body"><div class="dialog-head"><h2 id="settingsDialogTitle">Налаштування</h2><button class="icon-btn" data-close="settingsDialog" aria-label="Закрити"><svg><use href="#i-close"/></svg></button></div>
-<div class="field"><label for="micSelect">Мікрофон</label><select class="select" id="micSelect"><option value="">Системний мікрофон</option></select><p>Пристрій зміниться під час наступного підключення. Мікрофон не звучить у колонках.</p><button class="subtle-btn" id="micToggle">Увімкнути лише мікрофон</button></div>
+<div class="field"><label for="micSelect">Мікрофон</label><select class="select" id="micSelect"><option value="">Системний мікрофон</option></select><p>Пристрій зміниться під час наступного підключення. Мікрофон не звучить у колонках. Аудіо лишається на твоєму пристрої — записи нікуди не надсилаються.</p><p class="mic-state" id="micState">Мікрофон вимкнено</p><button class="subtle-btn" id="micToggle">Увімкнути лише мікрофон</button></div>
 <div class="field"><label for="gate">Поріг тиші <output id="gateOut">−48 dBFS</output></label><input id="gate" type="range" min="-70" max="-25" value="-48"><small>Не змінює WAV; лише відсікає тихі точки графіка.</small></div>
 <div class="field"><label for="octave">Вокальна октава</label><select class="select" id="octave"><option value="0">Як у цілі</option><option value="-12">На октаву нижче · мінус без змін</option><option value="12">На октаву вище · мінус без змін</option></select><p>Це перенос тільки вокальної партії, не зміна тональності пісні.</p></div>
 <div class="row"><div class="field"><label for="tolerance">Допуск, центи</label><input id="tolerance" type="number" min="10" max="100" step="5" value="35"></div><div class="field"><label for="latency">Зсув мікрофона, мс</label><input id="latency" type="number" min="-500" max="1000" step="5" value="0"></div></div>
@@ -354,6 +355,7 @@ dialog details{font-size:13px;color:var(--ink-3)}
 <p>Обери фрагмент і натисни <b>«Слухати»</b>. Лавандові смуги — автоматична ціль, пунктирні — сумнівні. <b>«Співати»</b> вмикає мікрофон, дає 2 секунди на підготовку й записує спробу. Ноти наближаються справа; світний слід — твій голос. Акомпанемент — у навушниках, у мікрофоні має бути лише голос.</p>
 <h3>Рівні</h3><p><b>Легко</b> — коридор ±80 ¢, нота зараховується, якщо влучив хоча б третину її тривалості, голос може стояти поруч у часі до 120 мс, а помилка на октаву прощається. <b>Звично</b> — ±50 ¢, половина ноти, 60 мс. <b>Точно</b> — ±35 ¢, дві третини ноти, 50 мс. Свій коридор можна ввести в налаштуваннях.</p>
 <h3>Збіг з ціллю</h3><p>Рахується наживо по всіх намальованих нотах, навіть сумнівних. Пісня ділиться на кадри по 20 мс. Кадр без цілі не рахується взагалі. Кадр із ціллю — влучання, якщо твоя впевнена нота в межах коридору рівня. Тиша або шум під ціллю — промах. Відсоток = влучання ÷ кадри з ціллю. Влучені ноти світяться м’ятним із ✓, промахи тьмяніють червоним із ×.</p>
+<h3>Позначки на графіку</h3><p>Лавандова смуга — мелодія-ціль, пунктирна — непевна ділянка авторозмітки. Світна лінія — твій голос. У вигляді «Ноти» влучена нота стає суцільною м’ятною смугою з <b>✓</b> і назвою ноти, промах — штрихованою червонуватою з <b>×</b>. У вигляді «Контур» те саме показують кружечки під нотами.</p>
 <h3>Повтор фрагмента</h3><p>За замовчуванням грає вся пісня. Щоб повторювати шматок, протягни мишею по нижній смужці під хвилею (або Shift + тягни по хвилі), або натисни <b>A</b> і <b>B</b> під час прослуховування. Ручки країв можна тягнути. «Повтор» (L) крутить фрагмент без пауз; під час співу кожен прохід — окрема спроба з коротким відліком. ✕ біля напису повтору повертає всю пісню.</p>
 <h3>Перемотування</h3><p>Тягни по хвилі або по графіку, крути колесо, натискай ← → (Shift — 5 с) — і під час відтворення теж: музика підхоплюється з нового місця. Під час співу перемотування завершує поточну ділянку. Повернення всередину запису перезаписує ту саму спробу; перехід за її межі створює нову.</p>
 <h3>Перегляд спроби</h3><p>Після запису слід не зникає: тягни графік, стрибай між промахами кнопками ‹ › у панелі спроби або клавішами , і . Кнопка ▶ у списку спроб відтворює твій голос поверх мінусу синхронно зі слідом. Кожна спроба зберігає повний слід нот і помилок.</p>
@@ -365,6 +367,6 @@ dialog details{font-size:13px;color:var(--ink-3)}
 <p><b>«Повтор»</b> запускає фрагмент знову; кожен прохід — окремий WAV. Максимум 10 спроб / 100 МіБ у пам’яті. Швидкість <b>0.8×</b> використовує заздалегідь уповільнені доріжки без зниження нот.</p>
 <p>Для мікрофона відкривай пісню з бібліотеки Luma Studio. Подвійний клік по HTML відкриває file://, де запис не працює. Альтернатива: локальний сервер:</p><pre class="help-code">python3 -m http.server 8000 --bind 127.0.0.1
 http://localhost:8000/</pre><p>Нову пісню готує Luma Studio (див. README проєкту): Demucs, CREPE і pYIN працюють локально. Кнопка «Інша пісня» імпортує тільки готові пакети, не сирий MP3.</p>
-<p><b>Клавіші:</b> пробіл — слухати / пауза; R — співати / зупинка; Esc — зупинка; A / B — початок / кінець повтору; L — повтор; V — голос / мінус; ← → — перемотування на 1 с (Shift — 5 с); , і . — попередній / наступний промах; [ і ] — готові фрагменти авторозмітки.</p>
+<p><b>Клавіші:</b> пробіл — слухати / пауза; R — співати / зупинка; Esc — зупинка; A / B — «Від сюди» / «До сюди»; L — повтор; V — голос / мінус; ← → — перемотування на 1 с (Shift — 5 с); , і . — попередній / наступний промах; [ і ] — готові фрагменти авторозмітки.</p>
 <p>Збережи WAV перед закриттям. Записи не завантажуються в інтернет. Згорнута вкладка може призупинити аудіо — поточна спроба тоді завершується.</p><div class="dialog-foot"><span></span><button class="primary" data-close="helpDialog">Почнемо</button></div></div></dialog>
 <input type="file" id="importFile" accept=".json,.luma" hidden><div class="toast" id="toast" role="status" aria-live="polite"></div><span class="sr-only" id="srStatus" aria-live="polite"></span><noscript><p>Увімкни JavaScript для роботи тренажера.</p></noscript>

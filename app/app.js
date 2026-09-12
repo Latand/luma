@@ -8,10 +8,10 @@ const GRID=.02;// scoring frame, seconds of song time
 let song=window.LUMA_SONG,assets=window.LUMA_ASSETS,baseNotes=structuredClone(song.notes);
 // Difficulty presets: corridor width, how far in time a sung frame may sit from the grid frame, share of a note's frames needed for ✓, and whether octave errors are forgiven.
 const LEVELS={easy:{tolerance:80,slack:.12,ratio:.35,octaveFree:true,label:'легко'},normal:{tolerance:50,slack:.06,ratio:.5,octaveFree:false,label:'звично'},strict:{tolerance:35,slack:.05,ratio:.65,octaveFree:false,label:'точно'}};
-const prefs={gate:-48,octave:0,tolerance:50,level:'normal',latency:0,back:.75,fore:.45,vocal:true,view:'contour',speed:1,loop:false,mic:'',lyrics:true,takesOpen:true,viewDefault:2};
+const prefs={gate:-48,octave:0,tolerance:50,level:'normal',latency:0,back:.75,fore:.45,vocal:true,view:'notes',speed:1,loop:false,mic:'',lyrics:true,takesOpen:true,viewDefault:3};
 try{const p=JSON.parse(localStorage.getItem('luma.trainer.settings')||'{}');for(const [k,a,b]of[['gate',-70,-25],['octave',-12,12],['tolerance',10,100],['latency',-500,1000],['back',0,1],['fore',0,1]])if(Number.isFinite(p[k]))prefs[k]=clamp(p[k],a,b);if(![-12,0,12].includes(prefs.octave))prefs.octave=0;if(typeof p.lyrics==='boolean')prefs.lyrics=p.lyrics;if(typeof p.takesOpen==='boolean')prefs.takesOpen=p.takesOpen;if(typeof p.vocal==='boolean')prefs.vocal=p.vocal;if(p.level in LEVELS||p.level==='custom')prefs.level=p.level;if(prefs.level!=='custom')prefs.tolerance=LEVELS[prefs.level].tolerance;
- // contour became the default on 2026-09-11; older saved settings keep their explicit choice only after that migration
- if(p.viewDefault===2&&(p.view==='notes'||p.view==='contour'))prefs.view=p.view;}catch(_){}
+ // notes became the default on 2026-09-12; a choice saved under an older default is not a choice, so it is not carried over
+ if(p.viewDefault===3&&(p.view==='notes'||p.view==='contour'))prefs.view=p.view;}catch(_){}
 function levelOpt(){const L=LEVELS[prefs.level]||LEVELS.normal;return{tolerance:prefs.level==='custom'?prefs.tolerance:L.tolerance,slack:L.slack,ratio:L.ratio,octaveFree:L.octaveFree,level:prefs.level};}
 function levelLabel(opt){return opt.level==='custom'?'свій коридор':(LEVELS[opt.level]||LEVELS.normal).label;}
 // Signed distance in cents; on the easy level the octave is forgiven (distance folds into ±6 semitones).
@@ -146,6 +146,8 @@ function populateSong(){
 }
 function sync(){
  s.dirty=true;$('lyricBand').hidden=!prefs.lyrics||!song.lyrics.length;
+ // nothing recorded and nothing running: one invitation instead of a readout with no reading and a meter with no level
+ const intro=!s.takes.length&&s.mode!=='singing'&&!s.stream&&!s.trace;$('invite').hidden=!intro;$('chartWrap').dataset.intro=intro?'1':'0';
  fitStage();measureStage();const active=s.mode!=='idle',singing=s.mode==='singing';$('singBtn').disabled=s.awaitFinish||(s.busy&&s.busyFor!=='sing');$('singBtn').classList.toggle('recording',singing);$('singLabel').textContent=s.busy?(s.busyFor==='sing'?'Скасувати':'Співати'):singing?'Завершити':'Співати';$('singBtn').querySelector('use').setAttribute('href',singing?'#i-stop':'#i-mic');
  $('listenBtn').disabled=s.busy||s.awaitFinish;$('listenLabel').textContent=s.busy&&s.busyFor==='listen'?'Готую…':singing?'Стоп':active?'Пауза':'Слухати';$('listenBtn').setAttribute('aria-label',singing?'Зупинити запис':active?'Пауза':'Слухати пісню');$('listenIcon').setAttribute('href',singing?'#i-stop':active?'#i-pause':'#i-play');$('stopBtn').disabled=!active&&!s.busy&&!s.awaitFinish;
  for(const id of ['phraseSelect','prevPhrase','nextPhrase','octave','latency','tolerance','rangeA','rangeB','applyRange','editBtn','applyEdit','importBtn','exportTarget','saveVerify','resetEdits','revokeVerify'])$(id).disabled=active||s.busy||s.awaitFinish;
@@ -157,7 +159,6 @@ function sync(){
  $('vocalBtn').setAttribute('aria-pressed',String(prefs.vocal));$('vocalLabel').textContent=prefs.vocal?'Вокал':'Мінус';$('vocalBtn').title=prefs.vocal?'Оригінальний вокал звучить · натисни, щоб лишити тільки мінус (V)':'Тільки мінус: чуєш лише себе · натисни, щоб повернути вокал (V)';
  const pt=punchTarget();if(!singing&&!s.busy)$('singLabel').textContent=pt?'Перезаписати з '+fmt(s.pos):'Співати';$('singBtn').title=pt?'Перезаписати спробу '+String(pt.id).padStart(2,'0')+' від '+fmt(s.pos)+' (R)':'Записати нову спробу (R)';
  $('newTakeBtn').hidden=!traceShown();$('newTakeBtn').disabled=active||s.busy||s.awaitFinish;
- $('onboarding').hidden=s.takes.length>0||active;
  $('undoPunchBtn').hidden=!s.undoPunch;$('undoPunchBtn').disabled=active||s.busy||s.awaitFinish;
  $('repeatMissBtn').hidden=!traceShown()||!missRuns(s.trace.score).length;$('repeatMissBtn').disabled=active||s.busy||s.awaitFinish;
  $('levelContext').textContent=traceShown()?'Наступна спроба':'Рівень';
@@ -512,9 +513,9 @@ function renderLyric(t){const el=$('lyricNow'),ahead=$('lyricNext');if(!prefs.ly
  for(const w of line.words){const sp=document.createElement('span');sp.textContent=w.w+' ';sp.className=line===next?'soon':t>=w.a&&t<w.b+.08?'on':t>=w.b?'past':'';el.append(sp);}
 }
 function updateReadout(t){
- let p=s.current;const review=traceShown();if(review)p=pointNear(s.trace.points,t,.06);
+ let p=s.current;const review=traceShown();if(review)p=pointNear(s.trace.points,t,.12);
  const live=p&&p.m!==null&&p.m!==undefined&&(review||s.ctx&&s.ctx.currentTime-(p.t||0)<.23);
- $('liveNote').innerHTML=noteHTML(live?p.m:null);$('liveNote').classList.toggle('empty',!live);$('liveDesc').textContent=live?words[(Math.round(p.m)%12+12)%12]+(review?' · запис':''):review?'Тут ти мовчав':s.stream?'Заспівай зручну ноту':'Час заспівати';$('liveFreq').textContent=live?(p.f.toFixed(1)+' Гц'):review?'Спроба '+String(s.trace.take.id).padStart(2,'0'):s.stream?'Слухаю мікрофон':'Мікрофон вимкнено';
+ $('liveNote').innerHTML=noteHTML(live?p.m:null);$('liveNote').classList.toggle('empty',!live);$('liveDesc').textContent=live?words[(Math.round(p.m)%12+12)%12]+(review?' · запис':''):review?'У цю мить у записі тиша':s.stream?'Заспівай зручну ноту':'Час заспівати';$('liveFreq').textContent=live?(p.f.toFixed(1)+' Гц'):review?'Спроба '+String(s.trace.take.id).padStart(2,'0'):s.stream?'Слухаю мікрофон':'Мікрофон вимкнено';
  const opt=effective(),target=targetAt(t,opt),ref=p?.songT!==undefined?targetAt(p.songT,opt):target;$('targetNote').textContent=target?name(target.m):'—';let text='Тут ціль не визначена',delta=null;if(target)text=target.ok?'Слухай. Потім повтори.':'Невпевнена ціль';if(live&&ref){delta=centsOff(p.raw??p.m,ref.m,opt);text=(ref.ok?'':'≈ ')+(delta>0?'+':'')+Math.round(delta)+' ¢'+(opt.octaveFree&&Math.abs((p.raw??p.m)-ref.m)>=6?' · інша октава':'')+(!ref.verified?' · чернетка':'');}
  const inTol=delta!==null&&Math.abs(delta)<=opt.tolerance;$('deviation').textContent=text;$('deviation').style.color=delta===null?'#94a0b3':inTol?'#a1eed8':'#d99aa2';$('needle').style.opacity=delta===null?0:1;$('needle').style.setProperty('--n',clamp(.5+(delta||0)/200,0,1));$('needle').style.background=delta!==null&&!inTol?'#d47f88':'#a1eed8';$('liveNote').classList.toggle('miss',delta!==null&&!inTol&&!!ref);
  $('level').style.width=p&&!review?clamp((p.db+60)/60*100,0,100)+'%':'0%';$('level').style.background=p?.peak>.99?'#f3a1b5':'#a1eed8';
@@ -552,7 +553,7 @@ $('singBtn').onclick=()=>startTransport(true);$('listenBtn').onclick=()=>startTr
 $('scaleSelect').onchange=()=>{setRangeScale();requestDraw();};
 $('newTakeBtn').onclick=()=>{if(s.mode!=='idle'||s.busy||s.awaitFinish)return;closeTrace();startTransport(true);};$('undoPunchBtn').onclick=undoPunch;
 $('repeatMissBtn').onclick=()=>{if(!traceShown()||s.mode!=='idle'||s.busy||s.awaitFinish)return;const runs=missRuns(s.trace.score),r=runs.find(r=>r.b>s.pos)||runs[0];if(!r)return;const a=Math.max(0,r.a-.6),b=Math.min(song.duration,r.b+.8);closeTrace();setRange(a,b);prefs.loop=true;s.pos=a;setRangeScale();sync();startTransport(false);};
-function markRange(which){if(s.busy||s.awaitFinish)return;const t=now();const ok=which==='a'?setRange(t,Math.max(s.range.b,t+.5)):setRange(Math.min(s.range.a,t-.5),t);if(ok)toast((which==='a'?'Початок':'Кінець')+' фрагмента: '+fmt(t));}
+function markRange(which){if(s.busy||s.awaitFinish)return;const t=now();const ok=which==='a'?setRange(t,Math.max(s.range.b,t+.5)):setRange(Math.min(s.range.a,t-.5),t);if(ok)toast((which==='a'?'Фрагмент від':'Фрагмент до')+' '+fmt(t));}
 $('markA').onclick=()=>markRange('a');$('markB').onclick=()=>markRange('b');$('rangeSettings').onclick=()=>{modal('settingsDialog');$('rangeA').focus();};$('prevMiss').onclick=()=>jumpMiss(-1);$('nextMiss').onclick=()=>jumpMiss(1);$('closeReview').onclick=closeTrace;$('takesToggle').onclick=()=>{prefs.takesOpen=!prefs.takesOpen;savePrefs();sync();};$('lyricsBtn').onclick=()=>{prefs.lyrics=!prefs.lyrics;savePrefs();s.lyricKey='~';resize();sync();};
 for(const b of document.querySelectorAll('[data-close]'))b.onclick=()=>$(b.dataset.close).close();
 $('loopBtn').onclick=()=>{prefs.loop=!prefs.loop;if(!prefs.loop)clearTimeout(s.nextTimer);if(prefs.loop&&!customRange())toast('Виділи фрагмент: тягни під хвилею або клавіші A / B під час прослуховування.');
