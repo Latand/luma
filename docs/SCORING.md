@@ -25,8 +25,9 @@ attempt, so a card keeps the rules it was recorded with.
 
 ## Colour and non-colour cues
 Fill and outline carry the state on their own, so hit and miss stay apart for an eye that does not read the colours. In the
-notes view a hit is a filled bar with a solid outline and a ✓; a miss is a diagonally hatched bar with an ×, dotted when the
-miss was silence; a draft note has a dashed outline. In the contour view every scored note gets a marker under it: a filled
+notes view a hit is the only solid bar on the roll, carrying a ✓ and its note name in dark ink; a miss is a diagonally
+hatched bar with an ×, dotted when the miss was silence; a draft note has a dashed outline and light type. Every label is
+measured off the canvas against the bar under it and has to clear 4.5:1. In the contour view every scored note gets a marker under it: a filled
 disc with a ✓ for a hit, a dashed ring with an × for a miss. The sung trace is mint inside the corridor, subdued red
 outside, dim where there was no target. The current note glows while you are inside it.
 

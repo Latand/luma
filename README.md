@@ -4,13 +4,13 @@ Luma turns a song into a single HTML file where you sing over the backing track 
 in real time. Drop a song into **Luma Studio**, wait a few minutes, open the trainer in a browser. No accounts, no uploads
 of your voice, no server after the file is built.
 
-![Luma trainer: contour view with lyrics riding the melody, a recorded attempt and the live match score](docs/screenshots/trainer-desktop.png)
+![Luma trainer: notes view with lyrics riding the melody, a recorded attempt and the live match score](docs/screenshots/trainer-desktop.png)
 
 ## What the trainer does
 
-- **Melody on a piano roll.** Contour or notes view on a lit stage with named C lines. Words sit right above the melody at
-  the moment they are sung, and the current and next line ride in a band of their own; on a phone that band is a full row,
-  so nothing ever covers the readout.
+- **Melody on a piano roll.** A trainer opens on the notes view — named bars a beginner can read — with the contour view a
+  click away. Named C lines on a lit stage. Words sit right above the melody at the moment they are sung, and the current
+  and next line ride in a band of their own; on a phone that band is a full row, so nothing ever covers the readout.
 - **Live match score.** Hits ÷ frames with a target, counted once per 20 ms. Silence under a note is a miss; frames with no
   target are excluded; draft notes count and are labelled as draft. Hit notes turn mint with ✓, misses hatched red with ×,
   so the two differ in pattern as well as colour.
