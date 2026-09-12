@@ -99,11 +99,13 @@ let detector=null,sr=48000,gate=-48,pipe=null,rec=null,lastEnd=null,lastPitch=nu
 function wavHeader(count,rate){const b=new ArrayBuffer(44),v=new DataView(b);function text(o,s){for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i));}text(0,'RIFF');v.setUint32(4,36+count*2,true);text(8,'WAVE');text(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,rate,true);v.setUint32(28,rate*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);text(36,'data');v.setUint32(40,count*2,true);return b;}
 function finish(reason='end'){
  if(!rec)return;const r=rec;rec=null;
- // A stop command can arrive after a PCM packet: trim trailing samples by timestamp.
- const wanted=Math.max(0,Math.min(r.count,Math.round((r.end-r.start)*sr)));let left=wanted;const parts=[];
- for(const b of r.chunks){if(left<=0)break;const n=Math.min(left,b.byteLength/2);parts.push(n*2===b.byteLength?b:b.slice(0,n*2));left-=n;}
- const blob=new Blob([wavHeader(wanted,sr),...parts],{type:'audio/wav'});
- self.postMessage({type:'finished',id:r.id,blob,sampleRate:sr,duration:wanted/sr,start:r.start,end:r.start+wanted/sr,reason,points:r.points.filter(p=>p.t>=0&&p.t<wanted/sr),gap:r.gap});
+ // A stop command can arrive after a PCM packet: trim trailing samples by timestamp. r.count follows the interval even
+ // when nothing was kept, so an attempt without audio still knows how long it was.
+ const wanted=Math.max(0,Math.min(r.count,Math.round((r.end-r.start)*sr)));let blob=null;
+ if(r.audio){let left=wanted;const parts=[];
+  for(const b of r.chunks){if(left<=0)break;const n=Math.min(left,b.byteLength/2);parts.push(n*2===b.byteLength?b:b.slice(0,n*2));left-=n;}
+  blob=new Blob([wavHeader(wanted,sr),...parts],{type:'audio/wav'});}
+ self.postMessage({type:'finished',id:r.id,blob,hasAudio:!!r.audio,clipped:!!r.clipped,sampleRate:sr,duration:wanted/sr,start:r.start,end:r.start+wanted/sr,reason,points:r.points.filter(p=>p.t>=0&&p.t<wanted/sr),gap:r.gap});
 }
 function pcm(m){
  if(!detector||!(m.samples instanceof Float32Array)||!m.samples.length)return;
@@ -112,16 +114,16 @@ function pcm(m){
  lastEnd=end;let sq=0,peak=0;for(let i=0;i<x.length;i++){sq+=x[i]*x[i];peak=Math.max(peak,Math.abs(x[i]));}
  const rms=Math.sqrt(sq/x.length),db=20*Math.log10(Math.max(rms,1e-9)),began=performance.now();detector.push(x);
  const p=db>=gate?detector.estimate():{f:null,confidence:0},win=detector.size/detector.rate,t=end-win/2;
- const point={t,f:p.f,confidence:p.confidence,db,rms,peak};lastPitch=point;
+ const point={t,f:p.f,confidence:p.confidence,db,peak};lastPitch=point;// peak drives the live level lamp; rms is already in db
  if(rec){
   if(end>rec.start&&m.t0<rec.end){
    const lo=Math.max(0,Math.min(x.length,Math.ceil((rec.start-m.t0)*sr-1e-6))),hi=Math.max(lo,Math.min(x.length,Math.ceil((rec.end-m.t0)*sr-1e-6)));
    if(hi>lo){
     if(rec.count===0&&m.t0+lo/sr-rec.start>1/sr+.001){rec.gap=m.t0+lo/sr-rec.start;rec.end=rec.start;finish('late-start');}
-    else{const b=new ArrayBuffer((hi-lo)*2),v=new DataView(b);for(let i=lo;i<hi;i++){const s=Math.max(-1,Math.min(1,x[i]));v.setInt16((i-lo)*2,Math.round(s<0?s*32768:s*32767),true);}rec.chunks.push(b);rec.count+=hi-lo;}
+    else{if(rec.audio){const b=new ArrayBuffer((hi-lo)*2),v=new DataView(b);for(let i=lo;i<hi;i++){const s=Math.max(-1,Math.min(1,x[i]));v.setInt16((i-lo)*2,Math.round(s<0?s*32768:s*32767),true);}rec.chunks.push(b);}rec.count+=hi-lo;if(peak>.99)rec.clipped=true;}
    }
   }
-  if(rec&&t>=rec.start&&t<rec.end)rec.points.push({...point,t:t-rec.start});
+  if(rec&&t>=rec.start&&t<rec.end)rec.points.push({t:t-rec.start,f:point.f,confidence:point.confidence,db:point.db});
   if(rec&&end>=rec.end)finish('end');
  }
  self.postMessage({type:'pitch',...point,computeMs:performance.now()-began,windowMs:win*1000});
@@ -132,7 +134,7 @@ self.onmessage=e=>{const m=e.data;
  else if(m.type==='record'){
   if(rec){self.postMessage({type:'error',message:'Recording already active'});return;}
   if(!Number.isFinite(m.start)||!Number.isFinite(m.end)||m.end<=m.start||m.end-m.start>601){self.postMessage({type:'error',message:'Invalid recording interval'});return;}
-  rec={id:m.id,start:m.start,end:m.end,chunks:[],count:0,points:[],gap:0};self.postMessage({type:'armed',id:m.id});
+  rec={id:m.id,start:m.start,end:m.end,audio:!!m.audio,chunks:[],count:0,points:[],gap:0,clipped:false};self.postMessage({type:'armed',id:m.id});
  }else if(m.type==='stop'&&rec){rec.end=Math.min(rec.end,Number.isFinite(m.time)?m.time:lastEnd||rec.start);finish(m.reason||'user');}
 };
 </script>
