@@ -112,10 +112,16 @@ const payload = await p.evaluate(() => window.Luma.test.history.exportPayload(fa
 const parsed = JSON.parse(payload);
 assert(parsed.schema === 'luma.history.v1' && parsed.runs.length === (await hist('H.runs().length')) && parsed.traces.length > 0,
   'export carries the runs and their traces ' + JSON.stringify({runs: parsed.runs.length, traces: parsed.traces.length}));
+const captionsBefore = await p.evaluate(() => [...document.querySelectorAll('#takesList .rec-delta')].map(e => e.textContent));
+assert(captionsBefore.length > 0, 'attempt cards carry a record caption to begin with ' + JSON.stringify(captionsBefore));
 const cleared = await p.evaluate(() => window.Luma.test.history.clearSong());
 assert(cleared === parsed.runs.length && (await hist('H.runs().length')) === 0, 'clearing the song empties its history');
+const captionsAfter = await p.evaluate(() => [...document.querySelectorAll('#takesList .rec-delta')].map(e => e.textContent));
+assert(captionsAfter.length === 0, 'clearing the history takes the record captions off the cards too ' + JSON.stringify(captionsAfter));
 const back = await p.evaluate(d => window.Luma.test.history.importPayload(JSON.parse(d)), payload);
 assert(back.imported === parsed.runs.length && (await hist('H.runs().length')) === parsed.runs.length, 'import restores every attempt ' + JSON.stringify(back));
+const captionsBack = await p.evaluate(() => [...document.querySelectorAll('#takesList .rec-delta')].map(e => e.textContent));
+assert(captionsBack.length === captionsBefore.length, 'an import puts the captions back, recounted against what it brought ' + JSON.stringify(captionsBack));
 const twice = await p.evaluate(d => window.Luma.test.history.importPayload(JSON.parse(d)), payload);
 assert(twice.imported === 0 && twice.skipped === parsed.runs.length, 'importing the same file again changes nothing ' + JSON.stringify(twice));
 const restored = await hist('H.rescore(H.runs().find(r => r.hasTrace).id)');
@@ -167,6 +173,33 @@ await p.evaluate(() => window.__restorePut());
 assert(state.takes.some(t => t.runId === kept.runId) && /переповнен/i.test(state.note),
   'a quota error keeps the attempt on screen and says so: ' + JSON.stringify(state.note));
 
+// ── 11 · importing another song starts its history clean and leaves the previous song's traces alone ──────────
+const oldHash = await hist('H.songHash()');
+const beforeSwap = await p.evaluate(() => window.Luma.test.history.exportPayload(true).then(d => ({
+  traces: d.traces.map(t => t.runId), runs: d.runs.length, songs: d.songs.map(s => s.songHash)})));
+await p.evaluate(() => {
+  // a package for the same audio under a new identity: enough to move songHash() the way «Інша пісня» does
+  const s = window.LUMA_SONG;
+  const song = {...structuredClone(s), id: 'aaaaaaaaaaaaaaaaaaaa', sourceId: 'SWAPPED-SONG-SOURCE-ID'};
+  const pack = {schema: 'luma.pack.v1', song, assets: window.LUMA_ASSETS};
+  window.__pack = JSON.stringify(pack);
+});
+const packText = await p.evaluate(() => window.__pack);
+await p.setInputFiles('#importFile', {name: 'other.luma.json', mimeType: 'application/json', buffer: Buffer.from(packText)});
+await p.waitForFunction(() => window.Luma.test.history.songHash() === 'SWAPPED-SONG-SOURCE-ID', null, {timeout: 8000});
+await p.waitForFunction(() => window.Luma.test.history.runs().length === 0, null, {timeout: 8000});
+assert(await hist('H.songHash()') !== oldHash, 'the imported song brings its own key');
+assert((await hist('H.runs().length')) === 0, 'a song with no attempts yet opens on an empty history, not the previous song’s');
+const fresh = await sing({a: win.a, b: win.b});
+const afterSwap = await p.evaluate(() => window.Luma.test.history.exportPayload(true).then(d => ({
+  row: d.songs.find(s => s.songHash === 'SWAPPED-SONG-SOURCE-ID'),
+  traces: d.traces.map(t => t.runId), runs: d.runs.length})));
+assert(afterSwap.row && afterSwap.row.runCount === 1, 'the new song’s row counts its own attempts ' + JSON.stringify(afterSwap.row && {runCount: afterSwap.row.runCount, firstRunAt: afterSwap.row.firstRunAt}));
+assert(afterSwap.row.firstRunAt === afterSwap.row.lastRunAt, 'and dates them by its own first and last attempt');
+assert(afterSwap.row.maps.length === 1, 'and lists only the map version it was sung against ' + JSON.stringify(afterSwap.row.maps.map(m => m.mapVersion)));
+const lost = beforeSwap.traces.filter(id => !afterSwap.traces.includes(id));
+assert(lost.length === 0, 'singing in the new song evicts no trace from the previous one ' + JSON.stringify(lost));
+assert(afterSwap.runs === beforeSwap.runs + 1, 'and adds exactly one attempt to the store');
 assert(logs.length === 0, 'console clean ' + JSON.stringify(logs));
 await p.screenshot({path: process.env.LUMA_SHOT || 'shot_history.png'});
 await b.close();

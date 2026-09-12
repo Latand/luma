@@ -93,6 +93,37 @@ await p.locator('#shadowBtn').click(); await p.waitForTimeout(200);
 assert((await hist('H.shadow()')) === null && (await p.locator('#shadowBtn').getAttribute('aria-pressed')) === 'false', 'the switch turns the shadow off');
 await p.locator('#shadowBtn').click(); await p.waitForTimeout(300);
 assert((await hist('H.shadow()')) !== null, 'the switch turns it back on');
+// The octave is out of the comparison key, so a record sung an octave away has to follow the target, not stay behind.
+// Measured as light added inside the plot rectangle with the switch on against the same frame with it off.
+const plotLight = () => p.evaluate(() => {
+  const T = window.Luma.test, pl = T.plot(), chart = document.getElementById('chart'), DPR = T.dpr();
+  T.draw();
+  const copy = document.createElement('canvas'); copy.width = chart.width; copy.height = chart.height;
+  const g = copy.getContext('2d', {willReadFrequently: true}); g.drawImage(chart, 0, 0);
+  const d = g.getImageData(Math.round(pl.left * DPR), Math.round(pl.top * DPR),
+    Math.max(1, Math.round((pl.right - pl.left) * DPR)), Math.max(1, Math.round((pl.bottom - pl.top) * DPR))).data;
+  let sum = 0; for (let i = 0; i < d.length; i += 4) sum += d[i] + d[i + 1] + d[i + 2];
+  return sum;
+});
+const shadowInk = async () => {
+  await p.waitForFunction(() => window.Luma.test.history.shadow() !== null, null, {timeout: 5000});
+  const on = await plotLight();
+  await p.locator('#shadowBtn').click(); await p.waitForTimeout(200);
+  const off = await plotLight();
+  await p.locator('#shadowBtn').click();
+  await p.waitForFunction(() => window.Luma.test.history.shadow() !== null, null, {timeout: 5000});
+  return on - off;
+};
+const straight = await shadowInk();
+assert(straight > 0, 'the shadow puts ink on the plot at the octave it was sung in (' + straight + ')');
+for (const oct of [-12, 12]) {
+  await p.evaluate(o => { const sel = document.getElementById('octave'); sel.value = String(o); sel.dispatchEvent(new Event('change')); }, oct);
+  await p.waitForTimeout(400);
+  const shifted = await shadowInk();
+  assert(shifted > 0, 'the shadow follows the vocal octave to ' + oct + ' instead of falling off the plot (' + shifted + ')');
+}
+await p.evaluate(() => { const sel = document.getElementById('octave'); sel.value = '0'; sel.dispatchEvent(new Event('change')); });
+await p.waitForTimeout(300);
 
 // ── 4 · days, not open tabs: the streak needs two minutes under a target, and the day ends at 04:00 ────────────
 await p.evaluate(() => window.Luma.test.history.clearSong());

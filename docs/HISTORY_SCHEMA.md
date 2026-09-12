@@ -41,6 +41,10 @@ IndexedDB stores structured clones, so the typed arrays go in as they are — no
 - `localDay` is the local date with its boundary at **04:00**, so singing at half past midnight belongs to the evening
   that just passed.
 
+Opening another song ("Інша пісня") swaps `songHash` under the tab, so the in-memory view of the history is reset and
+read again for the new song before anything else happens. Otherwise the next attempt would write the previous song's
+runs into the new song's row and thin the previous song's traces against a list it does not belong to.
+
 ## Keys
 
 ```
@@ -91,8 +95,9 @@ Four bytes a frame instead of 96 000 a second:
 - **Attempt summaries are never deleted.** Ten attempts a day is about 4 MB a year.
 - **Traces** are kept for every standing record (song, each phrase, each exercise) and for the last 20 attempts of the
   song. The rest drop out as attempts leave the twenty; the summary and the score stay.
-- **Ceiling: 250 MB in this origin.** Past it, the oldest traces that hold no record fall away first and the footer of
-  the Прогрес tab says so and asks for an export. Scores are never touched by the ceiling.
+- **Ceiling: 250 MB in this origin.** Past it, the oldest traces that hold no record fall away first, a hundred at a
+  time, and the browser's own storage estimate decides when there is room again and the thinning stops. The footer of
+  the Прогрес tab says how many went and asks for an export. Scores are never touched by the ceiling.
 - A `QuotaExceededError` never loses the attempt from the tab: it stays in the list marked «не збережено в історію», and
   the footer of the Прогрес tab says what to do.
 - `navigator.storage.persist()` is requested once, on the first write. If the browser says no, the footer says the
