@@ -2,8 +2,8 @@
 import {launch, assert} from './lib.mjs';
 const b=await launch(),p=await b.newPage({viewport:{width:390,height:844}});
 const url=process.env.LUMA_STUDIO_URL||'http://127.0.0.1:8795/';
-let offline=false,jobs=[];
-await p.route('**/status',r=>offline?r.abort('failed'):r.fulfill({json:{jobs,songs:[]}}));
+let offline=false,jobs=[],songs=[];
+await p.route('**/status',r=>offline?r.abort('failed'):r.fulfill({json:{jobs,songs}}));
 await p.goto(url);await p.keyboard.press('Tab');
 assert(await p.evaluate(()=>document.activeElement.id)==='addSong','adding a song is the first keyboard action');
 assert(await p.evaluate(()=>{const lib=document.getElementById('lib'),form=document.getElementById('uploadPanel');return !!(lib.compareDocumentPosition(form)&Node.DOCUMENT_POSITION_FOLLOWING)&&!form.open;}),'the first screen is for singing: the library sits above the folded upload form');
@@ -24,6 +24,15 @@ assert(await p.locator('#connectionNotice').isVisible(),'offline state is separa
 offline=false;await p.locator('#refreshBtn').click();await p.waitForFunction(()=>document.querySelector('#connectionNotice').hidden);
 assert((await p.locator('#lib').textContent()).includes('Тут поки немає'),'polling recovers to an explicit empty state');
 assert(await p.evaluate(()=>document.getElementById('jobsSection').hidden),'an empty queue takes no room on the page');
+// A library card answers what a singer picks by; the file size and the build time wait behind «Подробиці».
+songs=[{name:'Luma_Song.html',title:'Пісня',artist:'Виконавець',duration:280,bytes:27262976,mtime:'2026-09-11 20:36'}];
+await p.evaluate(()=>refresh());await p.waitForSelector('#lib .song');
+const card=p.locator('#lib .song').first();
+assert((await card.locator('.facts').textContent()).includes('4:40')&&(await card.locator('.artist').textContent())==='Виконавець','the card leads with duration and artist');
+assert(!(await card.locator('.facts, .title, .artist').allTextContents()).join(' ').includes('МБ'),'megabytes are not on the face of the card');
+assert(!await card.locator('.meta').isVisible(),'the file details stay folded');
+await card.locator('summary').click();
+assert((await card.locator('.meta').textContent()).includes('26 МБ'),'«Подробиці файлу» opens the size and the build time');
 jobs=[{id:'j1',title:'Пісня',artist:'Виконавець',state:'running',started:Date.now()/1000-30,stage:{n:2,total:6,name:'Розділяємо доріжки',progress:.4,eta:60}}];
 await p.evaluate(()=>refresh());await p.waitForFunction(()=>!document.querySelector('#jobsSection').hidden);
 assert((await p.locator('#jobsSection').textContent()).includes('Розділяємо доріжки'),'a song being prepared brings the queue back with its stage');

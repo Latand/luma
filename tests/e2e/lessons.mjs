@@ -54,7 +54,8 @@ const browser = await launch(['--autoplay-policy=no-user-gesture-required']);
   await page.waitForSelector('#lessonsSection .lesson');
   const shown = await page.evaluate(() => [...document.querySelectorAll('#lessons .lesson')].map(card => ({
     title: card.querySelector('.title').textContent, level: card.querySelector('.chip span').textContent,
-    goal: card.querySelector('.goal').textContent, description: card.querySelector('p').textContent,
+    goal: card.querySelector('.goal').textContent, facts: card.querySelector('.facts').textContent,
+    description: card.querySelector('details p').textContent, folded: !card.querySelector('details').open,
     meta: card.querySelector('.meta').textContent, href: card.querySelector('a.primary').getAttribute('href'),
     action: card.querySelector('a.primary').textContent})));
   const order = defs.lessons.map(l => l.title);
@@ -66,8 +67,12 @@ const browser = await launch(['--autoplay-policy=no-user-gesture-required']);
     assert(card.goal === lesson.summary && card.description === lesson.description, `${lesson.id}: the Ukrainian description comes from the definitions`);
     assert(/октав/i.test(card.description), `${lesson.id}: the description points at the vocal octave setting`);
     assert(card.href === '/song/' + lesson.file && /Відкрити/.test(card.action), `${lesson.id}: the card opens the trainer`);
-    assert(/\d+ BPM/.test(card.meta) && /\d+ нот/.test(card.meta), `${lesson.id}: tempo and size are on the card (${card.meta})`);
+    assert(/\d+ BPM/.test(card.meta) && /\d+ нот/.test(card.meta), `${lesson.id}: tempo and size are one fold away (${card.meta})`);
+    assert(card.folded && /\d:\d\d/.test(card.facts), `${lesson.id}: the face of the card is one sentence, a level and a length (${card.facts})`);
   }
+  // «Як виконувати» is the only way to the full method text, so it has to open.
+  await page.locator('#lessons .lesson summary').first().click();
+  assert(await page.locator('#lessons .lesson details p').first().isVisible(), 'the full description opens on demand');
   const lib = await page.locator('#lib').textContent();
   assert(/Тут поки немає/.test(lib), 'a fresh library still reads as empty: lessons are not songs you added');
   assert(await page.evaluate(() => document.querySelector('#lessonsSection').compareDocumentPosition(document.querySelector('#lib')) & Node.DOCUMENT_POSITION_FOLLOWING) > 0, '«Уроки» sits above the library');
