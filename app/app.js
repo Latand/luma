@@ -17,7 +17,7 @@ function levelLabel(opt){return opt.level==='custom'?'свій коридор':(
 // Signed distance in cents; on the easy level the octave is forgiven (distance folds into ±6 semitones).
 function centsOff(m,refM,opt){let d=m-refM;if(opt.octaveFree){d=((d%12)+12)%12;if(d>6)d-=12;}return d*100;}
 const LOOP_LANE=24;
-const s={ctx:null,stream:null,capture:null,micSource:null,worker:null,micGeneration:0,busy:false,cancel:0,mode:'idle',transport:null,sources:[],endTimer:null,nextTimer:null,bufs:new Map(),gains:null,pos:song.initialTime||0,range:{a:0,b:song.duration},rangeId:0,history:[],current:null,takes:[],takeCounter:0,pending:new Map(),awaitFinish:false,trace:null,live:null,verified:[],dirty:true,raf:0,lastDraw:0,lastFrame:0,lastUI:0,rangeLo:48,rangeHi:76,liveSmooth:null,lastSmoothT:0,toastTimer:0,edit:null,computeMs:0,windowMs:0,unsaved:false,undoPunch:null,busyFor:'',scrub:null,lyricKey:'',resumeAt:null,tlDrag:null,seekTimer:0};
+const s={ctx:null,stream:null,capture:null,micSource:null,worker:null,micGeneration:0,busy:false,cancel:0,mode:'idle',transport:null,sources:[],endTimer:null,nextTimer:null,bufs:new Map(),gains:null,pos:song.initialTime||0,range:{a:0,b:song.duration},rangeId:0,history:[],current:null,takes:[],takeCounter:0,pending:new Map(),awaitFinish:false,trace:null,live:null,verified:[],dirty:true,raf:0,lastDraw:0,lastFrame:0,lastUI:0,rangeLo:48,rangeHi:76,liveSmooth:null,lastSmoothT:0,toastTimer:0,edit:null,computeMs:0,windowMs:0,unsaved:false,undoPunch:null,busyFor:'',scrub:null,lyricKey:'',resumeAt:null,tlDrag:null,seekTimer:0,dense:false,stageH:0};
 const canvas=$('chart'),g=canvas.getContext('2d',{alpha:false}),tl=$('timeline'),tg=tl.getContext('2d',{alpha:false});let W=1,H=1,DPR=1,TW=1,TH=1;
 const reduced=matchMedia('(prefers-reduced-motion: reduce)');
 function fmt(t){t=Math.max(0,Number.isFinite(t)?t:0);return String(Math.floor(t/60)).padStart(2,'0')+':'+String(Math.floor(t%60)).padStart(2,'0');}
@@ -145,7 +145,8 @@ function populateSong(){
  baseNotes=structuredClone(song.notes);loadEdits();setRangeScale();sync();
 }
 function sync(){
- s.dirty=true;$('lyricBand').hidden=!prefs.lyrics||!song.lyrics.length;measureStage();const active=s.mode!=='idle',singing=s.mode==='singing';$('singBtn').disabled=s.awaitFinish||(s.busy&&s.busyFor!=='sing');$('singBtn').classList.toggle('recording',singing);$('singLabel').textContent=s.busy?(s.busyFor==='sing'?'Скасувати':'Співати'):singing?'Завершити':'Співати';$('singBtn').querySelector('use').setAttribute('href',singing?'#i-stop':'#i-mic');
+ s.dirty=true;$('lyricBand').hidden=!prefs.lyrics||!song.lyrics.length;
+ fitStage();measureStage();const active=s.mode!=='idle',singing=s.mode==='singing';$('singBtn').disabled=s.awaitFinish||(s.busy&&s.busyFor!=='sing');$('singBtn').classList.toggle('recording',singing);$('singLabel').textContent=s.busy?(s.busyFor==='sing'?'Скасувати':'Співати'):singing?'Завершити':'Співати';$('singBtn').querySelector('use').setAttribute('href',singing?'#i-stop':'#i-mic');
  $('listenBtn').disabled=s.busy||s.awaitFinish;$('listenLabel').textContent=s.busy&&s.busyFor==='listen'?'Готую…':singing?'Стоп':active?'Пауза':'Слухати';$('listenBtn').setAttribute('aria-label',singing?'Зупинити запис':active?'Пауза':'Слухати пісню');$('listenIcon').setAttribute('href',singing?'#i-stop':active?'#i-pause':'#i-play');$('stopBtn').disabled=!active&&!s.busy&&!s.awaitFinish;
  for(const id of ['phraseSelect','prevPhrase','nextPhrase','octave','latency','tolerance','rangeA','rangeB','applyRange','editBtn','applyEdit','importBtn','exportTarget','saveVerify','resetEdits','revokeVerify'])$(id).disabled=active||s.busy||s.awaitFinish;
  $('speedSelect').disabled=s.busy||s.awaitFinish||s.mode==='singing'||s.mode==='review';
@@ -359,25 +360,35 @@ function resize(){const r=$('chartWrap').getBoundingClientRect(),q=$('timelineWr
 // The readout, the lyric band and the rail are flow items inside the stage; the plot takes what is left between them.
 // Measured on layout changes only (resize and sync), never per frame, so the piano roll can never be drawn under them.
 function measureStage(){const box=$('chartWrap').getBoundingClientRect();const below=el=>el&&!el.hidden?el.getBoundingClientRect().bottom-box.top:0;
+ const dense=box.height<520||innerWidth<=720;if(dense!==s.dense){s.dense=dense;$('chartWrap').dataset.dense=dense?'1':'0';}
  s.headH=Math.max(below($('stageHead')),below($('lyricBand')));const rail=$('stageRail');s.railH=rail?box.bottom-rail.getBoundingClientRect().top:0;}
-function bounds(){const narrow=W<720,axis=narrow?22:26,left=narrow?42:56;
- const top=Math.min((s.headH||0)+26,H*.55),bottom=Math.max(top+80,H-(s.railH||0)-axis);
+// Phones, and phones held sideways: the page scrolls, so the stage takes exactly the height that leaves «Співати» on the first
+// screen — measured, not guessed, because the title, the hint banner and the browser chrome all move the space above it.
+// Never called from the resize observer: it writes a length, and the observer only reads.
+function fitStage(){const app=document.querySelector('.app');
+ if(!matchMedia('(max-width:720px),(max-height:560px)').matches){if(s.stageH){s.stageH=0;app.style.removeProperty('--stage-h');}return;}
+ const box=$('chartWrap').getBoundingClientRect(),btn=$('singBtn').getBoundingClientRect();
+ const h=Math.round(clamp(innerHeight-(box.top+scrollY)-(btn.bottom-box.bottom)-6,200,760));
+ if(Math.abs(h-(s.stageH||0))>1){s.stageH=h;app.style.setProperty('--stage-h',h+'px');}}
+function bounds(){const narrow=W<720||s.dense,axis=narrow?22:26,left=narrow?42:56;
+ // a folded head gets a thin lane instead of the 26 px the ЗАРАЗ caption needs
+ const top=Math.min((s.headH||0)+(s.dense?12:26),H*.55),bottom=Math.max(top+40,H-(s.railH||0)-axis);
  return{left,right:W-16,top,bottom,laneTop:top-6};}
 // Words ride the melody: each word sits just above the target pitch at its own moment; colliding labels stack upward, none is dropped.
 function drawWords(t,v,x,y,b,opt){
- if(!prefs.lyrics||!song.lyrics.length)return;const font=(W<720?'12px ':'13px ')+getComputedStyle(document.body).getPropertyValue('--sans');g.font=font;g.textAlign='left';g.textBaseline='alphabetic';
- const placed=[];const rowH=17;
+ if(!prefs.lyrics||!song.lyrics.length)return;const font=(W<720?'600 14px ':'600 16px ')+getComputedStyle(document.body).getPropertyValue('--sans');g.font=font;g.textAlign='left';g.textBaseline='alphabetic';
+ const placed=[];const rowH=W<720?19:22;
  for(const line of song.lyrics){if(line.a>v.b)break;if(line.b<v.a)continue;
   for(const w of line.words){if(w.a>v.b||w.b<v.a-.5)continue;const xx=x(w.a),tw=g.measureText(w.w).width;
    // anchor: median target pitch inside the word, else the nearest target within 0.6 s, else the plot centre line
    const ms=[];for(let q=w.a;q<=w.b+1e-6;q+=.04){const r=targetAt(q,opt);if(r)ms.push(r.m);}
    let m=null;if(ms.length){ms.sort((p,q)=>p-q);m=ms[ms.length>>1];}else{for(let d=.04;d<=.6&&m===null;d+=.04){const r=targetAt(w.a-d,opt)||targetAt(w.b+d,opt);if(r)m=r.m;}}
-   let yy=(m===null?(b.top+b.bottom)/2:clamp(y(m),b.top+rowH,b.bottom))-9;
+   let yy=(m===null?(b.top+b.bottom)/2:clamp(y(m),b.top+rowH,b.bottom))-11;
    for(let k=0;k<6;k++){const hit=placed.some(p=>xx<p.x1+6&&xx+tw>p.x0-6&&Math.abs(yy-p.y)<rowH-1);if(!hit)break;yy-=rowH;}
    if(yy<b.top+4)yy=b.top+4;placed.push({x0:xx,x1:xx+tw,y:yy});
    const on=t>=w.a&&t<w.b+.08,past=t>=w.b;g.globalAlpha=(w.c??1)<.5?.72:1;
-   g.fillStyle='#0c111ae8';g.beginPath();g.roundRect(xx-4,yy-12,tw+8,16,4);g.fill();// halo so the word stays legible over the lines
-   g.fillStyle=on?'#f2f8ff':past?'#a6b3c8':'#c6d0e0';g.fillText(w.w,xx,yy);if(on){g.fillStyle='#a1eed8';g.fillRect(xx,yy+3,tw,1.6);}
+   g.fillStyle='#0c111aec';g.beginPath();g.roundRect(xx-5,yy-(W<720?13:15),tw+10,W<720?18:21,5);g.fill();// halo so the word stays legible over the lines
+   g.fillStyle=on?'#f2f8ff':past?'#a6b3c8':'#c6d0e0';g.fillText(w.w,xx,yy);if(on){g.fillStyle='#a1eed8';g.fillRect(xx,yy+3.5,tw,1.8);}
    g.globalAlpha=1;}}
 }
 function view(t){const span=W<550?7:W<1100?10:12,behind=span*.34;return{a:t-behind,b:t+span-behind,span};}
@@ -432,7 +443,6 @@ function draw(t){
    else if(missed){fill='#c9707a14';stroke='#dd8f97';dash=kind==='silent'?[2,3]:[];glyph='×';ink='#ffdbdf';}
    else{fill=ok?'#b4a2eb3a':'#9a94b41c';stroke=ok?'#c9baf4':'#aaa4c4';dash=ok?[]:[4,3];ink=ok?'#f2edff':'#dcd8ea';
     if(cur&&curState===1){fill=HIT_CUR;stroke='#d8fff4';ink=HIT_INK;}else if(cur&&curState===2){fill='#c9707a45';stroke='#e6a0a8';ink='#ffdbdf';}}
-   // a spent note recedes, but not so far that its own name stops reading against it
    g.globalAlpha=n.b<t&&!kind?.75:1;
    g.beginPath();g.roundRect(xx,yy-barH/2,ww,barH,Math.min(4,ww/2,barH/2));g.fillStyle=fill;g.fill();
    if(missed){g.fillStyle=missHatch();g.fill();}
@@ -452,7 +462,6 @@ function draw(t){
   // Hit and miss stay readable in contour mode too: a filled disc against a dashed ring, each with its own glyph.
   let lastMark=-Infinity;g.textAlign='center';g.textBaseline='middle';
   for(const n of song.notes){if(n.a>v.b)break;if(n.b<v.a||n.ignored)continue;const kind=noteKind(sc,n.id),xx=x((n.a+n.b)/2);if(!kind||xx-lastMark<21)continue;lastMark=xx;
-   // the marker sits under its note, or above it when the plot floor is close; the clamp is a last resort, not the usual place
    const yv=y(n.m+opt.octave),yy=yv+19<=b.bottom-10?yv+19:yv-19>=b.top+10?yv-19:clamp(yv,b.top+10,b.bottom-10),hit=kind==='hit';
    g.beginPath();g.arc(xx,yy,8,0,Math.PI*2);
    if(hit){g.fillStyle='#a1eed8';g.fill();}
@@ -477,8 +486,9 @@ function draw(t){
  }
  drawWords(t,v,x,y,b,opt);
  g.restore();
- g.strokeStyle='#dff0ea52';g.lineWidth=1;g.setLineDash([2,5]);g.beginPath();g.moveTo(nowX,b.laneTop-8);g.lineTo(nowX,b.bottom);g.stroke();g.setLineDash([]);
- g.fillStyle='#a9c8c1';g.font='600 11px '+sans;g.letterSpacing='1.4px';g.textAlign='center';g.textBaseline='middle';g.fillText('ЗАРАЗ',nowX,b.laneTop-15);g.letterSpacing='0px';
+ g.strokeStyle='#dff0ea52';g.lineWidth=1;g.setLineDash([2,5]);g.beginPath();g.moveTo(nowX,b.laneTop-(s.dense?0:8));g.lineTo(nowX,b.bottom);g.stroke();g.setLineDash([]);
+ // the caption above the playhead is the first thing a short stage gives up: the dashed line already says where now is
+ if(!s.dense){g.fillStyle='#a9c8c1';g.font='600 11px '+sans;g.letterSpacing='1.4px';g.textAlign='center';g.textBaseline='middle';g.fillText('ЗАРАЗ',nowX,b.laneTop-15);g.letterSpacing='0px';}
  drawTimeline(t);
 }
 function pointNear(a,t,tol){let lo=0,hi=a.length;while(lo<hi){const m=(lo+hi)>>1;if(a[m].songT<t)lo=m+1;else hi=m;}let p=a[Math.min(lo,a.length-1)];const prev=a[lo-1];if(prev&&(!p||Math.abs(prev.songT-t)<Math.abs(p.songT-t)))p=prev;return p&&Math.abs(p.songT-t)<=tol?p:null;}
@@ -506,7 +516,7 @@ function updateReadout(t){
  const live=p&&p.m!==null&&p.m!==undefined&&(review||s.ctx&&s.ctx.currentTime-(p.t||0)<.23);
  $('liveNote').innerHTML=noteHTML(live?p.m:null);$('liveNote').classList.toggle('empty',!live);$('liveDesc').textContent=live?words[(Math.round(p.m)%12+12)%12]+(review?' · запис':''):review?'Тут ти мовчав':s.stream?'Заспівай зручну ноту':'Час заспівати';$('liveFreq').textContent=live?(p.f.toFixed(1)+' Гц'):review?'Спроба '+String(s.trace.take.id).padStart(2,'0'):s.stream?'Слухаю мікрофон':'Мікрофон вимкнено';
  const opt=effective(),target=targetAt(t,opt),ref=p?.songT!==undefined?targetAt(p.songT,opt):target;$('targetNote').textContent=target?name(target.m):'—';let text='Тут ціль не визначена',delta=null;if(target)text=target.ok?'Слухай. Потім повтори.':'Невпевнена ціль';if(live&&ref){delta=centsOff(p.raw??p.m,ref.m,opt);text=(ref.ok?'':'≈ ')+(delta>0?'+':'')+Math.round(delta)+' ¢'+(opt.octaveFree&&Math.abs((p.raw??p.m)-ref.m)>=6?' · інша октава':'')+(!ref.verified?' · чернетка':'');}
- const inTol=delta!==null&&Math.abs(delta)<=opt.tolerance;$('deviation').textContent=text;$('deviation').style.color=delta===null?'#94a0b3':inTol?'#a1eed8':'#d99aa2';$('needle').style.opacity=delta===null?0:1;$('needle').style.left=clamp(50+(delta||0)/2,0,100)+'%';$('needle').style.background=delta!==null&&!inTol?'#d47f88':'#a1eed8';$('liveNote').classList.toggle('miss',delta!==null&&!inTol&&!!ref);
+ const inTol=delta!==null&&Math.abs(delta)<=opt.tolerance;$('deviation').textContent=text;$('deviation').style.color=delta===null?'#94a0b3':inTol?'#a1eed8':'#d99aa2';$('needle').style.opacity=delta===null?0:1;$('needle').style.setProperty('--n',clamp(.5+(delta||0)/200,0,1));$('needle').style.background=delta!==null&&!inTol?'#d47f88':'#a1eed8';$('liveNote').classList.toggle('miss',delta!==null&&!inTol&&!!ref);
  $('level').style.width=p&&!review?clamp((p.db+60)/60*100,0,100)+'%':'0%';$('level').style.background=p?.peak>.99?'#f3a1b5':'#a1eed8';
  // live target-match: hit frames ÷ frames with any drawn target, tolerance from the attempt itself
  const sc=activeScore(),pct=scorePct(sc),pe=$('matchPct'),de=$('matchDetail');$('scoreLabel').textContent=sc?'Попередній збіг із мелодією':'Збіг із мелодією';pe.classList.remove('good','low');
@@ -588,6 +598,7 @@ window.addEventListener('keydown',e=>{if(e.ctrlKey||e.metaKey||e.altKey||e.repea
  else if(e.code==='KeyA')markRange('a');else if(e.code==='KeyB')markRange('b');else if(e.code==='KeyL'){$('loopBtn').click();}else if(e.code==='KeyV'){$('vocalBtn').click();}});
 window.addEventListener('beforeunload',e=>{if(s.unsaved||s.mode==='singing'){e.preventDefault();e.returnValue='';}});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){if(s.raf)cancelAnimationFrame(s.raf);s.raf=0;if(s.mode!=='idle'){prefs.loop=false;stopTransport('hidden');toast('Вкладку приховано — відтворення зупинено.');}}else{s.dirty=true;requestDraw();}});
+addEventListener('resize',fitStage);
 new ResizeObserver(resize).observe($('chartWrap'));new ResizeObserver(resize).observe($('timelineWrap'));
 function silentWav(seconds,rate=48000){const n=Math.round(seconds*rate),b=new ArrayBuffer(44+n*2),v=new DataView(b);const text=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i));};text(0,'RIFF');v.setUint32(4,36+n*2,true);text(8,'WAVE');text(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,rate,true);v.setUint32(28,rate*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);text(36,'data');v.setUint32(40,n*2,true);return new Blob([b],{type:'audio/wav'});}
 window.Luma={diagnostics:()=>({mode:s.mode,busy:s.busy,pending:s.awaitFinish,time:now(),range:{...s.range},takeCount:s.takes.length,takes:s.takes.map(t=>({id:t.id,duration:t.duration,samples:t.duration*t.sampleRate,sampleRate:t.sampleRate,points:t.points.length,stats:t.stats,match:scorePct(t.score),frames:t.score.frames.length})),mic:!!s.stream,frequency:s.current?.f??null,computeMs:s.computeMs,windowMs:s.windowMs,contextState:s.ctx?.state,bufferDurations:[...s.bufs].map(([k,b])=>({speed:k,back:b.back.duration,fore:b.fore.duration}))}),targetAt:t=>targetAt(t),song:()=>({title:song.title,duration:song.duration,metrics:song.metrics,notes:song.notes.length,phrases:song.phrases.length,lyrics:song.lyrics.length}),
@@ -603,5 +614,5 @@ window.Luma={diagnostics:()=>({mode:s.mode,busy:s.busy,pending:s.awaitFinish,tim
    if(s.mode!=='idle')return false;const meta=takeMeta(a,b,speed),id=meta.id;if(!s.ctx)s.ctx={currentTime:0,state:'running',sampleRate:48000,resume(){},get _fake(){return true;}};const when=s.ctx.currentTime;s.transport={token:++s.cancel,when,offset:a,end:b,speed,loop:null};s.mode='singing';s.history=[];s.live=newScore(meta);s.pending.set(id,meta);sync();return {id,when};},
   fakeTick:(ctxTime)=>{if(s.ctx&&'_fake' in s.ctx)s.ctx.currentTime=ctxTime;const t=now();if(s.mode==='singing'&&s.live&&s.transport)scoreAdvance(s.live,s.history,Math.min(t-.18*s.transport.speed,s.transport.end));draw(t);updateReadout(t);return t;},
   fakeFinish:()=>{const id=s.takeCounter,meta=s.pending.get(id);if(!meta)return null;const pts=s.history.map(p=>({t:(p.songT-meta.a)/meta.speed,f:p.f,confidence:p.confidence,db:p.db,rms:p.rms??0,peak:p.peak??0}));s.pending.delete(id);const duration=(s.pos=now())-meta.a;s.transport=null;s.mode='idle';s.live=null;const m={id,blob:silentWav(duration/meta.speed),sampleRate:48000,duration:duration/meta.speed,start:0,end:duration/meta.speed,reason:'end',points:pts,gap:0};const t=storeTake(meta,m);sync();return {id:t.id,pct:scorePct(t.score)};}}};
-populateSong();resize();setRangeScale();updateReadout(s.pos);
+populateSong();fitStage();resize();setRangeScale();updateReadout(s.pos);
 })();

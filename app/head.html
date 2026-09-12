@@ -21,11 +21,11 @@ button:hover:not(:disabled){filter:brightness(1.13)}
 button:active:not(:disabled){transform:translateY(.5px)}
 button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible,summary:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--mint);outline-offset:3px}
 button,input{-webkit-tap-highlight-color:transparent}
+kbd{font:12px var(--mono);color:#8e9db3}
 button svg,.icon{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
 [hidden]{display:none!important}
 button[aria-pressed=true]{color:var(--mint);border-color:#a1eed840;background:#a1eed80d}
 ::selection{background:#4c4070;color:#fff}
-kbd{font:12px var(--mono);color:#8e9db3}
 .app{display:flex;flex-direction:column;height:100dvh;min-height:0}
 .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
 
@@ -73,7 +73,8 @@ kbd{font:12px var(--mono);color:#8e9db3}
 .deviation{font-size:12px;color:var(--mint);min-height:1.45em}
 .micro-tuner{display:block;width:120px;height:11px;position:relative;margin-top:5px;border-bottom:1px solid #b4a2eb33}
 .micro-tuner:before{content:'';height:11px;border-left:1px solid var(--violet);position:absolute;left:50%;top:0}
-.micro-tuner i{display:block;width:7px;height:7px;position:absolute;left:50%;top:4px;border-radius:50%;background:var(--mint);box-shadow:0 0 9px #a1eed866;opacity:0;transform:translateX(-50%);transition:left .08s linear}
+/* --n is the needle's place in the corridor, 0…1; the arithmetic keeps the dot inside the track instead of 3.5 px past its end */
+.micro-tuner i{display:block;width:7px;height:7px;position:absolute;left:calc(3.5px + (100% - 7px)*var(--n,.5));top:4px;border-radius:50%;background:var(--mint);box-shadow:0 0 9px #a1eed866;opacity:0;transform:translateX(-50%);transition:left .08s linear}
 .score{text-align:right;flex:none;max-width:min(330px,40%)}
 .score .lbl{font-size:12px;letter-spacing:1.3px;text-transform:uppercase;color:var(--ink-3);margin-bottom:2px}
 .score .pct{font:500 clamp(42px,4.4vw,60px)/1 var(--sans);letter-spacing:-.05em;color:#eaf1fa;font-variant-numeric:tabular-nums}
@@ -87,11 +88,27 @@ kbd{font:12px var(--mono);color:#8e9db3}
 .lyric-band{padding:10px 18px 0;text-align:center;pointer-events:none}
 .lyric-line{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 2px 14px #0b0e15}
 .lyric-line:empty{visibility:hidden}
-.lyric-line.now{font-size:clamp(17px,1.7vw,21px);line-height:1.35;letter-spacing:-.2px;color:var(--ink-2)}
+.lyric-line.now{font-size:clamp(21px,2.1vw,27px);line-height:1.3;letter-spacing:-.2px;color:var(--ink-2)}
 .lyric-line.now span{transition:color .09s linear}
 .lyric-line.now .past,.lyric-line.now .soon{color:#98a6bc}
 .lyric-line.now .on{color:#f2f8ff;font-weight:600}
-.lyric-line.next{font-size:16px;line-height:1.4;color:#96a4ba;margin-top:3px}
+.lyric-line.next{font-size:19px;line-height:1.35;color:#96a4ba;margin-top:4px}
+
+/* Before the first take there is nothing to meter, so the readout gives way to one sentence (the target note keeps its place).
+   When the stage itself is short — a small laptop, the attempt list open, a phone — the readout folds into a single line and the
+   second lyric line steps aside, so the piano roll keeps the height instead of the head. Both flags are set in measureStage(). */
+.stage[data-dense="1"] .stage-head{padding:9px 16px 0 var(--gutter);gap:16px;align-items:center}
+.stage[data-dense="1"] .readout{align-items:center;gap:12px}
+.stage[data-dense="1"] .voice-meta,.stage[data-dense="1"] .target-meta{display:flex;align-items:baseline;gap:2px 9px;padding-top:0;flex-wrap:wrap}
+.stage[data-dense="1"] .kicker,.stage[data-dense="1"] .deviation{margin:0}
+.stage[data-dense="1"] .big-note{font-size:34px;min-width:62px}
+.stage[data-dense="1"] .readout-sep{margin:0}
+.stage[data-dense="1"] .micro-tuner{width:96px;margin:0;align-self:center}
+.stage[data-dense="1"] .score .detail,.stage[data-dense="1"] .meter{display:none}
+.stage[data-dense="1"] .score .pct{font-size:30px}
+.stage[data-dense="1"] .lyric-band{padding:7px 18px 0}
+.stage[data-dense="1"] .lyric-line.now{font-size:20px}
+.stage[data-dense="1"] .lyric-line.next{font-size:17px;margin-top:2px}
 
 /* ── stage rail: legend on the left, view controls on the right ── */
 .stage-rail{margin-top:auto;display:flex;align-items:center;gap:14px;padding:9px 16px;background:#0b0f17;border-top:1px solid var(--hair);flex-wrap:wrap}
@@ -135,9 +152,8 @@ kbd{font:12px var(--mono);color:#8e9db3}
 
 /* ── strip: waveform, A–B region ── */
 .strip{flex:none;display:flex;gap:12px;align-items:center;padding:8px 16px 10px;background:var(--rail);border-top:1px solid var(--hair);flex-wrap:wrap}
-.timeline{flex:1 0 100%;order:-1}
+.timeline{flex:1 0 100%;order:-1;position:relative;height:52px;cursor:pointer;touch-action:none;min-width:0;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--hair)}
 .range-actions{display:flex;gap:8px;flex-wrap:wrap}
-.timeline{position:relative;height:52px;cursor:pointer;touch-action:none;min-width:0;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--hair)}
 .timeline canvas{display:block;width:100%;height:100%}
 .strip-meta{font:12px var(--mono);color:var(--ink-3);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .strip-meta.on{color:#c6b8f2}
@@ -209,34 +225,36 @@ dialog details{font-size:13px;color:var(--ink-3)}
  :root{--tap:44px;--tap-sm:40px;--gutter:12px}
  .app{height:auto;min-height:100dvh}
  .bar{padding:8px 12px;gap:8px 10px;flex-wrap:wrap}
+ .onboarding{padding:10px 12px}
  .brand{font-size:17px}.brand svg{width:21px;height:21px}
  .song{order:3;flex:1 1 50%;min-width:0}.song b{max-width:52vw;overflow:hidden;text-overflow:ellipsis}
  .quality{order:4;margin-left:auto}.status{display:none}
- .onboarding{padding:10px 12px}
- .stage{flex:none;height:620px;min-height:620px}
- .stage-head{padding:10px 12px 0;gap:9px;flex-direction:column}
- .readout{width:100%;flex-wrap:wrap;gap:4px 12px}
+ .stage{flex:none;height:var(--stage-h,560px);min-height:min(62dvh,330px)}
+ .stage-head,.stage[data-dense="1"] .stage-head{padding:9px 12px 0;gap:6px 12px;flex-wrap:wrap;align-items:center}
+ .readout{width:100%;flex-wrap:wrap;gap:2px 12px}
  .readout-sep{display:none}
- .big-note{font-size:42px;min-width:58px}
- .voice-meta,.target-meta{font-size:12px;padding-top:2px}
- .voice-meta .freq{max-width:18ch}
- .target-meta{flex:1 0 100%;display:flex;align-items:center;gap:4px 10px;flex-wrap:wrap}
- .target-meta .kicker,.deviation{margin:0}
- .micro-tuner{width:96px;margin:0}
- .score{width:100%;max-width:none;text-align:left;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:end;gap:0 12px}
- .score .lbl{grid-column:2;grid-row:1;margin:0 0 7px}
- .score .pct{grid-column:1;grid-row:1;font-size:38px}
- .score .detail{grid-column:1/-1;margin:5px 0 0}
- .meter{grid-column:1/-1;width:148px;margin:7px 0 0}
+ .big-note,.stage[data-dense="1"] .big-note{font-size:36px;min-width:54px}
+ .voice-meta,.target-meta{font-size:12px;padding-top:0}
+ .voice-meta .freq{display:none}
  .mic-state{display:none}
- .scale-control{flex:1 0 100%}
- .scale-control select{flex:1;max-width:220px}
- .lyric-band{padding:10px 12px 0;text-align:left}
- .lyric-line.now{font-size:18px;color:#c8d4e4}
- .lyric-line.next{font-size:16px}
- .stage-rail{padding:8px 12px;gap:8px 10px}
- .legend{gap:6px 12px;width:100%}
- .stage-tools{margin-left:0;width:100%}
+ .target-meta,.stage[data-dense="1"] .target-meta{display:flex;align-items:center;gap:2px 9px;flex-wrap:wrap}
+ .micro-tuner{width:84px;margin:0}
+ .score{max-width:none;display:flex;align-items:baseline;gap:9px;text-align:left}
+ .score .lbl{margin:0}
+ .score .pct,.stage[data-dense="1"] .score .pct{font-size:30px}
+ .score .detail,.meter{display:none}
+ .scale-control>span{display:none}
+ .scale-control select{max-width:104px}
+ .lyric-band,.stage[data-dense="1"] .lyric-band{padding:9px 12px 0;text-align:left}
+ .lyric-line.now,.stage[data-dense="1"] .lyric-line.now{font-size:21px;color:#c8d4e4;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;min-height:2.6em}
+ .lyric-line.next,.stage[data-dense="1"] .lyric-line.next{font-size:18px;margin-top:3px}
+ .stage-rail{padding:7px 12px;gap:8px}
+ .legend{display:none}
+ .stage-tools{margin-left:auto;gap:7px;justify-content:flex-end;min-width:0}
+ .stage-rail .ghost,.stage-rail select,.segmented button{min-height:var(--tap-sm)}
+ .stage-tools .ghost{padding:0 9px}
+ .stage-tools .segmented button{padding:0 10px}
+ .scale-control{gap:6px}
  .countdown b{font-size:56px}
  .transport{padding:10px 12px;gap:8px}
  .primary{min-height:48px;padding:0 16px}
@@ -261,25 +279,32 @@ dialog details{font-size:13px;color:var(--ink-3)}
  .row{flex-direction:column;gap:0}
 }
 
+/* ── the narrowest phones: the rail keeps one row by giving up the scale picker, not by clipping ── */
+@media(max-width:380px){.scale-control{display:none}.stage-tools .ghost{padding:0 8px}}
+
 /* ── phone held sideways: little height, so the readout loses its second rank ── */
 @media(max-height:560px) and (min-width:721px){
  .app{height:auto;min-height:100dvh}
  .onboarding{display:none}
- .stage{flex:none;height:330px;min-height:330px}
- .stage-head{padding:9px 16px 0 var(--gutter);gap:14px}
- .big-note{font-size:36px;min-width:62px}
+ .bar{padding:6px 14px;gap:10px}
+ .stage{flex:none;height:var(--stage-h,300px);min-height:200px}
+ .stage-head,.stage[data-dense="1"] .stage-head{padding:5px 16px 0 var(--gutter);gap:14px}
+ .big-note,.stage[data-dense="1"] .big-note{font-size:28px;min-width:54px}
  .voice-meta .freq,.mic-state,.score .detail,.meter{display:none}
- .score .pct{font-size:34px}
- .target-meta{display:flex;align-items:center;gap:9px}
- .target-meta .kicker,.deviation{margin:0}
+ .score .pct,.stage[data-dense="1"] .score .pct{font-size:26px}
  .micro-tuner{width:84px;margin:0}
- .lyric-band{padding:7px 16px 0}
- .lyric-line.now{font-size:16px}
+ .lyric-band,.stage[data-dense="1"] .lyric-band{padding:5px 16px 0}
+ .lyric-line.now,.stage[data-dense="1"] .lyric-line.now{font-size:16px}
  .lyric-line.next{display:none}
- .stage-rail{padding:6px 14px;gap:8px}
- .legend{gap:11px}
+ .stage-rail{padding:4px 14px;gap:8px}
+ .legend{display:none}
+ .stage-rail .ghost,.stage-rail select,.segmented button{min-height:var(--tap-sm)}
+ .stage-rail .segmented{padding:2px}
  .scale-control>span{display:none}
  .scale-control select{max-width:112px}
+ .transport{padding:6px 14px}
+ .primary{min-height:36px}
+ .secondary{min-height:34px}
  .timeline{height:40px}
  .takes{max-height:30vh}
 }
