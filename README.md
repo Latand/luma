@@ -23,7 +23,8 @@ of your voice, no server after the file is built.
   switch on and your voice is recorded again: review with your own singing and WAV export come back with it.
 - **Progress that lives on this computer.** Every finished attempt goes into a local history by itself — no files to save.
   The Прогрес tab shows the record, the average of the last five attempts, the best of the day, the day streak, a trend
-  over attempts and the weak phrases; a click on a phrase loops it. A pale line under your trace is your own best attempt
+  over attempts and the weak phrases — each bar is that phrase's personal best, with a notch where the last attempt
+  landed, and a click on a phrase loops it. A pale line under your trace is your own best attempt
   at that fragment. Scores are only ever compared within the same level, target map, view and speed; see
   [docs/SCORING.md](docs/SCORING.md) and [docs/HISTORY_SCHEMA.md](docs/HISTORY_SCHEMA.md). Export and import are two
   buttons in the tab's footer.

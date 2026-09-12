@@ -89,7 +89,25 @@ await sing({a: 0, b: dur});
 const full = await hist('H.records().song');
 assert(full && full.match > 9000, 'a pass over the whole song earns the song record ' + JSON.stringify(full));
 
-// ── 6 · export, clear, import, and importing the same file twice ────────────────────────────────────────────────
+// ── 6 · a re-scored attempt exports the ruler it now carries, not the one it was saved with ────────────────────
+{
+  const before = await p.evaluate(() => { const t = window.Luma.test, id = t.takes()[0].id;
+    t.selectTake(id); return {id, pct: t.takes()[0].pct, json: t.history.takeJSON(id).runs[0]}; });
+  await p.evaluate(() => { const sel = document.getElementById('octave'); sel.value = '12'; sel.dispatchEvent(new Event('change')); });
+  await p.waitForTimeout(200);
+  const after = await p.evaluate(id => ({pct: window.Luma.test.takes().find(t => t.id === id).pct,
+    json: window.Luma.test.history.takeJSON(id).runs[0]}), before.id);
+  assert(before.json.octave === 0 && after.json.octave === 12, 'the exported attempt carries the octave it is now scored with');
+  assert(after.json.match === after.pct * 100 && after.pct !== before.pct,
+    'the exported numbers follow the re-scored attempt ' + JSON.stringify({card: after.pct, file: after.json.match, was: before.pct}));
+  assert(after.json.hit <= after.json.target, 'a re-scored export never claims more hits than it has target frames');
+  await p.evaluate(() => { const sel = document.getElementById('octave'); sel.value = '0'; sel.dispatchEvent(new Event('change')); });
+  await p.waitForTimeout(200);
+  const back = await p.evaluate(id => window.Luma.test.history.takeJSON(id).runs[0], before.id);
+  assert(back.match === before.json.match && back.octave === 0, 'putting the octave back restores the original numbers');
+}
+
+// ── 7 · export, clear, import, and importing the same file twice ────────────────────────────────────────────────
 const payload = await p.evaluate(() => window.Luma.test.history.exportPayload(false).then(d => JSON.stringify(d)));
 const parsed = JSON.parse(payload);
 assert(parsed.schema === 'luma.history.v1' && parsed.runs.length === (await hist('H.runs().length')) && parsed.traces.length > 0,
@@ -104,13 +122,29 @@ const restored = await hist('H.rescore(H.runs().find(r => r.hasTrace).id)');
 assert(restored && restored.target === restored.stored.target && restored.hit === restored.stored.hit, 'an imported trace still rebuilds its own numbers');
 const bad = await p.evaluate(() => window.Luma.test.history.importPayload({schema: 'nope'}).then(() => 'accepted', e => e.message));
 assert(/luma.history.v1/.test(bad), 'a foreign file is refused whole with a readable message: ' + bad);
+// every refusal speaks the language of the interface, whatever broke
+const broken = await p.evaluate(d => {
+  const cases = {};
+  const one = (name, mutate) => { const copy = JSON.parse(d); mutate(copy);
+    return window.Luma.test.history.importPayload(copy).then(() => (cases[name] = 'accepted'), e => (cases[name] = e.message)); };
+  return Promise.all([
+    // a fresh id, so the trace is really decoded instead of skipped as an attempt we already have
+    one('base64', c => { c.runs[0].id = 'imported-broken-1'; c.traces[0].runId = 'imported-broken-1'; c.traces[0].segments[0].cents = '!!!not base64!!!'; }),
+    one('songs', c => { delete c.songs[0].songHash; }),
+    one('phrases', c => { c.runs[0].phraseIds = ['x']; c.runs[0].phraseStats = [1, 2, 3, 4]; }),
+  ]).then(() => cases);
+}, payload);
+for (const [name, message] of Object.entries(broken))
+  assert(/[\u0400-\u04FF]/.test(message) && !/Failed to execute|not correctly encoded/.test(message),
+    'a broken file refuses in Ukrainian (' + name + '): ' + message);
+assert((await hist('H.runs().length')) === parsed.runs.length, 'a refused file changes nothing in the store');
 
-// ── 7 · four hundred attempts and the song's history still opens fast ──────────────────────────────────────────
+// ── 8 · four hundred attempts and the song's history still opens fast ──────────────────────────────────────────
 await hist(`H.seedMany(Array.from({length: 400}, (_, i) => ({match: 5000 + i * 10, target: 900, startedAt: new Date(Date.now() - i * 36e5).toISOString()})))`);
 const ms = await hist('H.reloadMs()');
 assert((await hist('H.runs().length')) >= 400 && ms < 50, 'the history of one song opens in ' + ms + ' ms with 400+ attempts');
 
-// ── 8 · the storage ceiling drops traces that hold no record, and never a score ────────────────────────────────
+// ── 9 · the storage ceiling drops traces that hold no record, and never a score ────────────────────────────────
 const beforeCap = await hist('({traces: H.runs().filter(r => r.hasTrace).length, runs: H.runs().length})');
 assert(beforeCap.traces > 1, 'there are traces to thin out ' + JSON.stringify(beforeCap));
 await p.evaluate(() => window.Luma.test.history.enforceCeiling());
@@ -121,7 +155,7 @@ const recordKeptItsTrace = held.song && await hist(`H.runs().find(r => r.id === 
 assert(recordKeptItsTrace, 'the trace of the standing record survives the ceiling');
 assert(/250 МБ/.test(afterCap.note) && /експорт/.test(afterCap.note), 'the footer says what happened and what to do: ' + afterCap.note);
 
-// ── 9 · a full store never loses the attempt from the tab ──────────────────────────────────────────────────────
+// ── 10 · a full store never loses the attempt from the tab ──────────────────────────────────────────────────────
 await p.evaluate(() => {
   const put = IDBObjectStore.prototype.put;
   window.__restorePut = () => { IDBObjectStore.prototype.put = put; };

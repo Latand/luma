@@ -112,8 +112,10 @@ One file, schema `luma.history.v1`:
 - The trainer exports the current song or everything; the same envelope with a single run is what the JSON button on an
   attempt card writes, so one attempt can travel on its own.
 - Import merges by attempt `id`: importing the same file twice changes nothing.
-- Validation is bounded the way `importFile()` already is — counts, string lengths, value ranges — and any violation
-  rejects the whole file with a readable message.
+- Validation is bounded the way `importFile()` already is — counts, string lengths, value ranges, song keys, per-phrase
+  numbers — and any violation rejects the whole file with a readable message before a single record is written. What the
+  validator cannot foresee (a base64 channel that will not decode, a store that refuses a key) is caught too and answered
+  in the language of the interface, with the exception name kept as a hint.
 - Attempts whose `songHash` is not in the library import all the same; they attach themselves the next time that song is
   prepared.
 

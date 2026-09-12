@@ -76,6 +76,9 @@ changed the target; confirming a fragment by ear does not, because `verified` ne
 octave is not in the key: it moves the target and leaves the difficulty alone. The microphone shift is not in it either —
 it is not scored and it is not calibrated.
 
+A re-scored attempt (a changed view or vocal octave) is re-summarized with it, so the card and the JSON it exports never
+mix two rulers; the history keeps the run as it was measured when it finished.
+
 **Song record**: the best match among full passes of one ruler (≥ 95 % of the song's frames with a target, at least 4 s of
 them). **Phrase record**: the best match among attempts that covered ≥ 80 % of that phrase, with at least 1.5 s of target
 in it — without those floors "100 % over 0.3 s" would hold first place forever. Ties go to the smaller median |Δ|, then to

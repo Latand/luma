@@ -44,11 +44,23 @@ await hist(`H.seedMany([{match: 8000, target: ${whole}, phrases: [
   {id: ${phr[1].id}, target: 300, hit: 285, median: 8}]}])`);
 await p.waitForTimeout(200);
 const weak = await hist('H.weak()');
-assert(weak[0].id === phr[0].id && weak[0].last === 40 && weak[1].id === phr[1].id && weak[1].last === 95,
-  'the weakest phrase is first and carries its number ' + JSON.stringify(weak.slice(0, 3)));
-assert(weak.slice(2).every(w => w.last === null), 'phrases nobody has sung yet stand at the bottom');
+assert(weak[0].id === phr[0].id && weak[0].best === 40 && weak[1].id === phr[1].id && weak[1].best === 95,
+  'the weakest phrase is first, ranked by its personal best ' + JSON.stringify(weak.slice(0, 3)));
+assert(weak.slice(2).every(w => w.best === null), 'phrases nobody has sung yet stand at the bottom');
 const rowText = await p.evaluate(() => [...document.querySelectorAll('#progressPanel .prog-bar')].slice(0, 3).map(e => e.textContent));
 assert(rowText[0].includes('40%') && rowText.at(-1).includes('не співано'), 'every bar carries its number, not only its colour ' + JSON.stringify(rowText));
+// the bar draws the personal best and the notch the last attempt, and the title says which is which
+await hist(`H.seedMany([{match: 4000, target: ${whole}, phrases: [{id: ${phr[1].id}, target: 300, hit: 90, median: 70}]}])`);
+await p.waitForTimeout(250);
+const moved = await p.evaluate(label => {
+  const row = [...document.querySelectorAll('#progressPanel .prog-bar')].find(e => e.title.startsWith(label + ' '));
+  const mark = row.querySelector('.mark');
+  return {title: row.title, num: row.querySelector('.num').textContent, fill: row.querySelector('.fill').style.width,
+    mark: mark && mark.style.left, markTitle: mark && mark.title};
+}, phr[1].label);
+assert(moved.num === '95%' && moved.fill === '95%', 'a worse recent attempt does not lower the bar of a phrase you have already nailed ' + JSON.stringify(moved));
+assert(moved.mark === '30%' && /Остання спроба 30%/.test(moved.markTitle), 'the notch marks the last counted attempt ' + JSON.stringify(moved));
+assert(/найкраще 95%/.test(moved.title) && /остання спроба 30%/.test(moved.title), 'the row title names both numbers: ' + moved.title);
 // count every animation frame while the click lands: no note may be drawn outside the vertical range
 const watch = async act => {
   await p.evaluate(() => { const w = window.__watch = {bad: 0, frames: 0};
