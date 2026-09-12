@@ -2,10 +2,15 @@
 import {launch, assert} from './lib.mjs';
 const b=await launch(),p=await b.newPage({viewport:{width:390,height:844}});
 const url=process.env.LUMA_STUDIO_URL||'http://127.0.0.1:8795/';
-let offline=false;
-await p.route('**/status',r=>offline?r.abort('failed'):r.fulfill({json:{jobs:[],songs:[]}}));
+let offline=false,jobs=[];
+await p.route('**/status',r=>offline?r.abort('failed'):r.fulfill({json:{jobs,songs:[]}}));
 await p.goto(url);await p.keyboard.press('Tab');
-assert(await p.evaluate(()=>document.activeElement.id)==='choose','file picker is the first keyboard action');
+assert(await p.evaluate(()=>document.activeElement.id)==='addSong','adding a song is the first keyboard action');
+assert(await p.evaluate(()=>{const lib=document.getElementById('lib'),form=document.getElementById('uploadPanel');return !!(lib.compareDocumentPosition(form)&Node.DOCUMENT_POSITION_FOLLOWING)&&!form.open;}),'the first screen is for singing: the library sits above the folded upload form');
+await p.keyboard.press('Enter');
+await p.waitForFunction(()=>document.getElementById('uploadPanel').open&&document.activeElement.id==='choose');
+assert(true,'the header button unfolds the form and lands on the file picker');
+await p.waitForTimeout(400);   // the panel scrolls itself into view; let that settle before opening the picker
 const [chooser]=await Promise.all([p.waitForEvent('filechooser'),p.keyboard.press('Enter')]);
 await chooser.setFiles({name:'Song - Artist.wav',mimeType:'audio/wav',buffer:Buffer.from('fake audio; network is intercepted')});
 assert(await p.locator('#title').inputValue()==='Song'&&await p.locator('#artist').inputValue()==='Artist','file name fills labelled fields');
@@ -18,5 +23,9 @@ offline=true;await p.locator('#refreshBtn').evaluate(e=>e.click());await p.waitF
 assert(await p.locator('#connectionNotice').isVisible(),'offline state is separate from the empty library');
 offline=false;await p.locator('#refreshBtn').click();await p.waitForFunction(()=>document.querySelector('#connectionNotice').hidden);
 assert((await p.locator('#lib').textContent()).includes('Тут поки немає'),'polling recovers to an explicit empty state');
+assert(await p.evaluate(()=>document.getElementById('jobsSection').hidden),'an empty queue takes no room on the page');
+jobs=[{id:'j1',title:'Пісня',artist:'Виконавець',state:'running',started:Date.now()/1000-30,stage:{n:2,total:6,name:'Розділяємо доріжки',progress:.4,eta:60}}];
+await p.evaluate(()=>refresh());await p.waitForFunction(()=>!document.querySelector('#jobsSection').hidden);
+assert((await p.locator('#jobsSection').textContent()).includes('Розділяємо доріжки'),'a song being prepared brings the queue back with its stage');
 if(process.env.LUMA_SHOT)await p.screenshot({path:process.env.LUMA_SHOT,fullPage:true});
 await b.close();
