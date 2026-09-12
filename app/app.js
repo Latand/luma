@@ -9,7 +9,8 @@ let song=window.LUMA_SONG,assets=window.LUMA_ASSETS,baseNotes=structuredClone(so
 // Difficulty presets: corridor width, how far in time a sung frame may sit from the grid frame, share of a note's frames needed for ✓, and whether octave errors are forgiven.
 const LEVELS={easy:{tolerance:80,slack:.12,ratio:.35,octaveFree:true,label:'легко'},normal:{tolerance:50,slack:.06,ratio:.5,octaveFree:false,label:'звично'},strict:{tolerance:35,slack:.05,ratio:.65,octaveFree:false,label:'точно'}};
 const prefs={gate:-48,octave:0,tolerance:50,level:'normal',latency:0,back:.75,fore:.45,vocal:true,view:'notes',speed:1,loop:false,mic:'',lyrics:true,takesOpen:true,viewDefault:3,audio:false,shadow:true,tab:'takes',audioNotice:false};
-try{const p=JSON.parse(localStorage.getItem('luma.trainer.settings')||'{}');for(const [k,a,b]of[['gate',-70,-25],['octave',-12,12],['tolerance',10,100],['latency',-500,1000],['back',0,1],['fore',0,1]])if(Number.isFinite(p[k]))prefs[k]=clamp(p[k],a,b);if(![-12,0,12].includes(prefs.octave))prefs.octave=0;for(const k of ['lyrics','takesOpen','vocal','audio','shadow','audioNotice'])if(typeof p[k]==='boolean')prefs[k]=p[k];if(p.tab==='takes'||p.tab==='progress')prefs.tab=p.tab;if(p.level in LEVELS||p.level==='custom')prefs.level=p.level;if(prefs.level!=='custom')prefs.tolerance=LEVELS[prefs.level].tolerance;
+let hadSettings=false;// an empty profile has nothing to be told about a change it did not live through
+try{const saved=localStorage.getItem('luma.trainer.settings');hadSettings=!!saved;const p=JSON.parse(saved||'{}');for(const [k,a,b]of[['gate',-70,-25],['octave',-12,12],['tolerance',10,100],['latency',-500,1000],['back',0,1],['fore',0,1]])if(Number.isFinite(p[k]))prefs[k]=clamp(p[k],a,b);if(![-12,0,12].includes(prefs.octave))prefs.octave=0;for(const k of ['lyrics','takesOpen','vocal','audio','shadow','audioNotice'])if(typeof p[k]==='boolean')prefs[k]=p[k];if(p.tab==='takes'||p.tab==='progress')prefs.tab=p.tab;if(p.level in LEVELS||p.level==='custom')prefs.level=p.level;if(prefs.level!=='custom')prefs.tolerance=LEVELS[prefs.level].tolerance;
  // notes became the default on 2026-09-12; a choice saved under an older default is not a choice, so it is not carried over
  if(p.viewDefault===3&&(p.view==='notes'||p.view==='contour'))prefs.view=p.view;}catch(_){}
 function levelOpt(){const L=LEVELS[prefs.level]||LEVELS.normal;return{tolerance:prefs.level==='custom'?prefs.tolerance:L.tolerance,slack:L.slack,ratio:L.ratio,octaveFree:L.octaveFree,level:prefs.level};}
@@ -17,7 +18,7 @@ function levelLabel(opt){return opt.level==='custom'?'свій коридор':(
 // Signed distance in cents; on the easy level the octave is forgiven (distance folds into ±6 semitones).
 function centsOff(m,refM,opt){let d=m-refM;if(opt.octaveFree){d=((d%12)+12)%12;if(d>6)d-=12;}return d*100;}
 const LOOP_LANE=24;
-const s={ctx:null,stream:null,capture:null,micSource:null,worker:null,micGeneration:0,busy:false,cancel:0,mode:'idle',transport:null,sources:[],endTimer:null,nextTimer:null,bufs:new Map(),gains:null,pos:song.initialTime||0,range:{a:0,b:song.duration},rangeId:0,history:[],current:null,takes:[],takeCounter:0,pending:new Map(),awaitFinish:false,trace:null,live:null,verified:[],dirty:true,raf:0,lastDraw:0,lastFrame:0,lastUI:0,rangeLo:48,rangeHi:76,liveSmooth:null,lastSmoothT:0,toastTimer:0,edit:null,computeMs:0,windowMs:0,unsaved:false,undoPunch:null,busyFor:'',scrub:null,lyricKey:'',resumeAt:null,tlDrag:null,seekTimer:0,dense:false,stageH:0,hist:{runs:[],days:[],loaded:false,note:'',persisted:null,stamp:''},shadow:null,shadowSig:'',progressSig:'',trendScope:'',weakAll:false};
+const s={ctx:null,stream:null,capture:null,micSource:null,worker:null,micGeneration:0,busy:false,cancel:0,mode:'idle',transport:null,sources:[],endTimer:null,nextTimer:null,bufs:new Map(),gains:null,pos:song.initialTime||0,range:{a:0,b:song.duration},rangeId:0,history:[],current:null,takes:[],takeCounter:0,pending:new Map(),awaitFinish:false,trace:null,live:null,verified:[],dirty:true,raf:0,lastDraw:0,lastFrame:0,lastUI:0,rangeLo:48,rangeHi:76,liveSmooth:null,lastSmoothT:0,toastTimer:0,edit:null,computeMs:0,windowMs:0,unsaved:false,undoPunch:null,busyFor:'',scrub:null,lyricKey:'',resumeAt:null,tlDrag:null,seekTimer:0,dense:false,stageH:0,hist:{runs:[],days:[],loaded:false,note:'',persisted:null,stamp:'',stale:false},shadow:null,shadowSig:'',progressSig:'',trendScope:'',weakAll:false};
 const canvas=$('chart'),g=canvas.getContext('2d',{alpha:false}),tl=$('timeline'),tg=tl.getContext('2d',{alpha:false});let W=1,H=1,DPR=1,TW=1,TH=1;
 const reduced=matchMedia('(prefers-reduced-motion: reduce)');
 function fmt(t){t=Math.max(0,Number.isFinite(t)?t:0);return String(Math.floor(t/60)).padStart(2,'0')+':'+String(Math.floor(t%60)).padStart(2,'0');}
@@ -364,7 +365,7 @@ function packTrace(points){
   if(!cur||Math.abs(p.t-(cur.t0+cur.cents.length*hop))>hop*.25){cur={t0:p.t,cents:[],conf:[],db:[]};segs.push(cur);}
   cur.cents.push(p.f>0?clamp(Math.round((69+12*Math.log2(p.f/440))*100),-32767,32767):HIST.noPitch);
   cur.conf.push(clamp(Math.round((p.confidence||0)*255),0,255));
-  cur.db.push(clamp(Math.round(Number.isFinite(p.db)?p.db:-120),-128,0));
+  cur.db.push(clamp(Math.round(Number.isFinite(p.db)?p.db:-120),-120,0));
  }
  return {hop,segments:segs.map(sg=>({t0:sg.t0,cents:Int16Array.from(sg.cents),conf:Uint8Array.from(sg.conf),db:Int8Array.from(sg.db)}))};
 }
@@ -489,7 +490,7 @@ function askPersist(){
 }
 // The whole in-memory view of the history, so importing another song cannot leave the previous song's runs behind it:
 // songHash() would then have moved while s.hist.runs had not, and the next attempt would write the mixed list back.
-function resetHistory(){s.hist={runs:[],days:[],loaded:false,note:'',persisted:s.hist.persisted,stamp:''};s.shadow=null;s.shadowSig='';s.progressSig='';}
+function resetHistory(){s.hist={runs:[],days:[],loaded:false,note:'',persisted:s.hist.persisted,stamp:'',stale:false};s.shadow=null;s.shadowSig='';s.progressSig='';}
 // A caption is a statement about the history; when the history moves under the cards, every caption is recounted, and
 // an attempt whose row is no longer stored loses it altogether.
 function refreshCaptions(){
@@ -508,8 +509,8 @@ async function loadHistory(){
   s.hist.runs=(await idbAll('runs','bySong',IDBKeyRange.bound([key,''],[key,'￿']))).sort(byNewest);
   const recent=await idbAll('runs','byDay',IDBKeyRange.lowerBound(dayShift(localDay(Date.now()),-180)));
   s.hist.days=recent.map(r=>({id:r.id,localDay:r.localDay,target:r.target}));
-  s.hist.note='';
- }catch(e){s.hist.note=storeNote(e);}
+  s.hist.note='';s.hist.stale=false;
+ }catch(e){s.hist.note=storeNote(e);s.hist.stale=true;}
  s.hist.stamp=newRunId();refreshShadow();refreshCaptions();renderProgress();sync();
 }
 function byNewest(a,b){return a.startedAt<b.startedAt?1:a.startedAt>b.startedAt?-1:0;}
@@ -574,7 +575,10 @@ function saveRun(take){
  catch(e){take.historyError=true;s.hist.note=readable(e,'Не вдалося підсумувати спробу.');return Promise.resolve(false);}
  if(!historyAvailable()){take.historyError=false;return Promise.resolve(false);}
  const runs=[run,...s.hist.runs.filter(r=>r.id!==run.id)].sort(byNewest);
- const ops=[['songs','put',songEntry(runs)],['runs','put',run],['traces','put',{runId:run.id,songHash:run.songHash,hop:trace.hop,segments:trace.segments}]];
+ // s.hist.runs is what songEntry() counts; when the last read failed it is empty, and a summary row built from it
+ // would claim this attempt is the song's first. The attempt itself is written either way.
+ const ops=[['runs','put',run],['traces','put',{runId:run.id,songHash:run.songHash,hop:trace.hop,segments:trace.segments}]];
+ if(!s.hist.stale)ops.unshift(['songs','put',songEntry(runs)]);
  for(const r of staleTraces(runs)){r.hasTrace=false;ops.push(['runs','put',r],['traces','delete',r.id]);}
  return idbWrite(ops).then(()=>{
   s.hist.runs=runs;s.hist.stamp=run.id+':'+run.endedAt;take.historyError=false;s.hist.note='';
@@ -585,19 +589,22 @@ function saveRun(take){
 // The shadow of the personal best for what is framed now: one dim line under the live trace, so «how am I moving»
 // has an answer while singing and not only afterwards.
 function refreshShadow(){
- const sig=prefs.shadow?[currentKey(),s.range.a.toFixed(2),s.range.b.toFixed(2),s.hist.stamp||'',s.trace?.take?.runId||''].join('|'):'off';
+ const sig=prefs.shadow?[currentKey(),s.trendScope||'',s.range.a.toFixed(2),s.range.b.toFixed(2),s.hist.stamp||'',s.trace?.take?.runId||''].join('|'):'off';
  if(sig===s.shadowSig)return;s.shadowSig=sig;
  if(!prefs.shadow){s.shadow=null;s.dirty=true;requestDraw();return;}
  const key=currentKey(),skip=s.trace?.take?.runId;
- let best=null;
- for(const r of s.hist.runs)if(r.id!==skip&&r.cmpKey===key&&r.hasTrace&&r.match!==null&&r.a<=s.range.a+.25&&r.b>=s.range.b-.25&&better(r,best))best=r;
- if(!best){s.shadow=null;s.dirty=true;requestDraw();return;}
+ // Same population as the numbers above the graph: under a fragment the best line is the best pass of that fragment,
+ // never a whole-song pass that happened to cover it.
+ let entry=null;
+ for(const e of scopeEntries(s.hist.runs.filter(r=>r.cmpKey===key&&r.hasTrace&&r.id!==skip)))if(better(e,entry))entry=e;
+ if(!entry){s.shadow=null;s.dirty=true;requestDraw();return;}
+ const best=entry.run;
  if(s.shadow?.id===best.id)return;
  idbGet('traces',best.id).then(tr=>{
   if(s.shadowSig!==sig||!tr)return;
   // The octave is out of the comparison key because it moves the target and leaves the difficulty alone; the shadow
   // has to move with it, or a record sung an octave away silently falls off the plot.
-  s.shadow={id:best.id,match:best.match,octave:best.octave||0,points:unpackTrace(tr).map(p=>({songT:best.a+p.t*best.speed,m:p.f?69+12*Math.log2(p.f/440):null,confidence:p.confidence}))};
+  s.shadow={id:best.id,match:entry.match,octave:best.octave||0,points:unpackTrace(tr).map(p=>({songT:best.a+p.t*best.speed,m:p.f?69+12*Math.log2(p.f/440):null,confidence:p.confidence}))};
   s.dirty=true;requestDraw();
  }).catch(()=>{});
 }
@@ -756,7 +763,10 @@ function renderTakes(){const root=$('takesList');root.replaceChildren();for(cons
  const buttons=[...(t.hasAudio?[['WAV',()=>saveWav(t),'Зберегти WAV']]:[]),['CSV',()=>saveCSV(t),'Зберегти CSV зі слідом нот і станом кожної точки'],['JSON',()=>saveTakeJSON(t),'Зберегти спробу файлом: метадані, оцінка і стиснутий слід'],['×',()=>removeTake(t),'Видалити спробу з вкладки · в історії вона лишається']];
  for(const [label,fn,tip]of buttons){const b=document.createElement('button');b.textContent=label;b.title=tip;b.setAttribute('aria-label',tip);b.onclick=fn;actions.append(b);}
  el.append(play,title,st,actions);root.append(el);
- }$('takesCount').textContent=s.takes.length;renderProgress();}
+ }
+ if(!s.takes.length&&s.hist.runs.length){const p=document.createElement('p');p.className='takes-empty';
+  p.textContent='У цій вкладці спроб ще немає. Те, що ти співав раніше, — у вкладці «Прогрес».';root.append(p);}
+ $('takesCount').textContent=s.takes.length;renderProgress();}
 // ── Progress tab ────────────────────────────────────────────────────────────────────────────────────────────────
 // The attempt panel gets two tabs instead of one heading; nothing is added inside .stage, so the geometry the stage
 // redesign made reliable stays untouched. Mint means better, muted rose means worse, and every bar carries its number.
@@ -778,16 +788,36 @@ function lastSession(runs,eligible){
  for(let i=1;i<runs.length;i++){const gap=Date.parse(out[out.length-1].startedAt)-Date.parse(runs[i].startedAt);if(gap>HIST.sessionGap)break;out.push(runs[i]);}
  // Attempts and minutes count everything sung in the session; the best number obeys the same coverage floors as the
  // record above it, so a three-second fragment can never sit under «найкраще» next to a record over the whole song.
- const best=out.reduce((a,r)=>eligible.has(r.id)&&r.match!==null&&(a===null||r.match>a)?r.match:a,null);
+ const best=out.reduce((a,r)=>eligible.has(r.id)&&(a===null||eligible.get(r.id)>a)?eligible.get(r.id):a,null);
  return {count:out.length,frames:out.reduce((a,r)=>a+r.target,0),best};
 }
 function trendScope(){return s.trendScope==='song'||!customRange()?'song':'range';}
-function scopeRuns(runs){
- return trendScope()==='song'
-  ?runs.filter(r=>r.songTarget&&r.target>=r.songTarget*HIST.songCover&&r.target>=HIST.minSongFrames)
-  :runs.filter(r=>r.a<=s.range.a+.25&&r.b>=s.range.b-.25&&r.target>=HIST.minPhraseFrames);
+// The phrase the A–B region is currently sitting on, if it is sitting on one at all.
+function scopePhrase(){
+ if(trendScope()==='song')return null;
+ const p=(song.phrases||[]).find(p=>Math.abs(p.a-s.range.a)<=.25&&Math.abs(p.b-s.range.b)<=.25);
+ return p?p.id:null;
 }
-function trendRuns(runs){return scopeRuns(runs).slice(0,HIST.trendRuns).reverse();}
+// What every number on the panel is counted over, as {id, match, medianCents, startedAt, localDay, target}. A full pass
+// of the song carries a whole-song percentage, which says nothing about one phrase — so when the fragment lines up with
+// a phrase, that phrase's own frames are read out of the attempt instead, the way docs/PROGRESS_DESIGN.md §4.2 has it:
+// an arbitrary A–B has no entity of its own and decomposes into the phrases it covered. An A–B that is not a phrase can
+// only be spoken for by an attempt recorded at that very fragment.
+function scopeEntries(runs){
+ const of=(r,match,medianCents,target)=>({id:r.id,run:r,match,medianCents,target,startedAt:r.startedAt,localDay:r.localDay});
+ if(trendScope()==='song')
+  return runs.filter(r=>r.match!==null&&r.songTarget&&r.target>=r.songTarget*HIST.songCover&&r.target>=HIST.minSongFrames)
+   .map(r=>of(r,r.match,r.medianCents,r.target));
+ const id=scopePhrase();
+ if(id!==null){
+  const out=[];
+  for(const r of runs)for(const c of phraseCandidates(r))if(c.id===id&&c.target>=HIST.minPhraseFrames)out.push(of(r,c.match,c.medianCents,c.target));
+  return out;
+ }
+ return runs.filter(r=>r.match!==null&&Math.abs(r.a-s.range.a)<=.25&&Math.abs(r.b-s.range.b)<=.25&&r.target>=HIST.minPhraseFrames)
+  .map(r=>of(r,r.match,r.medianCents,r.target));
+}
+function trendRuns(runs){return scopeEntries(runs).slice(0,HIST.trendRuns).reverse();}
 function drawTrend(cv,list){
  const w=cv.clientWidth||320,h=cv.clientHeight||70,dpr=Math.min(window.devicePixelRatio||1,2);
  cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr);const c=cv.getContext('2d');c.setTransform(dpr,0,0,dpr,0,0);c.clearRect(0,0,w,h);
@@ -871,14 +901,14 @@ function renderProgress(){
 function buildProgress(box){
  box.replaceChildren();
  const key=currentKey(),runs=s.hist.runs.filter(r=>r.cmpKey===key),today=localDay(Date.now());
- const whole=trendScope()==='song',scored=scopeRuns(runs).filter(r=>r.match!==null);
- let best=null;for(const r of scored)if(better(r,best))best=r;
- const last5=scored.slice(0,5),bestToday=scored.filter(r=>r.localDay===today).reduce((a,r)=>a===null||r.match>a?r.match:a,null);
- const of=whole?'повних проходів пісні':'спроб цього фрагмента';
+ const whole=trendScope()==='song',phraseId=scopePhrase(),scored=scopeEntries(runs);
+ let best=null;for(const e of scored)if(better(e,best))best=e;
+ const last5=scored.slice(0,5),bestToday=scored.filter(e=>e.localDay===today).reduce((a,e)=>a===null||e.match>a?e.match:a,null);
+ const of=whole?'повних проходів пісні':phraseId!==null?'зарахованих проходів цієї фрази':'спроб цього фрагмента';
  // 1 · the numbers, all counted over the same attempts as the trend below
  const row=document.createElement('div');row.className='prog-nums';
  const cells=[['Рекорд',best?pctText(best.match):'—',best?(whole?'найкращий повний прохід':'найкраща спроба цього фрагмента')+' · '+String(best.startedAt).slice(0,10):whole?'Ще немає повного проходу цієї пісні':'Ще немає зарахованої спроби цього фрагмента'],
-  ['Останні 5',last5.length?Math.round(last5.reduce((a,r)=>a+r.match,0)/last5.length/100)+'%':'—','середній збіг останніх '+last5.length+' '+of],
+  ['Останні 5',last5.length?Math.round(last5.reduce((a,e)=>a+e.match,0)/last5.length/100)+'%':'—','середній збіг останніх '+last5.length+' '+of],
   ['Сьогодні',pctText(bestToday),'найкраще за цю добу серед '+of],
   ['Серія днів',String(streakDays()),'дні поспіль, у кожному щонайменше 2 хв кадрів із ціллю']];
  for(const [label,value,tip]of cells){const cell=document.createElement('div');cell.className='prog-num';cell.title=tip;
@@ -886,7 +916,7 @@ function buildProgress(box){
  const ruler=document.createElement('p');ruler.className='prog-ruler';
  const totals=targetTotals(prefs.view),draftShare=totals.song?Math.round(100*totals.draft/totals.song):0;
  ruler.textContent='Лінійка: '+levelLabel(levelOpt())+' · '+(prefs.view==='notes'?'Ноти':'Контур')+' · '+prefs.speed+'× · карта '+mapVersion().slice(-8)
-  +' · чернеткових цілей '+draftShare+'% · область: '+(whole?'вся пісня':'фрагмент '+fmt(s.range.a)+'–'+fmt(s.range.b));
+  +' · чернеткових цілей '+draftShare+'% · область: '+(whole?'вся пісня':phraseId!==null?phraseLabel(phraseId):'фрагмент '+fmt(s.range.a)+'–'+fmt(s.range.b));
  box.append(row,ruler);
  // 2 · trend
  const head=document.createElement('div');head.className='prog-head';
@@ -898,10 +928,10 @@ function buildProgress(box){
  head.append(seg);box.append(head);
  const list=trendRuns(runs);
  const cv=document.createElement('canvas');cv.className='prog-trend';cv.setAttribute('role','img');
- cv.setAttribute('aria-label','Збіг останніх '+list.length+' спроб: '+(list.map(r=>pctText(r.match)).join(', ')||'спроб ще немає'));
+ cv.setAttribute('aria-label','Збіг останніх '+list.length+' спроб: '+(list.map(e=>pctText(e.match)).join(', ')||'спроб ще немає'));
  box.append(cv);
  const note=document.createElement('p');note.className='prog-note';
- const octaves=new Set(list.map(r=>r.octave));
+ const octaves=new Set(list.map(e=>e.run.octave));
  note.textContent=list.length?(list.length+' '+plural(list.length,'спроба','спроби','спроб')+' · точки в часі, лінія — середнє по п’яти'
   +(octaves.size>1?' · спроби співано в різних вокальних октавах':'')):'Тут з’явиться крива збігу, коли буде хоча б одна зарахована спроба цієї лінійки.';
  box.append(note);
@@ -938,7 +968,7 @@ function buildProgress(box){
  // 4 · footer: where the history lives and what you can do with it
  const foot=document.createElement('div');foot.className='prog-foot';
  const state=document.createElement('p');state.className='prog-note';
- const session=lastSession(runs,new Set(scored.map(r=>r.id)));
+ const session=lastSession(runs,new Map(scored.map(e=>[e.id,e.match])));
  state.textContent=(s.hist.note?s.hist.note+' ':'')
   +(session?'Остання сесія: '+session.count+' '+plural(session.count,'спроба','спроби','спроб')+' · '+underTarget(session.frames)+' під ціллю'
    +(session.best===null?' · '+(whole?'без повного проходу':'без зарахованої спроби цього фрагмента'):' · найкраще '+pctText(session.best))+'. ':'')
@@ -1292,6 +1322,8 @@ window.Luma={diagnostics:()=>({mode:s.mode,busy:s.busy,pending:s.awaitFinish,tim
   fakeFinish:()=>{const id=s.takeCounter,meta=s.pending.get(id);if(!meta)return null;const pts=s.history.map(p=>({t:(p.songT-meta.a)/meta.speed,f:p.f,confidence:p.confidence,db:p.db}));s.pending.delete(id);const duration=(s.pos=now())-meta.a;s.transport=null;s.mode='idle';s.live=null;const m={id,blob:meta.hasAudio?silentWav(duration/meta.speed):null,hasAudio:!!meta.hasAudio,clipped:false,sampleRate:48000,duration:duration/meta.speed,start:0,end:duration/meta.speed,reason:'end',points:pts,gap:0};const t=storeTake(meta,m);sync();return {id:t.id,pct:scorePct(t.score)};},
   history:historyHooks}};
 populateSong();fitStage();resize();setRangeScale();updateReadout(s.pos);loadHistory();
-if(!prefs.audioNotice){prefs.audioNotice=true;savePrefs();
- setTimeout(()=>toast('Запис голосу у WAV тепер вимикається і типово вимкнений. Слід і оцінка кожної спроби зберігаються завжди — вкладка «Прогрес». WAV вмикається в налаштуваннях.'),900);}
+// A profile that has never opened Luma before did not live through the change, so it is told nothing; the flag is set
+// either way, so the notice can never surface later.
+if(!prefs.audioNotice){const upgrade=hadSettings;prefs.audioNotice=true;savePrefs();
+ if(upgrade)setTimeout(()=>toast('Запис голосу у WAV тепер вимикається і типово вимкнений. Слід і оцінка кожної спроби зберігаються завжди — вкладка «Прогрес». WAV вмикається в налаштуваннях.'),900);}
 })();

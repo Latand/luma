@@ -77,6 +77,38 @@ const after = await p.evaluate(() => window.Luma.test.state());
 assert(Math.abs(after.range.a - phr[0].a) < .01 && Math.abs(after.range.b - phr[0].b) < .01, 'clicking a weak phrase sets the A–B loop on it ' + JSON.stringify(after.range));
 assert(framed.bad === 0 && framed.frames > 10, 'the phrase is framed before it is played ' + JSON.stringify(framed));
 
+// ── 2b · under a fragment the numbers read that fragment's frames, not a whole-song percentage ─────────────────
+await p.evaluate(() => window.Luma.test.history.clearSong());
+const at = (back, h) => { const d = new Date(); d.setDate(d.getDate() - back); d.setHours(h, 0, 0, 0); return d.toISOString(); };
+const target0 = phr[0];
+await hist(`H.seedMany([
+  {match: 6000, target: ${whole}, startedAt: ${JSON.stringify(at(3, 12))}, phrases: [{id: ${target0.id}, target: 300, hit: 90, median: 55}]},
+  {match: 4500, target: 300, a: ${target0.a}, b: ${target0.b}, startedAt: ${JSON.stringify(at(2, 12))}, phrases: [{id: ${target0.id}, target: 300, hit: 135, median: 40}]},
+  {match: 4400, target: 300, a: ${target0.a}, b: ${target0.b}, startedAt: ${JSON.stringify(at(1, 12))}, phrases: [{id: ${target0.id}, target: 300, hit: 132, median: 38}]}
+])`);
+await p.evaluate(q => { const T = window.Luma.test; T.closeTrace(); T.setRange(q.a, q.b, q.id); }, target0);
+await p.waitForTimeout(300);
+const frag = await p.evaluate(() => ({
+  scope: window.Luma.test.history.trend(),
+  numbers: [...document.querySelectorAll('#progressPanel .prog-num b')].map(e => e.textContent),
+  recordTitle: document.querySelectorAll('#progressPanel .prog-num')[0].title,
+  ruler: document.querySelector('#progressPanel .prog-ruler').textContent,
+  weak: document.querySelector('#progressPanel .prog-bar').title,
+  foot: document.querySelector('#progressPanel .prog-foot .prog-note').textContent}));
+assert(JSON.stringify(frag.scope.map(v => Math.round(v / 100))) === JSON.stringify([30, 45, 44]),
+  'a whole-song pass enters the fragment trend at its score for that phrase ' + JSON.stringify(frag.scope));
+assert(frag.numbers[0] === '45%', 'the fragment record is the best pass of the fragment, not of the song ' + JSON.stringify(frag.numbers));
+assert(frag.numbers[1] === '40%', 'the average is taken over the same three numbers ' + JSON.stringify(frag.numbers));
+assert(/найкраще 45%/.test(frag.weak), 'and it agrees with the weak-phrase row on the same screen: ' + frag.weak);
+assert(frag.ruler.includes('область: ' + target0.label), 'the ruler names the phrase the numbers are about: ' + frag.ruler);
+assert(!/найкраще 60%/.test(frag.foot) && /найкраще 4[45]%/.test(frag.foot), 'the session line is scoped with them: ' + frag.foot);
+// an A–B that is not a phrase can only be spoken for by an attempt recorded at that very fragment
+await p.evaluate(q => window.Luma.test.setRange(q.a + 0.6, q.b - 0.6), target0);
+await p.waitForTimeout(300);
+assert((await hist('H.trend()')).length === 0, 'a free A–B takes no whole-song pass as its own attempt');
+await p.evaluate(q => window.Luma.test.setRange(q.a, q.b, q.id), target0);
+await p.waitForTimeout(250);
+
 // ── 3 · the record shadow: only where a record exists, and gone with the switch ────────────────────────────────
 await p.evaluate(() => { const T = window.Luma.test; T.closeTrace(); T.clearRange(); });
 await p.waitForTimeout(150);
