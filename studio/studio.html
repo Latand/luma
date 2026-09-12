@@ -53,7 +53,7 @@ details{font-size:12px;color:var(--muted)}summary{cursor:pointer;padding:6px 0;c
 <h2>Бібліотека <span class="count" id="libCount"></span></h2>
 <div class="lib" id="lib"><p class="st">Завантажуємо бібліотеку…</p></div>
 <div class="library-actions"><button class="secondary" id="importTrainer" type="button">Додати готовий тренажер</button><a class="secondary" href="/demo" target="_blank" rel="noopener">Спробувати демо</a><input id="trainerFile" type="file" accept=".html" hidden></div>
-<details class="card upload" id="uploadPanel"><summary id="uploadSummary">Додати свою пісню<small>вокал і мелодію Studio визначить на цьому комп’ютері</small></summary>
+<details class="card upload" id="uploadPanel"><summary>Додати свою пісню<small>вокал і мелодію Studio визначить на цьому комп’ютері</small></summary>
 <div class="drop" id="drop"><b id="fileName">Перетягни аудіофайл сюди</b><button class="secondary" id="choose" type="button">Вибрати аудіофайл</button><small>m4a, mp3, flac, wav, ogg · до 10 хв · до 200 МБ · назва «Пісня - Виконавець» заповнює поля сама</small><input type="file" id="file" accept="audio/*,.m4a,.mp3,.flac,.wav,.ogg" hidden></div>
 <form id="prepareForm" class="row"><label for="title">Назва пісні<input id="title" autocomplete="off"></label><label for="artist">Виконавець<input id="artist" autocomplete="off"></label><button class="primary" id="go" disabled>Підготувати</button></form>
 <div class="notice" id="uploadNotice" hidden role="alert"></div>
