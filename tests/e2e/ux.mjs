@@ -166,9 +166,12 @@ await p.setViewportSize({width:390,height:844});
 assert(await p.locator('#listenBtn').getAttribute('aria-label') === 'Слухати пісню', 'mobile listen has an accessible name');
 const dimensions = await p.evaluate(() => ({page:document.documentElement.scrollWidth,view:innerWidth}));
 assert(dimensions.page === dimensions.view, 'trainer fits the narrow viewport');
+// ── two budgets: the WAV limit only when the voice is being recorded, the trace limit always ──
+const setAudio=on=>p.evaluate(v=>{const c=document.getElementById('recordAudio');c.checked=v;c.dispatchEvent(new Event('change'));},on);
+await setAudio(true);
 await p.evaluate(()=>{
   window.Luma.test.closeTrace();window.LUMA_SONG.duration=600;
-  window.Luma.test.injectTake({a:0,b:600,points:[]});
+  window.Luma.test.injectTake({a:0,b:600,points:[],audio:true});
   window.Luma.test.setRange(1,3);window.Luma.test.seek(1);
 });
 await p.locator('#singBtn').click();await p.waitForFunction(()=>!document.querySelector('#errorBanner').hidden);
@@ -176,5 +179,19 @@ assert((await p.locator('#errorText').textContent()).includes('Ліміт пам
 await p.evaluate(()=>{window.Luma.test.closeTrace();window.Luma.test.clearRange();window.Luma.test.seek(600);});
 await p.locator('#singBtn').click();await p.waitForFunction(()=>!document.querySelector('#errorBanner').hidden);
 assert((await p.locator('#errorText').textContent()).includes('Ліміт пам’яті'), 'starting at song end reserves the restarted full song');
+// with the switch off there is no WAV to budget, so the very same attempt is allowed
+await setAudio(false);
+await p.evaluate(()=>{window.Luma.test.closeTrace();window.Luma.test.seek(600);document.getElementById('errorBanner').hidden=true;});
+await p.locator('#singBtn').click();await p.waitForFunction(()=>window.Luma.test.state().mode==='singing',null,{timeout:9000});
+assert(await p.locator('#errorBanner').isHidden(),'with the recording switch off the WAV budget no longer stops a new attempt');
+await p.locator('#stopBtn').click();await p.waitForFunction(()=>window.Luma.test.state().mode==='idle',null,{timeout:9000});await p.waitForTimeout(600);
+// the trace budget is what stops singing now, and it says the history keeps what the tab drops
+const filled=await p.evaluate(()=>{const T=window.Luma.test;T.clearRange();
+  while(T.takes().length<20)T.injectTake({a:0,b:1,points:[],audio:false});
+  T.closeTrace();T.seek(0);return T.takes().length;});// no attempt on screen, so this is a new one and not a punch-in
+assert(filled===20,'twenty traces fit in the tab '+filled);
+await p.locator('#singBtn').click();await p.waitForFunction(()=>!document.querySelector('#errorBanner').hidden,null,{timeout:9000});
+const limit=await p.locator('#errorText').textContent();
+assert(limit.includes('Ліміт слідів')&&limit.includes('історія її не втратить'),'the 21st attempt reports the trace limit and says the history keeps the deleted one: '+limit);
 assert(logs.length === 0, 'trainer console clean: '+JSON.stringify(logs));
 await b.close();
