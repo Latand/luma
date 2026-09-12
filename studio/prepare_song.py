@@ -2,10 +2,11 @@
 """Turn one audio file into a standalone Luma trainer, entirely on this machine:
 
   FFmpeg decode -> official HTDemucs (fine-tuned) vocal separation -> pYIN + CREPE pitch on the vocal stem
-  -> note map (draft, unverified) -> 1.0x / 0.8x stems -> optional word timings (Soniox API) -> single HTML file.
+  -> note map (draft, unverified) -> 1.0x / 0.8x stems -> optional word timings (Soniox API on the vocal stem, then
+  snapped to the voice offline) -> single HTML file.
 
 Usage:
-  prepare_song.py song.m4a --title "Song" --artist "Artist" [--out songs] [--no-lyrics] [--lang en]
+  prepare_song.py song.m4a --title "Song" --artist "Artist" [--out songs] [--no-lyrics] [--lang en] [--lyrics-from vocal|mix]
 
 The only network traffic is the one-time Demucs weight download and, if enabled, the transcription request to Soniox
 (set SONIOX_API_KEY or put the key in ~/.config/luma/soniox-api-key; otherwise lyrics are skipped).
@@ -18,6 +19,7 @@ import numpy as np, soundfile as sf, librosa, scipy.ndimage as ndi
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'studio'))
 from build_html import build as build_html
+from align_lyrics import context as align_context, realign, save_transcript, aligned_note
 
 def sha256(p: Path) -> str:
     h = hashlib.sha256()
@@ -37,32 +39,51 @@ def soniox_key() -> str | None:
     f = Path.home() / '.config' / 'luma' / 'soniox-api-key'
     return f.read_text().strip() if f.exists() else None
 
-def soniox_words(audio: Path, key: str, lang: str) -> list[dict]:
+def soniox_tokens(audio: Path, key: str, lang: str, transcription_id: str | None = None) -> list[dict]:
+    """One paid transcription: upload, poll, return the tokens exactly as Soniox sent them. `transcription_id`
+    fetches a transcription that was already paid for instead of starting a new one."""
     api = 'https://api.soniox.com/v1'; auth = {'Authorization': 'Bearer ' + key}
     boundary = uuid.uuid4().hex; body = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{audio.name}"\r\nContent-Type: application/octet-stream\r\n\r\n').encode() + audio.read_bytes() + f'\r\n--{boundary}--\r\n'.encode()
     def call(path, data=None, headers=None, method=None):
         req = urllib.request.Request(api + path, data=data, headers={**auth, **(headers or {})}, method=method)
         with urllib.request.urlopen(req, timeout=120) as r: return json.loads(r.read().decode())
-    fid = call('/files', body, {'Content-Type': f'multipart/form-data; boundary={boundary}'}, 'POST')['id']
-    tid = call('/transcriptions', json.dumps({'model': 'stt-async-v5', 'file_id': fid, 'language_hints': [lang], 'enable_speaker_diarization': False}).encode(), {'Content-Type': 'application/json'}, 'POST')['id']
-    for _ in range(300):
-        st = call(f'/transcriptions/{tid}')['status']
-        if st == 'completed': break
-        if st == 'error': raise RuntimeError('Soniox transcription failed')
-        time.sleep(3)
-    toks = call(f'/transcriptions/{tid}/transcript')['tokens']
+    tid = transcription_id
+    if not tid:
+        fid = call('/files', body, {'Content-Type': f'multipart/form-data; boundary={boundary}'}, 'POST')['id']
+        tid = call('/transcriptions', json.dumps({'model': 'stt-async-v5', 'file_id': fid, 'language_hints': [lang], 'enable_speaker_diarization': False}).encode(), {'Content-Type': 'application/json'}, 'POST')['id']
+    try:
+        for _ in range(300):
+            st = call(f'/transcriptions/{tid}')['status']
+            if st == 'completed': break
+            if st == 'error': raise RuntimeError('Soniox transcription failed')
+            time.sleep(3)
+        return call(f'/transcriptions/{tid}/transcript')['tokens']
+    except Exception as e:
+        raise RuntimeError(f'{type(e).__name__}: {e} (transcription {tid} is already paid for; fetch it again with --transcription-id)') from e
+
+def merge_tokens(toks: list[dict]) -> list[dict]:
+    """Sub-word tokens into words. A token that does not start with a space continues the previous word, but it may
+    only push that word's end forward when it is sung next to it: Soniox timestamps sentence punctuation where it
+    decided the sentence ends, which used to stretch a single word over half a minute of silence."""
     words = []
     for t in toks:
         tx = t['text']
         if not tx.strip(): continue
         a = t['start_ms'] / 1000; b = t['end_ms'] / 1000; c = t.get('confidence') or 0
         if words and not tx.startswith(' '):
-            if tx.strip()[0] in '.,!?': words[-1]['w'] += tx.strip(); words[-1]['b'] = round(max(words[-1]['b'], b), 2)
-            else: words[-1]['w'] += tx; words[-1]['b'] = round(max(words[-1]['b'], b), 2); words[-1]['c'] = round(min(words[-1]['c'], c), 2)
+            punctuation = tx.strip()[0] in '.,!?'; w = words[-1]
+            w['w'] += tx.strip() if punctuation else tx
+            if a - w['b'] <= .4: w['b'] = round(max(w['b'], b), 2)
+            if not punctuation: w['c'] = round(min(w['c'], c), 2)
         else: words.append({'a': round(a, 2), 'b': round(b, 2), 'w': tx.strip(), 'c': round(c, 2)})
     return words
 
+def soniox_words(audio: Path, key: str, lang: str) -> list[dict]:
+    return merge_tokens(soniox_tokens(audio, key, lang))
+
 def group_lines(words: list[dict]) -> list[dict]:
+    """The transcript's own grouping, kept as the record of what Soniox returned; align_lyrics regroups it at the
+    real silences of the voice before the trainer ever sees it."""
     lines, cur = [], []
     for w in words:
         if cur and ((w['a'] - cur[-1]['b'] > 1.0) or (cur[-1]['w'][-1] in '.!?' and w['a'] - cur[-1]['b'] > .45) or len(cur) >= 9): lines.append(cur); cur = []
@@ -129,6 +150,7 @@ def main():
     ap.add_argument('audio'); ap.add_argument('--title', required=True); ap.add_argument('--artist', default=''); ap.add_argument('--out', default=str(ROOT / 'songs'))
     ap.add_argument('--model', default='htdemucs_ft', choices=['htdemucs', 'htdemucs_ft']); ap.add_argument('--device', default='auto', choices=['auto', 'cpu', 'cuda'])
     ap.add_argument('--no-lyrics', action='store_true'); ap.add_argument('--lang', default='en'); ap.add_argument('--out-html')
+    ap.add_argument('--lyrics-from', default='vocal', choices=['vocal', 'mix'], help='audio sent to Soniox: the separated vocal stem (default) or the full mix')
     a = ap.parse_args(); src = Path(a.audio).expanduser().resolve()
     if not src.is_file(): ap.error('audio file not found')
     slug = slugify(a.title); pkg = Path(a.out).expanduser().resolve() / slug; work = pkg / 'work'; pkg.mkdir(parents=True, exist_ok=True); work.mkdir(exist_ok=True)
@@ -193,10 +215,15 @@ def main():
     if key:
         t5 = time.time()
         try:
-            ffmpeg('-i', work / 'mix22.wav', '-ac', '1', '-c:a', 'libmp3lame', '-b:a', '96k', work / 'mix_mono.mp3')
-            words = soniox_words(work / 'mix_mono.mp3', key, a.lang); song['lyrics'] = group_lines(words)
-            song['lyricsSource'] = f'Soniox stt-async-v5, {time.strftime("%Y-%m-%d")}, automatic word timings'
-            manifest['steps']['lyrics'] = {'seconds': round(time.time() - t5, 1), 'words': len(words), 'lines': len(song['lyrics'])}
+            # the clean vocal, not the mix: under the band the model drops the first syllables of most phrases
+            source = work / ('vocal22.wav' if a.lyrics_from == 'vocal' else 'mix22.wav')
+            ffmpeg('-i', source, '-ac', '1', '-c:a', 'libmp3lame', '-b:a', '96k', work / 'lyrics_mono.mp3')
+            words = merge_tokens(soniox_tokens(work / 'lyrics_mono.mp3', key, a.lang))
+            heard = 'the Demucs vocal stem' if a.lyrics_from == 'vocal' else 'the full mix'
+            note = f'Soniox stt-async-v5 on {heard}, {time.strftime("%Y-%m-%d")}, automatic word timings'
+            save_transcript(pkg, a.lyrics_from, group_lines(words), note)
+            song['lyrics'] = realign(words, align_context(pkg, song)); song['lyricsSource'] = aligned_note(note)
+            manifest['steps']['lyrics'] = {'seconds': round(time.time() - t5, 1), 'audio': a.lyrics_from, 'words': len(words), 'lines': len(song['lyrics'])}
         except (urllib.error.URLError, RuntimeError, KeyError) as e:
             log('  lyrics skipped:', e); song['lyrics'] = []; manifest['steps']['lyrics'] = {'error': str(e)}
     else:
@@ -207,7 +234,7 @@ def main():
     manifest['html'] = {'path': str(out_html), 'bytes': out_html.stat().st_size, 'sha256': sha256(out_html)}
     manifest['finished'] = time.strftime('%Y-%m-%dT%H:%M:%S%z'); manifest['total_s'] = round(time.time() - T0, 1)
     (pkg / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=1), encoding='utf-8')
-    for f in ['mix.wav', 'vocals44.wav', 'vocal22.wav', 'back22.wav', 'mix22.wav', 'mix_mono.mp3']:
+    for f in ['mix.wav', 'vocals44.wav', 'vocal22.wav', 'back22.wav', 'mix22.wav', 'lyrics_mono.mp3']:
         (work / f).unlink(missing_ok=True)
     log('DONE', json.dumps({'html': str(out_html), 'map': manifest['map'], 'lyrics': manifest['steps']['lyrics'], 'total_s': manifest['total_s']}, ensure_ascii=False))
 
