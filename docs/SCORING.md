@@ -31,16 +31,54 @@ measured off the canvas against the bar under it and has to clear 4.5:1. In the 
 disc with a ✓ for a hit, a dashed ring with an × for a miss. The sung trace is mint inside the corridor, subdued red
 outside, dim where there was no target. The current note glows while you are inside it.
 
+## Attempts are traces, audio is optional
+Recording the voice into a WAV is a switch in the settings and it is **off by default**. The microphone always runs — there
+is no pitch without it — but with the switch off the worker keeps no PCM and the attempt has no blob. Everything else is
+unchanged: the attempt keeps its timestamped pitch points and its per-frame state array, it stays on screen after the run,
+it is scored the same way, and it goes into the local history. ▶ on such an attempt plays the backing in sync with the
+trace instead of your voice; the WAV button is absent and CSV and JSON are not. Punch-in needs the attempt and the switch
+to agree: re-recording into an attempt recorded the other way would leave half of it with audio and half without.
+
+Two budgets apply to the tab, not to the history. Traces: 20 attempts and 400 000 points, and an attempt deleted from the
+tab stays in the history. Audio: the old 10 attempts / 100 MiB, and only while the switch is on.
+
 ## Trace history
-Every attempt keeps its timestamped pitch points and the per-frame state array. The trace stays on screen after the take:
-drag the plot, use ← → or the wheel, or jump between misses. ▶ on an attempt plays your voice over the backing in sync with
-the same trace. CSV export includes the per-point match state.
+The trace stays on screen after the take: drag the plot, use ← → or the wheel, or jump between misses. CSV export includes
+the per-point match state. Every finished attempt is also written to a local practice history — see
+[docs/HISTORY_SCHEMA.md](HISTORY_SCHEMA.md).
 
 ## Punch-in
 With an attempt on screen and the playhead inside it, "Співати" becomes "Перезаписати з …" and re-records that attempt from the
 playhead: old audio before the point, new audio, then the old tail beyond the new end. Seeking back while singing does the
-same. The WAV and the points are spliced and rescored.
+same. The WAV and the points are spliced and rescored; with the recording switch off only the points and the duration are.
+The attempt and the switch have to agree, and so do the speeds — otherwise the button says "Співати" and a separate
+attempt is recorded.
 
 ## Strict statistics
 "У коридорі", "Покриття" and "Медіана |Δ|" on attempt cards use only `ok` frames inside fragments the user confirmed by ear.
 They exist so that a verified fragment can be judged without draft noise.
+
+## Scores that can stand side by side
+Every attempt also stores three numbers derived from the same pass over its frames: **voice coverage** (`sung ÷ target`,
+so silence under a target is visible on its own), the **median |Δ|** in cents over every drawn target, and the **draft
+share** — frames whose target has `ok = 0`. Draft targets count towards the match exactly as they do live; there is no
+separate "draft scale", because draftness is a property of the target map and the map version is already part of the key
+below. The share is shown next to the record, so a number never passes for more than it is.
+
+Two scores may be compared only when they were measured with the same ruler:
+
+```
+cmpKey = songHash · mapVersion · level · view · speed
+```
+
+Re-preparing a song opens a new `mapVersion` and keeps the history; editing a note opens a new one too, because you
+changed the target; confirming a fragment by ear does not, because `verified` never reaches `targetAt().m`. The vocal
+octave is not in the key: it moves the target and leaves the difficulty alone. The microphone shift is not in it either —
+it is not scored and it is not calibrated.
+
+**Song record**: the best match among full passes of one ruler (≥ 95 % of the song's frames with a target, at least 4 s of
+them). **Phrase record**: the best match among attempts that covered ≥ 80 % of that phrase, with at least 1.5 s of target
+in it — without those floors "100 % over 0.3 s" would hold first place forever. Ties go to the smaller median |Δ|, then to
+the earlier date. For a lesson a record is also kept per exercise, on each level separately, because one exercise is one
+skill sung in nine keys. Rhythm and entry timing are still not scored: the end-to-end microphone latency is not measured,
+so a rhythm mark would be an invention.

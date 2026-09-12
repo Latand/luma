@@ -48,6 +48,10 @@ the key sweep, and the two Ukrainian strings (`summary`, `description`) are what
 syllable, a breathing cue, the suggested level, what to watch on screen and the octave note. Nothing else has to change
 — the audio, the map, the lyrics, the practice fragments and the Studio card all follow from that definition.
 
+Each practice fragment carries `exercise` — the pattern's name, without the key. One exercise is one skill sung through
+nine keys, so the trainer's Прогрес tab groups the fragments by it and keeps a record per exercise and per difficulty
+level instead of nine unrelated rows (see [SCORING.md](SCORING.md) and [HISTORY_SCHEMA.md](HISTORY_SCHEMA.md)).
+
 Two invariants are checked before anything is built, and the generator stops with the reason when one breaks: each
 repetition has to fill a whole number of beats, because the click rides the same beat grid, and `Lesson.file` has to be
 `Luma_*.html`, because the library server lists exactly that glob and a trainer outside it would be generated into

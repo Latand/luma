@@ -17,9 +17,21 @@ of your voice, no server after the file is built.
 - **Three levels.** Легко (±80 ¢, octave errors forgiven), Звично (±50 ¢), Точно (±35 ¢); each also sets timing slack and how
   much of a note must be hit. Details in [docs/SCORING.md](docs/SCORING.md).
 - **Fragment pitch scale.** The vertical range frames the notes in view plus the next four seconds, so it is already right when a phrase arrives. It grows only when upcoming notes would leave the margin, shrinks after two quiet seconds, and every change eases over a second. Confident voice enters through a percentile band, so a single glitch never moves the plot. Масштаб → Детальніше halves the minimum span.
-- **Attempts with history.** Every take keeps its WAV, its timestamped pitch trace and per-frame results. Scrub back to see
-  where you drifted, jump between misses, play your voice over the backing in sync, export WAV and CSV.
+- **Attempts are traces, not recordings.** Recording your voice into a WAV is a switch in the settings, off by default.
+  Sing and the attempt stays on screen with its trace, its score and its per-frame results either way. Scrub back to see
+  where you drifted, jump between misses, play the attempt back in sync with the backing, export CSV or JSON. Turn the
+  switch on and your voice is recorded again: review with your own singing and WAV export come back with it.
+- **Progress that lives on this computer.** Every finished attempt goes into a local history by itself — no files to save.
+  The Прогрес tab shows the record, the average of the last five attempts, the best of the day, the day streak, a trend
+  over attempts and the weak phrases; a click on a phrase loops it. A pale line under your trace is your own best attempt
+  at that fragment. Scores are only ever compared within the same level, target map, view and speed; see
+  [docs/SCORING.md](docs/SCORING.md) and [docs/HISTORY_SCHEMA.md](docs/HISTORY_SCHEMA.md). Export and import are two
+  buttons in the tab's footer.
+
+  ![The Прогрес tab: the record, the average of the last five attempts, the day streak, a trend over attempts and the weak phrases](docs/screenshots/trainer-progress.png)
 - **Punch-in.** Seek inside an attempt and "Співати" becomes "Перезаписати з …": the same take is re-recorded from that point. Нова спроба records a separate take; Скасувати перезапис restores the previous version of the last punch.
+- **Built-in lessons.** Three warm-ups with exact synthetic targets; progress on them is kept per exercise, with one lamp
+  per difficulty level, because one exercise is one skill sung through nine keys.
 - **Loop and seek.** Whole song by default; draw an A–B region under the waveform or press A / B while listening, loop it
   without gaps. Seek during playback and the music picks up from there.
 - **Vocal on/off.** One button (V) mutes the original vocal stem so you hear only the backing and yourself.
@@ -73,8 +85,12 @@ tests/e2e/run.sh
 
 `scoring.mjs` checks the engine (correct / wrong / uncertain / silence / no-target / no double counting), trace persistence,
 seek and miss navigation, lyrics. `audio.mjs` drives the real audio path with Chrome's fake microphone: seamless loop, live
-seek, vocal toggle, recording, punch-in, review playback. Both require a clean console. Set `LUMA_BROWSER=/path/to/chrome`
-to use a specific Chromium build.
+seek, vocal toggle, an attempt with the recording switch off and the same with it on, punch-in, review playback.
+`history.mjs` builds a practice history without a microphone and checks that it survives a reload and a rebuilt trainer,
+that a stored trace re-scores to the same numbers, that records stay inside one ruler, and that export and import
+round-trip. `progress.mjs` checks the Прогрес tab: trend, weak phrases, the record shadow, the day streak, lesson lamps,
+and the 390 px layout. Every suite requires a clean console. Set `LUMA_BROWSER=/path/to/chrome` to use a specific
+Chromium build.
 
 ## Layout
 
@@ -83,7 +99,7 @@ app/       head.html (styles + markup, {{TITLE}} / {{ARTIST}} placeholders), wor
 studio/    prepare_song.py (pipeline), build_html.py (package → HTML, --rebuild), studio_server.py + studio.html, luma-studio.sh
 examples/  make_demo.py (synthetic demo song)
 tests/e2e/ Playwright suites
-docs/      TARGET_MAP_SCHEMA.md, PIPELINE.md, SCORING.md, screenshots
+docs/      TARGET_MAP_SCHEMA.md, PIPELINE.md, SCORING.md, HISTORY_SCHEMA.md, PROGRESS_DESIGN.md, LESSONS.md, screenshots
 ```
 
 Updating the app for already built trainers: `studio/build_html.py --rebuild songs/Luma_*.html` keeps each file's song
@@ -91,8 +107,12 @@ data byte-for-byte and swaps in the current `app/` parts.
 
 ## Privacy
 
-The trainer makes no network requests. Recordings live in the tab's memory until you save them. The Studio sends audio to
-Soniox only when a key is configured, only for word timings.
+The trainer makes no network requests. Recordings live in the tab's memory until you save them, and the voice is only
+recorded at all when you turn that switch on. The practice history is IndexedDB in the trainer page's own origin: it holds
+pitch, confidence and level numbers plus scores, never audio, and a voice cannot be reconstructed from it. It stays on this
+computer; export is a file you choose to write, and "Очистити пісню" in the Прогрес tab deletes a song's history. Because
+the history belongs to an origin and a browser profile, a different port or profile starts empty — that is what export is
+for. The Studio sends audio to Soniox only when a key is configured, only for word timings.
 
 ## License
 
