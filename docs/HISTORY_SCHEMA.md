@@ -95,11 +95,11 @@ Four bytes a frame instead of 96 000 a second:
 - **Attempt summaries are never deleted.** Ten attempts a day is about 4 MB a year.
 - **Traces** are kept for every standing record (song, each phrase, each exercise) and for the last 20 attempts of the
   song. The rest drop out as attempts leave the twenty; the summary and the score stay.
-- **Ceiling: 250 MB in this origin.** Past it, the oldest traces that hold no record fall away first, a hundred at a
-  time, and the browser's own storage estimate decides when there is room again and the thinning stops. The footer of
-  the Прогрес tab says how many went and asks for an export. Scores are never touched by the ceiling.
-- A `QuotaExceededError` never loses the attempt from the tab: it stays in the list marked «не збережено в історію», and
-  the footer of the Прогрес tab says what to do.
+- There is no storage ceiling of its own. The retention above keeps a song's traces to about 3 MB, so a quarter of a
+  gigabyte would take the history of some eighty songs, and a browser quota that does run out is caught on the write.
+- A `QuotaExceededError` never loses the attempt from the tab: it stays in the list marked «не збережено в історію» and
+  counts as unsaved, so × asks first, closing the tab warns, and the tab never drops it to make room. The footer of the
+  Прогрес tab says what to do, and «Очистити пісню» writes such attempts again once there is room.
 - `navigator.storage.persist()` is requested once, on the first write. If the browser says no, the footer says the
   browser may clear the history and that export is the answer.
 
@@ -116,7 +116,9 @@ One file, schema `luma.history.v1`:
 
 - The trainer exports the current song or everything; the same envelope with a single run is what the JSON button on an
   attempt card writes, so one attempt can travel on its own.
-- Import merges by attempt `id`: importing the same file twice changes nothing.
+- Import merges by attempt `id`: importing the same file twice changes nothing. A song row this browser already has
+  stays in charge: an import adds its new attempts to `runCount`, keeps the earlier `firstRunAt` and the later
+  `lastRunAt`, and leaves the row untouched when the file brings no new attempt for that song.
 - Validation is bounded the way `importFile()` already is — counts, string lengths, value ranges, song keys, per-phrase
   numbers — and any violation rejects the whole file with a readable message before a single record is written. What the
   validator cannot foresee (a base64 channel that will not decode, a store that refuses a key) is caught too and answered

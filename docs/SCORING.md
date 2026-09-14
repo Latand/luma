@@ -39,8 +39,11 @@ it is scored the same way, and it goes into the local history. ▶ on such an at
 trace instead of your voice; the WAV button is absent and CSV and JSON are not. Punch-in needs the attempt and the switch
 to agree: re-recording into an attempt recorded the other way would leave half of it with audio and half without.
 
-Two budgets apply to the tab, not to the history. Traces: 20 attempts and 400 000 points, and an attempt deleted from the
-tab stays in the history. Audio: the old 10 attempts / 100 MiB, and only while the switch is on.
+Two budgets apply to the tab; the history has neither. Traces: 20 attempts and 400 000 points, and they never stop
+practice. When a new attempt needs room, the oldest attempt that is already in the history, holds no WAV, is not on screen
+and is not held by undo leaves the tab by itself. «Співати» refuses only when no attempt qualifies, and the message then
+asks to save what matters as a file. Audio: the old 10 attempts / 100 MiB, and only while the switch is on. Every pass of
+the A–B auto-repeat is an attempt of its own.
 
 ## Trace history
 The trace stays on screen after the take: drag the plot, use ← → or the wheel, or jump between misses. CSV export includes
@@ -63,7 +66,9 @@ Every attempt also stores three numbers derived from the same pass over its fram
 so silence under a target is visible on its own), the **median |Δ|** in cents over every drawn target, and the **draft
 share** — frames whose target has `ok = 0`. Draft targets count towards the match exactly as they do live; there is no
 separate "draft scale", because draftness is a property of the target map and the map version is already part of the key
-below. The share is shown next to the record, so a number never passes for more than it is.
+below. The Прогрес tab prints the share for the area on screen (the song, the phrase or the A–B fragment), and a record
+over any draft target is labelled «Рекорд · за чернеткою», the way the attempt card says «Попередня оцінка за чернеткою»,
+so a number never passes for more than it is.
 
 Two scores may be compared only when they were measured with the same ruler:
 
@@ -86,7 +91,9 @@ recorded at that very fragment.
 
 **Song record**: the best match among full passes of one ruler (≥ 95 % of the song's frames with a target, at least 4 s of
 them). **Phrase record**: the best match among attempts that covered ≥ 80 % of that phrase, with at least 1.5 s of target
-in it — without those floors "100 % over 0.3 s" would hold first place forever. Ties go to the smaller median |Δ|, then to
+in it — without those floors "100 % over 0.3 s" would hold first place forever. A phrase with under 1.5 s of target in
+the whole map can therefore never hold one: the weak-phrase map labels it «закоротка для рекорду», puts it last and leaves
+it out of the count of phrases without a counted attempt. Ties go to the smaller median |Δ|, then to
 the earlier date. For a lesson a record is also kept per exercise, on each level separately, because one exercise is one
 skill sung in nine keys. Rhythm and entry timing are still not scored: the end-to-end microphone latency is not measured,
 so a rhythm mark would be an invention.
