@@ -25,7 +25,7 @@ SPEEDS = ((1.0, '', ('-b:a', '256k')), (0.8, '_80', ('-q:a', '2')))
 FILES = tuple(role + suffix + '.mp3' for role in ROLES for _, suffix, _ in SPEEDS)
 ENCODER = 'libmp3lame 44.1 kHz stereo: 1.0x CBR 256 kb/s, 0.8x VBR -q:a 2'
 
-def ffmpeg(*a): subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', *map(str, a)], check=True)
+def ffmpeg(*a): subprocess.run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', *map(str, a)], check=True)
 
 @functools.cache
 def tempo_engine() -> str:
@@ -38,7 +38,7 @@ def tempo_filter(speed: float) -> str:
 
 def decode(path: Path, sr: int = SAMPLE_RATE) -> np.ndarray:
     """Any audio file as float32 stereo at `sr`, the same samples prepare_song's decode step writes to mix.wav."""
-    raw = subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-i', str(path), '-vn', '-ar', str(sr), '-ac', '2', '-f', 'f32le', '-'],
+    raw = subprocess.run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-i', str(path), '-vn', '-ar', str(sr), '-ac', '2', '-f', 'f32le', '-'],
                          check=True, capture_output=True).stdout
     return np.frombuffer(raw, dtype='<f4').reshape(-1, 2).copy()
 
