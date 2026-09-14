@@ -4,7 +4,8 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 PY=${LUMA_PY:-.venv/bin/python}; [ -x "$PY" ] || PY=python3
 export LUMA_PY="$PY"
-[ -f examples/demo/Demo/target.json ] || "$PY" examples/make_demo.py
+RATE=$(ffprobe -v error -select_streams a:0 -show_entries stream=sample_rate -of csv=p=0 examples/demo/Demo/foreground.mp3 2>/dev/null || true)
+[ -f examples/demo/Demo/target.json ] && [ "$RATE" = 44100 ] || "$PY" examples/make_demo.py   # demos from before 44.1 kHz stems are built again
 "$PY" studio/build_html.py examples/demo/Demo -o examples/demo/Luma_Demo.html >/dev/null   # always embed the current app/ parts
 PORT=${LUMA_TEST_PORT:-8791}
 python3 -m http.server "$PORT" --bind 127.0.0.1 --directory examples/demo >/dev/null 2>&1 &
@@ -22,4 +23,5 @@ RUN=${LUMA_JS:-bun}; command -v "$RUN" >/dev/null || RUN=node
 status=0
 for t in scoring audio ux studio scale lessons; do echo "== $t"; LUMA_SHOT="tests/e2e/shot_$t.png" "$RUN" "tests/e2e/$t.mjs" || status=1; done
 "$PY" tests/studio_test.py || status=1
+"$PY" tests/audio_stems_test.py || status=1
 exit $status
