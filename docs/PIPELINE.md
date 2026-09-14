@@ -16,11 +16,25 @@
    - *reliable* frame: valid, periodicity ≥ 0.70, level > −38 dBFS, and either pYIN agrees within 50 cents or periodicity ≥ 0.85.
    - Notes: hysteretic labelling over a median-filtered contour (a change of more than 0.72 semitones starts a new note); a note is
      `ok` when at least 55 % of its frames are reliable. Phrases are short automatic groupings for the settings dialog.
-6. **Stems.** MP3 at 1.0× and 0.8× (`atempo=0.8`, pitch preserved), padded/trimmed to identical lengths; a lossless FLAC copy of
-   the vocal stem is kept in the package for listening.
+6. **Stems.** `studio/stems.py` cuts the playback stems from the full-rate float signals, 44.1 kHz stereo with one joint gain:
+   foreground = the Demucs vocal, backing = mix − vocal. 1.0× is MP3 CBR 256 kb/s with no tempo filter; 0.8× is stretched by
+   ffmpeg's `rubberband` with both channels together (`atempo` only when ffmpeg lacks librubberband), pitch preserved, and
+   encoded VBR `-q:a 2`. All four are padded/trimmed to identical lengths. The 22 kHz copy of the vocal feeds pitch analysis and
+   transcription only. A lossless FLAC copy of the vocal stem and the upload itself (`original.<ext>`) are kept in the package.
+   [AUDIO_QUALITY.md](AUDIO_QUALITY.md) has the measurements behind these settings.
 7. **Lyrics (optional).** The mono mix is sent to Soniox `stt-async-v5`; tokens are merged into words with start/end times and
    grouped into lines. Skipped when no key is configured.
 8. **HTML.** `build_html.py` embeds the map and the stems into the app.
+
+## Upgrading songs prepared before 44.1 kHz stems
+Songs prepared earlier play 22 kHz 128 kb/s stems. `studio/upgrade_audio.py` rebuilds their audio in place from the original
+upload (found by the SHA-256 in `manifest.json`, split as original − `vocals_44k.flac` after the alignment is measured) and
+leaves `target.json`, `lyrics/`, the embedded song data and every file name byte-identical:
+
+```
+.venv/bin/python studio/upgrade_audio.py songs/* --dry-run   # the source each song would use; writes nothing
+.venv/bin/python studio/upgrade_audio.py songs/*
+```
 
 ## What the numbers mean
 `comparableSeconds` / `comparablePercentOfTrack` count reliable frames only. Automatic maps of real songs typically reach
