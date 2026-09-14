@@ -83,9 +83,9 @@ def error_db(decoded, reference):
 
 class DemoStemsTest(unittest.TestCase):
     def test_demo_trainer_plays_44k_stereo_stems(self):
+        # built here every time, so a demo left over from before 44.1 kHz stems cannot pass for the current one
         demo = ROOT / 'examples' / 'demo'
-        if not (demo / 'Demo' / 'target.json').is_file():
-            subprocess.run([sys.executable, str(ROOT / 'examples' / 'make_demo.py')], check=True, capture_output=True)
+        subprocess.run([sys.executable, str(ROOT / 'examples' / 'make_demo.py')], check=True, capture_output=True)
         for name in stems.FILES:
             p = stems.probe(demo / 'Demo' / name)
             self.assertEqual((p['codec'], p['sample_rate'], p['channels']), ('mp3', SR, 2), name)
