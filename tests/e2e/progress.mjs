@@ -1,7 +1,7 @@
 // The Прогрес tab: the trend follows the ruler, the weak-phrase map moves the loop and frames it, the record shadow
 // appears only where a record exists, and the day streak counts days, not open tabs. Lessons show exercises, not keys.
 import {execFileSync} from 'node:child_process';
-import {launch, open, window_, assert} from './lib.mjs';
+import {launch, open, window_, assert, url} from './lib.mjs';
 const py = process.env.LUMA_PY || '.venv/bin/python';
 const studio = process.env.LUMA_STUDIO_URL || 'http://127.0.0.1:8793/';
 const library = process.env.LUMA_TEST_LIBRARY;
@@ -224,6 +224,75 @@ for (const [width, height] of [[1440, 900], [390, 844]]) {
   });
   assert(contrast.length === 0, 'every line of the progress tab clears 4.5:1 at ' + width + ' px ' + JSON.stringify(contrast));
   await p.screenshot({path: 'tests/e2e/shot_progress_' + width + '.png'});
+}
+
+// ── 7 · draft targets and a short phrase: the share follows the area on screen, a record over drafts says so, a
+// phrase too short to count is not «не співано», and the trend is redrawn whenever its canvas changes size ─────────
+{
+  const dp = await b.newPage({viewport: {width: 1440, height: 900}}), dlogs = [];
+  dp.on('console', m => { if (['error', 'warning'].includes(m.type())) dlogs.push(m.type() + ': ' + m.text()); });
+  dp.on('pageerror', e => dlogs.push('PAGEERROR ' + e.message));
+  // the demo, reshaped before the trainer reads it: draft notes only past 25 s, and one more phrase over a single short note
+  await dp.addInitScript(() => { let song;
+    Object.defineProperty(window, 'LUMA_SONG', {configurable: true, get: () => song, set: v => {
+      for (const n of v.notes) if (n.a >= 25) n.ok = false;
+      const note = v.notes.find(n => n.a > 10.5 && n.b - n.a < 1);
+      v.phrases.push({id: 99, label: 'Коротка', a: note.a, b: note.b}); v.phrases.sort((x, y) => x.a - y.a); song = v; }}); });
+  await dp.goto(url); await dp.waitForFunction(() => window.Luma && window.Luma.test.history.runs); await dp.waitForTimeout(400);
+  const dph = await dp.evaluate(() => window.LUMA_SONG.phrases.map(x => ({id: x.id, a: x.a, b: x.b})));
+  const one = id => dph.find(x => x.id === id);
+  // the shares counted here from the drawn target itself, on the same 20 ms grid
+  const expect = await dp.evaluate(() => { const S = window.LUMA_SONG, share = (a, b) => { let f = 0, d = 0;
+      for (let i = Math.ceil(a / .02); i * .02 <= b; i++) { const r = window.Luma.targetAt(i * .02); if (!r) continue; f++; if (!r.ok) d++; }
+      return Math.round(100 * d / f); };
+    const q = id => S.phrases.find(x => x.id === id);
+    return {song: share(0, S.duration), clean: share(q(1).a, q(1).b), soft: share(q(4).a, q(4).b)}; });
+  const dwhole = await dp.evaluate(() => Math.ceil(window.Luma.test.history.totals().song * .97));
+  await dp.evaluate(w => window.Luma.test.history.seedMany([{match: 8000, target: w,
+    phrases: [{id: 1, target: 300, hit: 240, median: 20}, {id: 4, target: 240, hit: 200, median: 20}]}]), dwhole);
+  await dp.evaluate(() => document.getElementById('tabProgress').click());
+  const readOut = async q => {
+    await dp.evaluate(q => { const T = window.Luma.test; T.closeTrace(); if (q) T.setRange(q.a, q.b, q.id); else T.clearRange(); }, q);
+    await dp.waitForTimeout(250);
+    return dp.evaluate(() => ({ruler: document.querySelector('#progressPanel .prog-ruler').textContent,
+      label: document.querySelector('#progressPanel .prog-num span').textContent, record: document.querySelector('#progressPanel .prog-num b').textContent}));
+  };
+  const shareOf = r => Number((r.ruler.match(/чернеткових цілей <?(\d+)%/) || [])[1]);
+  const clean = await readOut(one(1)), soft = await readOut(one(4)), all = await readOut(null);
+  assert(expect.clean === 0 && shareOf(clean) === 0 && clean.record === '80%' && clean.label === 'Рекорд',
+    'a phrase with no draft target reads 0 % and a plain record ' + JSON.stringify(clean));
+  assert(expect.soft > 50 && Math.abs(shareOf(soft) - expect.soft) <= 1 && soft.record === '83%' && soft.label === 'Рекорд · за чернеткою',
+    'a phrase over draft targets reads its own share and marks its record as preliminary ' + JSON.stringify({soft, expect: expect.soft}));
+  assert(expect.song > 0 && expect.song < expect.soft && Math.abs(shareOf(all) - expect.song) <= 1 && all.label === 'Рекорд · за чернеткою',
+    'the whole song reads the share of the whole song ' + JSON.stringify({all, expect: expect.song}));
+  // a full pass: every phrase long enough to count gets a number, and the short one says why it has none
+  const ddur = await dp.evaluate(() => window.LUMA_SONG.duration);
+  await dp.evaluate(`(${SING})({a: 0, b: ${ddur}, off: 0})`); await dp.waitForTimeout(400);
+  const map = await dp.evaluate(() => ({weak: window.Luma.test.history.weak(),
+    rows: [...document.querySelectorAll('#progressPanel .prog-bar')].map(e => ({text: e.textContent, title: e.title}))}));
+  const shortRow = map.weak.find(w => w.id === 99);
+  assert(shortRow && shortRow.short && shortRow.best === null && map.weak.at(-1).id === 99 && map.weak.filter(w => !w.short).every(w => w.best !== null),
+    'after a full pass only the phrase under 1.5 s of target is left without a number, and it stands last ' + JSON.stringify(map.weak));
+  assert(!map.rows.some(r => /не співано/.test(r.text)) && /закоротка для рекорду/.test(map.rows.at(-1).text) && /1\.5 с/.test(map.rows.at(-1).title),
+    'no phrase that was sung reads «не співано», and the short one reads «закоротка для рекорду» ' + JSON.stringify(map.rows.map(r => r.text)));
+  await dp.screenshot({path: 'tests/e2e/shot_progress_draft_1440.png'});
+  // the trend: built while the panel is folded, then opened, then narrowed
+  const sized = () => dp.evaluate(() => { const cv = document.querySelector('#progressPanel .prog-trend');
+    return {width: cv.width, client: cv.clientWidth, want: Math.round(cv.clientWidth * Math.min(devicePixelRatio || 1, 2))}; });
+  await dp.locator('#takesToggle').click();
+  await dp.reload(); await dp.waitForFunction(() => window.Luma && window.Luma.test.history.runs().length >= 2, null, {timeout: 5000});
+  await dp.waitForTimeout(300);
+  const folded = await sized();
+  await dp.locator('#takesToggle').click(); await dp.waitForTimeout(250);
+  const opened = await sized();
+  assert(folded.client === 0 && opened.client > 320 && opened.width === opened.want,
+    'a trend built inside a folded panel is drawn to its real size once the panel opens ' + JSON.stringify({folded, opened}));
+  await dp.setViewportSize({width: 390, height: 844}); await dp.waitForTimeout(350);
+  const narrow = await sized();
+  assert(narrow.client > 0 && narrow.client < opened.client && narrow.width === narrow.want, 'and drawn again when the window narrows ' + JSON.stringify(narrow));
+  await dp.screenshot({path: 'tests/e2e/shot_progress_draft_390.png', fullPage: true});
+  assert(dlogs.length === 0, 'console clean on the reshaped song ' + JSON.stringify(dlogs));
+  await dp.close();
 }
 assert(logs.length === 0, 'console clean ' + JSON.stringify(logs));
 await p.screenshot({path: process.env.LUMA_SHOT || 'shot_progress.png'});

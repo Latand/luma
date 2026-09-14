@@ -144,24 +144,27 @@ for (const [name, message] of Object.entries(broken))
   assert(/[\u0400-\u04FF]/.test(message) && !/Failed to execute|not correctly encoded/.test(message),
     'a broken file refuses in Ukrainian (' + name + '): ' + message);
 assert((await hist('H.runs().length')) === parsed.runs.length, 'a refused file changes nothing in the store');
+// one later attempt from a file: the song's first date stays, the last one moves, and the same file again is a no-op
+const songRow = () => p.evaluate(() => window.Luma.test.history.exportPayload(false).then(d => JSON.stringify(d.songs[0])));
+const rowBefore = JSON.parse(await songRow());
+const stamp = new Date(Date.parse(rowBefore.lastRunAt) + 60e3).toISOString();
+const single = {...parsed, songs: [{...parsed.songs[0], firstRunAt: stamp, lastRunAt: stamp, runCount: 1}],
+  runs: [{...parsed.runs[0], id: 'imported-later-1', startedAt: stamp, endedAt: stamp, hasTrace: false}], traces: []};
+await p.evaluate(d => window.Luma.test.history.importPayload(d), single);
+const rowAfter = JSON.parse(await songRow());
+assert(rowAfter.firstRunAt === rowBefore.firstRunAt && rowAfter.lastRunAt === stamp && rowAfter.runCount === rowBefore.runCount + 1,
+  'importing a later attempt keeps the song’s first date and moves only the last one ' + JSON.stringify({
+    before: [rowBefore.firstRunAt, rowBefore.lastRunAt, rowBefore.runCount], after: [rowAfter.firstRunAt, rowAfter.lastRunAt, rowAfter.runCount]}));
+const rowText = await songRow();
+await p.evaluate(d => window.Luma.test.history.importPayload(d), single);
+assert(await songRow() === rowText, 'importing that file again leaves the song row as it was, byte for byte');
 
 // ── 8 · four hundred attempts and the song's history still opens fast ──────────────────────────────────────────
 await hist(`H.seedMany(Array.from({length: 400}, (_, i) => ({match: 5000 + i * 10, target: 900, startedAt: new Date(Date.now() - i * 36e5).toISOString()})))`);
 const ms = await hist('H.reloadMs()');
 assert((await hist('H.runs().length')) >= 400 && ms < 50, 'the history of one song opens in ' + ms + ' ms with 400+ attempts');
 
-// ── 9 · the storage ceiling drops traces that hold no record, and never a score ────────────────────────────────
-const beforeCap = await hist('({traces: H.runs().filter(r => r.hasTrace).length, runs: H.runs().length})');
-assert(beforeCap.traces > 1, 'there are traces to thin out ' + JSON.stringify(beforeCap));
-await p.evaluate(() => window.Luma.test.history.enforceCeiling());
-const afterCap = await hist('({traces: H.runs().filter(r => r.hasTrace).length, runs: H.runs().length, note: H.note()})');
-const held = await hist('H.records()');
-assert(afterCap.runs === beforeCap.runs && afterCap.traces < beforeCap.traces, 'the ceiling drops traces and keeps every score ' + JSON.stringify(afterCap));
-const recordKeptItsTrace = held.song && await hist(`H.runs().find(r => r.id === ${JSON.stringify(held.song.id)}).hasTrace`);
-assert(recordKeptItsTrace, 'the trace of the standing record survives the ceiling');
-assert(/250 МБ/.test(afterCap.note) && /експорт/.test(afterCap.note), 'the footer says what happened and what to do: ' + afterCap.note);
-
-// ── 10 · a full store never loses the attempt from the tab ──────────────────────────────────────────────────────
+// ── 10 · a full store never loses the attempt from the tab, and never lets it go quietly ────────────────────────
 await p.evaluate(() => {
   const put = IDBObjectStore.prototype.put;
   window.__restorePut = () => { IDBObjectStore.prototype.put = put; };
@@ -169,9 +172,30 @@ await p.evaluate(() => {
 });
 const kept = await sing({a: win.a, b: win.b});
 const state = await p.evaluate(() => ({takes: window.Luma.test.takes(), note: window.Luma.test.history.note()}));
-await p.evaluate(() => window.__restorePut());
-assert(state.takes.some(t => t.runId === kept.runId) && /переповнен/i.test(state.note),
+assert(state.takes.some(t => t.runId === kept.runId && t.historyError) && /переповнен/i.test(state.note),
   'a quota error keeps the attempt on screen and says so: ' + JSON.stringify(state.note));
+const unloadWarns = () => p.evaluate(() => { const e = new Event('beforeunload', {cancelable: true}); window.dispatchEvent(e); return e.defaultPrevented; });
+assert(await unloadWarns(), 'closing the tab warns while an attempt is missing from the history');
+let asked = '';
+p.once('dialog', d => { asked = d.message(); d.dismiss(); });
+await p.locator('#takesList .take-actions button[aria-label$="в історії її немає"]').first().click();
+assert(/немає в історії/.test(asked) && await p.evaluate(id => window.Luma.test.takes().some(t => t.id === id), kept.id),
+  '× on such an attempt asks first, and a «no» keeps it: ' + asked);
+// every attempt the store refused has to stay, so a tab full of them is the one case where «Співати» still refuses
+const crowd = await p.evaluate(a => { const T = window.Luma.test; while (T.takes().length < 21) T.injectTake({a, b: a + .8, points: []}); return T.takes().length; }, win.a);
+await p.waitForTimeout(400);
+await p.evaluate(() => { const T = window.Luma.test; T.closeTrace(); T.clearRange(); T.seek(0); });
+await p.locator('#singBtn').click();
+await p.waitForFunction(() => !document.getElementById('errorBanner').hidden, null, {timeout: 5000});
+const refusal = await p.evaluate(() => ({text: document.getElementById('errorText').textContent, takes: window.Luma.test.takes().length}));
+assert(/Ліміт слідів/.test(refusal.text) && !/не втратить/.test(refusal.text) && refusal.takes === crowd,
+  'with only refused attempts to drop, the trace limit refuses and promises nothing about the history: ' + refusal.text);
+await p.evaluate(() => { window.__restorePut(); document.getElementById('dismissError').click(); });
+// clearing the song is what the quota message asks for, and the refused attempts are written once there is room
+await p.evaluate(() => window.Luma.test.history.clearSong());
+await p.waitForFunction(() => window.Luma.test.takes().every(t => !t.historyError), null, {timeout: 5000});
+const written = await hist('H.runs().length');
+assert(written === crowd - 1 && !(await unloadWarns()), 'after the clear the refused attempts are in the history and closing the tab is quiet again ' + JSON.stringify({written, crowd}));
 
 // ── 11 · importing another song starts its history clean and leaves the previous song's traces alone ──────────
 const oldHash = await hist('H.songHash()');

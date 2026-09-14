@@ -166,7 +166,7 @@ await p.setViewportSize({width:390,height:844});
 assert(await p.locator('#listenBtn').getAttribute('aria-label') === 'Слухати пісню', 'mobile listen has an accessible name');
 const dimensions = await p.evaluate(() => ({page:document.documentElement.scrollWidth,view:innerWidth}));
 assert(dimensions.page === dimensions.view, 'trainer fits the narrow viewport');
-// ── two budgets: the WAV limit only when the voice is being recorded, the trace limit always ──
+// ── two budgets: the WAV limit only when the voice is being recorded; the trace limit never stops practice ──
 const setAudio=on=>p.evaluate(v=>{const c=document.getElementById('recordAudio');c.checked=v;c.dispatchEvent(new Event('change'));},on);
 await setAudio(true);
 await p.evaluate(()=>{
@@ -185,13 +185,32 @@ await p.evaluate(()=>{window.Luma.test.closeTrace();window.Luma.test.seek(600);d
 await p.locator('#singBtn').click();await p.waitForFunction(()=>window.Luma.test.state().mode==='singing',null,{timeout:9000});
 assert(await p.locator('#errorBanner').isHidden(),'with the recording switch off the WAV budget no longer stops a new attempt');
 await p.locator('#stopBtn').click();await p.waitForFunction(()=>window.Luma.test.state().mode==='idle',null,{timeout:9000});await p.waitForTimeout(600);
-// the trace budget is what stops singing now, and it says the history keeps what the tab drops
-const filled=await p.evaluate(()=>{const T=window.Luma.test;T.clearRange();
-  while(T.takes().length<20)T.injectTake({a:0,b:1,points:[],audio:false});
-  T.closeTrace();T.seek(0);return T.takes().length;});// no attempt on screen, so this is a new one and not a punch-in
-assert(filled===20,'twenty traces fit in the tab '+filled);
-await p.locator('#singBtn').click();await p.waitForFunction(()=>!document.querySelector('#errorBanner').hidden,null,{timeout:9000});
-const limit=await p.locator('#errorText').textContent();
-assert(limit.includes('Ліміт слідів')&&limit.includes('історія її не втратить'),'the 21st attempt reports the trace limit and says the history keeps the deleted one: '+limit);
+// Past twenty attempts the oldest one already in the history leaves the tab by itself: a fresh tab gets twenty, then
+// «Співати» and the A–B auto-repeat carry on to thirty, every pass an attempt of its own.
+{
+  const {page:q,logs:qlogs}=await open(b);
+  await q.evaluate(a=>{const T=window.Luma.test;for(let i=0;i<20;i++)T.injectTake({a,b:a+.8,points:[],audio:false});},win.a);
+  await q.waitForFunction(()=>window.Luma.test.history.runs().length===20,null,{timeout:9000});
+  const early=await q.evaluate(()=>window.Luma.test.takes().map(t=>t.runId));// newest first
+  await q.evaluate(a=>{const T=window.Luma.test,w=window.__room={banner:'',stopped:'',most:0};
+    T.closeTrace();T.setRange(a,a+.8);T.seek(a);document.getElementById('loopBtn').click();
+    w.timer=setInterval(()=>{w.most=Math.max(w.most,T.takes().length);
+      if(!document.getElementById('errorBanner').hidden)w.banner=document.getElementById('errorText').textContent;
+      const toast=document.getElementById('toast').textContent;if(/Повтор зупинено/.test(toast))w.stopped=toast;},30);},win.a);
+  await q.locator('#singBtn').click();
+  await q.waitForFunction(()=>window.Luma.test.history.runs().length>=30||window.__room.banner||window.__room.stopped,null,{timeout:90000});
+  await q.evaluate(()=>{if(window.Luma.test.state().loop)document.getElementById('loopBtn').click();document.getElementById('stopBtn').click();});
+  await q.waitForTimeout(1500);
+  const room=await q.evaluate(()=>{const w=window.__room,T=window.Luma.test;clearInterval(w.timer);
+    return {banner:w.banner,stopped:w.stopped,most:w.most,takes:T.takes().map(t=>t.runId),runs:T.history.runs().map(r=>r.id),count:document.getElementById('takesCount').textContent};});
+  assert(!room.banner&&!room.stopped,'21+ attempts never block «Співати» and the fragment auto-repeat '+JSON.stringify({banner:room.banner,stopped:room.stopped}));
+  assert(room.runs.length>=30,'thirty attempts in a row, ten of them sung by the auto-repeat, all land in the history '+room.runs.length);
+  assert(room.most<=20&&room.takes.length===20&&room.count==='20','the tab never holds more than twenty attempts '+JSON.stringify({most:room.most,now:room.takes.length}));
+  const gone=early.filter(id=>!room.takes.includes(id));
+  assert(gone.length>=10&&JSON.stringify(gone)===JSON.stringify(early.slice(-gone.length))&&gone.every(id=>room.runs.includes(id)),
+    'the attempts that left the tab are the oldest ones, and every one of them is in the history '+JSON.stringify({gone:gone.length}));
+  assert(qlogs.length===0,'thirty attempts in a row keep the console clean: '+JSON.stringify(qlogs));
+  await q.close();
+}
 assert(logs.length === 0, 'trainer console clean: '+JSON.stringify(logs));
 await b.close();
