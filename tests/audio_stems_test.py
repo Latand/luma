@@ -1,7 +1,9 @@
 """Playback stems at 44.1 kHz: the demo trainer's, the encoder's, and upgrade_audio rebuilding a prepared song in place.
 Synthetic audio only; no Demucs and no network."""
 import base64
+import contextlib
 import hashlib
+import io
 import json
 from pathlib import Path
 import subprocess
@@ -16,6 +18,7 @@ import soundfile as sf
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'studio'))
+import prepare_song  # noqa: E402
 import stems  # noqa: E402
 import upgrade_audio  # noqa: E402
 from build_html import build, embedded_song  # noqa: E402
@@ -75,6 +78,15 @@ def library(root, lag=0, wrong_vocal=False, with_original=True):
     return lib, pkg, upload, band * gain
 
 
+def fake_separate(seed=0):
+    """prepare_song.separate without Demucs: the voice the library was built from, at the length of the mix it is given."""
+    def separate(mix, model, device):
+        voice = voice_and_band(seed=seed)[0]
+        voice = np.concatenate([voice, np.zeros((max(len(mix) - len(voice), 0), 2), np.float32)])[:len(mix)]
+        return voice, {'model': model, 'device': device, 'seconds': 0.0}
+    return separate
+
+
 def error_db(decoded, reference):
     """How far a decoded stem is from the exact signal on the same timeline, in dB below it."""
     n = min(len(decoded), len(reference)); d = decoded[:n].astype(np.float64); r = reference[:n].astype(np.float64)
@@ -83,6 +95,7 @@ def error_db(decoded, reference):
 
 class DemoStemsTest(unittest.TestCase):
     def test_demo_trainer_plays_44k_stereo_stems(self):
+        self.assertEqual(stems.SAMPLE_RATE, 44100, 'playback is 44.1 kHz; every other rate here is read from this constant')
         # built here every time, so a demo left over from before 44.1 kHz stems cannot pass for the current one
         demo = ROOT / 'examples' / 'demo'
         subprocess.run([sys.executable, str(ROOT / 'examples' / 'make_demo.py')], check=True, capture_output=True)
@@ -162,6 +175,47 @@ class UpgradeTest(unittest.TestCase):
         lib, pkg, _, _ = library(self.root / 'b', with_original=False); before = tree(lib)
         self.assertEqual(upgrade_audio.upgrade(pkg)['source'], 'none')
         self.assertEqual(tree(lib), before)
+
+    def test_demucs_fills_in_a_missing_vocal_and_the_run_still_reports_success(self):
+        """The vocal this run writes itself is not one of the files the upgrade promised to leave alone."""
+        lib, pkg, _, _ = library(self.root); (pkg / 'vocals_44k.flac').unlink()
+        kept = {n: digest(pkg / n) for n in ('target.json', 'lyrics/vocal.json')}
+        with patch.object(prepare_song, 'separate', side_effect=fake_separate()) as sep, \
+             patch.object(sys, 'argv', ['upgrade_audio.py', str(pkg)]), contextlib.redirect_stdout(io.StringIO()) as out:
+            with self.assertRaises(SystemExit) as run: upgrade_audio.main()
+        self.assertEqual(run.exception.code, 0, out.getvalue())
+        lines = [json.loads(l) for l in out.getvalue().splitlines() if l.startswith('{')]
+        self.assertEqual(len(lines), 1, out.getvalue())
+        r = lines[0]
+        self.assertEqual((r['source'], r['checks']['kept_files_identical'], r['checks']['song_data_identical']), ('demucs', True, True), r)
+        self.assertTrue(sep.called)
+        self.assertTrue((pkg / 'vocals_44k.flac').is_file(), 'the separated vocal is stored for the next run')
+        self.assertEqual({n: digest(pkg / n) for n in kept}, kept, 'notes and lyrics stay byte-identical')
+        for name in stems.FILES:
+            p = stems.probe(pkg / name); self.assertEqual((p['codec'], p['sample_rate'], p['channels']), ('mp3', SR, 2), name)
+
+    def test_a_stored_vocal_that_changes_during_the_run_still_fails_loudly(self):
+        lib, pkg, _, _ = library(self.root, wrong_vocal=True)
+        def clobber(mix, model, device):
+            sf.write(pkg / 'vocals_44k.flac', voice_and_band(seed=2)[0], SR, subtype='PCM_24')  # something else edits the analysis stem
+            return fake_separate()(mix, model, device)
+        with patch.object(prepare_song, 'separate', clobber):
+            with self.assertRaises(RuntimeError) as raised: upgrade_audio.upgrade(pkg)
+        self.assertIn("'kept_files_identical': False", str(raised.exception))
+        self.assertIn(pkg.name, str(raised.exception))
+
+    def test_one_damaged_trainer_does_not_end_the_batch(self):
+        """build_html.data_span raises SystemExit; it must land in the report as an error and leave the rest of the run alone."""
+        _, first, _, _ = library(self.root / 'a'); _, second, _, _ = library(self.root / 'b')
+        (first.parent / 'Luma_Song.html').write_text('<html>a trainer with no embedded song data</html>', encoding='utf-8')
+        run = subprocess.run([sys.executable, str(ROOT / 'studio' / 'upgrade_audio.py'), str(first), str(second)], capture_output=True, text=True)
+        lines = [json.loads(l) for l in run.stdout.splitlines() if l.startswith('{')]
+        self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+        self.assertEqual(len(lines), 2, run.stdout)
+        self.assertIn('SystemExit', lines[0]['error'])
+        self.assertEqual((lines[1].get('source'), lines[1]['checks']['kept_files_identical']), ('original', True), lines[1])
+        self.assertEqual(lines[1]['after']['sample_rates'], [SR])
+        self.assertEqual(stems.probe(first / 'foreground.mp3')['sample_rate'], 22050, 'the damaged song is left as it was')
 
 
 if __name__ == '__main__':

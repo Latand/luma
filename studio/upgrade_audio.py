@@ -90,7 +90,7 @@ def upgrade(pkg: Path, extra: list[Path] = (), dry_run: bool = False, allow_demu
     if dry_run: return {**report, 'dry_run': True}
     if report['source'] == 'demucs' and not allow_demucs: return {**report, 'skipped': 'needs Demucs and --no-demucs was given'}
 
-    kept = fingerprint(pkg); song_text = embedded_song(html) if html.is_file() else None
+    kept = fingerprint(pkg); exempt: set[str] = set(); song_text = embedded_song(html) if html.is_file() else None
     work = Path(tempfile.mkdtemp(prefix='.audio-upgrade-', dir=pkg))
     try:
         if report['source'] == 'original':
@@ -102,7 +102,7 @@ def upgrade(pkg: Path, extra: list[Path] = (), dry_run: bool = False, allow_demu
             fore, report['separation'] = separate(mix, model, device); back = mix - fore
             if not (pkg / 'vocals_44k.flac').is_file():
                 sf.write(work / 'vocals44.wav', fore, stems.SAMPLE_RATE, subtype='FLOAT'); stems.ffmpeg('-i', work / 'vocals44.wav', '-c:a', 'flac', pkg / 'vocals_44k.flac')
-                kept.pop('vocals_44k.flac', None)
+                exempt.add('vocals_44k.flac')  # written by this run, so it is not one of the files the upgrade promises to leave alone
         gain = stems.joint_gain(fore, back)
         sf.write(work / 'foreground.wav', fore * gain, stems.SAMPLE_RATE, subtype='FLOAT'); sf.write(work / 'backing.wav', back * gain, stems.SAMPLE_RATE, subtype='FLOAT')
         del fore, back, mix, vocal
@@ -122,7 +122,8 @@ def upgrade(pkg: Path, extra: list[Path] = (), dry_run: bool = False, allow_demu
         (work / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=1), encoding='utf-8'); os.replace(work / 'manifest.json', pkg / 'manifest.json')
     finally:
         shutil.rmtree(work, ignore_errors=True)
-    checks = {'kept_files_identical': fingerprint(pkg) == kept, 'song_data_identical': song_text is None or embedded_song(html) == song_text, 'html': html.name}
+    without = lambda d: {k: v for k, v in d.items() if k not in exempt}
+    checks = {'kept_files_identical': without(fingerprint(pkg)) == without(kept), 'song_data_identical': song_text is None or embedded_song(html) == song_text, 'html': html.name}
     report.update(after=stems_now(pkg), checks=checks)
     if not (checks['kept_files_identical'] and checks['song_data_identical']): raise RuntimeError(f'{pkg.name}: data that must stay identical changed: {checks}')
     return report
@@ -150,7 +151,9 @@ def main():
         if not (p / 'target.json').is_file(): continue
         t0 = time.time()
         try: r = upgrade(p, [Path(d) for d in a.originals], a.dry_run, not a.no_demucs, a.device, a.force)
-        except Exception as e: failed += 1; r = {'package': p.name, 'error': f'{type(e).__name__}: {e}'}
+        # SystemExit too: build_html.data_span and prepare_song.separate raise it as CLIs would, and one damaged song must not
+        # end the batch. KeyboardInterrupt is a BaseException of its own and still stops the run.
+        except (Exception, SystemExit) as e: failed += 1; r = {'package': p.name, 'error': f'{type(e).__name__}: {e}'}
         r['seconds'] = round(time.time() - t0, 1); log(summary(r)); print(json.dumps(r, ensure_ascii=False), flush=True)
     sys.exit(1 if failed else 0)
 
