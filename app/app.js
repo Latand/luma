@@ -8,8 +8,9 @@ const GRID=.02;// scoring frame, seconds of song time
 let song=window.LUMA_SONG,assets=window.LUMA_ASSETS,baseNotes=structuredClone(song.notes);
 // Difficulty presets: corridor width, how far in time a sung frame may sit from the grid frame, share of a note's frames needed for ✓, and whether octave errors are forgiven.
 const LEVELS={easy:{tolerance:80,slack:.12,ratio:.35,octaveFree:true,label:'легко'},normal:{tolerance:50,slack:.06,ratio:.5,octaveFree:false,label:'звично'},strict:{tolerance:35,slack:.05,ratio:.65,octaveFree:false,label:'точно'}};
-const prefs={gate:-48,octave:0,tolerance:50,level:'normal',latency:0,back:.75,fore:.45,vocal:true,view:'notes',speed:1,loop:false,mic:'',lyrics:true,takesOpen:true,viewDefault:3};
-try{const p=JSON.parse(localStorage.getItem('luma.trainer.settings')||'{}');for(const [k,a,b]of[['gate',-70,-25],['octave',-12,12],['tolerance',10,100],['latency',-500,1000],['back',0,1],['fore',0,1]])if(Number.isFinite(p[k]))prefs[k]=clamp(p[k],a,b);if(![-12,0,12].includes(prefs.octave))prefs.octave=0;if(typeof p.lyrics==='boolean')prefs.lyrics=p.lyrics;if(typeof p.takesOpen==='boolean')prefs.takesOpen=p.takesOpen;if(typeof p.vocal==='boolean')prefs.vocal=p.vocal;if(p.level in LEVELS||p.level==='custom')prefs.level=p.level;if(prefs.level!=='custom')prefs.tolerance=LEVELS[prefs.level].tolerance;
+const prefs={gate:-48,octave:0,tolerance:50,level:'normal',latency:0,back:.75,fore:.45,vocal:true,view:'notes',speed:1,loop:false,mic:'',lyrics:true,takesOpen:true,viewDefault:3,audio:false,shadow:true,tab:'takes',audioNotice:false};
+let hadSettings=false;// an empty profile has nothing to be told about a change it did not live through
+try{const saved=localStorage.getItem('luma.trainer.settings');hadSettings=!!saved;const p=JSON.parse(saved||'{}');for(const [k,a,b]of[['gate',-70,-25],['octave',-12,12],['tolerance',10,100],['latency',-500,1000],['back',0,1],['fore',0,1]])if(Number.isFinite(p[k]))prefs[k]=clamp(p[k],a,b);if(![-12,0,12].includes(prefs.octave))prefs.octave=0;for(const k of ['lyrics','takesOpen','vocal','audio','shadow','audioNotice'])if(typeof p[k]==='boolean')prefs[k]=p[k];if(p.tab==='takes'||p.tab==='progress')prefs.tab=p.tab;if(p.level in LEVELS||p.level==='custom')prefs.level=p.level;if(prefs.level!=='custom')prefs.tolerance=LEVELS[prefs.level].tolerance;
  // notes became the default on 2026-09-12; a choice saved under an older default is not a choice, so it is not carried over
  if(p.viewDefault===3&&(p.view==='notes'||p.view==='contour'))prefs.view=p.view;}catch(_){}
 function levelOpt(){const L=LEVELS[prefs.level]||LEVELS.normal;return{tolerance:prefs.level==='custom'?prefs.tolerance:L.tolerance,slack:L.slack,ratio:L.ratio,octaveFree:L.octaveFree,level:prefs.level};}
@@ -17,7 +18,7 @@ function levelLabel(opt){return opt.level==='custom'?'свій коридор':(
 // Signed distance in cents; on the easy level the octave is forgiven (distance folds into ±6 semitones).
 function centsOff(m,refM,opt){let d=m-refM;if(opt.octaveFree){d=((d%12)+12)%12;if(d>6)d-=12;}return d*100;}
 const LOOP_LANE=24;
-const s={ctx:null,stream:null,capture:null,micSource:null,worker:null,micGeneration:0,busy:false,cancel:0,mode:'idle',transport:null,sources:[],endTimer:null,nextTimer:null,bufs:new Map(),gains:null,pos:song.initialTime||0,range:{a:0,b:song.duration},rangeId:0,history:[],current:null,takes:[],takeCounter:0,pending:new Map(),awaitFinish:false,trace:null,live:null,verified:[],dirty:true,raf:0,lastDraw:0,lastFrame:0,lastUI:0,rangeLo:48,rangeHi:76,liveSmooth:null,lastSmoothT:0,toastTimer:0,edit:null,computeMs:0,windowMs:0,unsaved:false,undoPunch:null,busyFor:'',scrub:null,lyricKey:'',resumeAt:null,tlDrag:null,seekTimer:0,dense:false,stageH:0};
+const s={ctx:null,stream:null,capture:null,micSource:null,worker:null,micGeneration:0,busy:false,cancel:0,mode:'idle',transport:null,sources:[],endTimer:null,nextTimer:null,bufs:new Map(),gains:null,pos:song.initialTime||0,range:{a:0,b:song.duration},rangeId:0,history:[],current:null,takes:[],takeCounter:0,pending:new Map(),awaitFinish:false,trace:null,live:null,verified:[],dirty:true,raf:0,lastDraw:0,lastFrame:0,lastUI:0,rangeLo:48,rangeHi:76,liveSmooth:null,lastSmoothT:0,toastTimer:0,edit:null,computeMs:0,windowMs:0,unsaved:false,undoPunch:null,busyFor:'',scrub:null,lyricKey:'',resumeAt:null,tlDrag:null,seekTimer:0,dense:false,stageH:0,hist:{runs:[],days:[],loaded:false,note:'',persisted:null,stamp:'',stale:false},shadow:null,shadowSig:'',progressSig:'',trendScope:'',weakAll:false,roomNotice:false};
 const canvas=$('chart'),g=canvas.getContext('2d',{alpha:false}),tl=$('timeline'),tg=tl.getContext('2d',{alpha:false});let W=1,H=1,DPR=1,TW=1,TH=1;
 const reduced=matchMedia('(prefers-reduced-motion: reduce)');
 function fmt(t){t=Math.max(0,Number.isFinite(t)?t:0);return String(Math.floor(t/60)).padStart(2,'0')+':'+String(Math.floor(t%60)).padStart(2,'0');}
@@ -29,7 +30,7 @@ function toast(text){$('toast').textContent=text;$('toast').classList.add('show'
 // kind 'mic': microphone trouble, so the banner offers the microphone settings (or the Studio link on file://). Other errors get no action.
 function error(text,kind=''){$('errorText').textContent=text;$('errorBanner').hidden=false;const file=location.protocol==='file:';$('studioLink').hidden=!(kind==='mic'&&file);$('errorSettings').hidden=!(kind==='mic'&&!file);if($('settingsDialog').open)$('settingsDialog').close();updateStatus();say(text);}
 function savePrefs(){try{localStorage.setItem('luma.trainer.settings',JSON.stringify(prefs));}catch(_){}}
-function saveEdits(){try{localStorage.setItem('luma.target.'+song.id,JSON.stringify({notes:song.notes,verified:s.verified}));}catch(_){toast('Не вдалося зберегти правки у браузері. Завантаж JSON цілі.');}}
+function saveEdits(){invalidateMap();try{localStorage.setItem('luma.target.'+song.id,JSON.stringify({notes:song.notes,verified:s.verified}));}catch(_){toast('Не вдалося зберегти правки у браузері. Завантаж JSON цілі.');}}
 function loadEdits(){s.verified=[];try{const d=JSON.parse(localStorage.getItem('luma.target.'+song.id)||'null');if(d&&validNotes(d.notes,song.duration)){song.notes=d.notes;s.verified=(d.verified||[]).filter(r=>Number.isFinite(r.a)&&Number.isFinite(r.b)&&r.a>=0&&r.b<=song.duration&&r.b>r.a);}}catch(_){}}
 function validNotes(a,d){return Array.isArray(a)&&a.length<=20000&&a.every(n=>Number.isFinite(n.id)&&Number.isFinite(n.a)&&Number.isFinite(n.b)&&Number.isFinite(n.m)&&n.a>=0&&n.b>n.a&&n.b<=d+.05&&n.m>=24&&n.m<=108);}
 function validLyrics(a){return Array.isArray(a)&&a.length<=5000&&a.every(l=>Number.isFinite(l.a)&&Number.isFinite(l.b)&&Array.isArray(l.words)&&l.words.every(w=>Number.isFinite(w.a)&&Number.isFinite(w.b)&&typeof w.w==='string'));}
@@ -142,7 +143,7 @@ function populateSong(){
  // Whole song by default; the user draws a loop region on the timeline when a fragment is wanted.
  s.rangeId=0;s.range={a:0,b:song.duration};s.pos=clamp(song.initialTime||0,0,song.duration);
  if(!validLyrics(song.lyrics))song.lyrics=[];$('lyricsBtn').hidden=!song.lyrics.length;
- baseNotes=structuredClone(song.notes);loadEdits();setRangeScale();sync();
+ baseNotes=structuredClone(song.notes);loadEdits();invalidateMap();setRangeScale();sync();
 }
 function sync(){
  s.dirty=true;$('lyricBand').hidden=!prefs.lyrics||!song.lyrics.length;
@@ -163,8 +164,9 @@ function sync(){
  $('repeatMissBtn').hidden=!traceShown()||!missRuns(s.trace.score).length;$('repeatMissBtn').disabled=active||s.busy||s.awaitFinish;
  $('levelContext').textContent=traceShown()?'Наступна спроба':'Рівень';
  const ver=rangeVerified();$('qualityPill').textContent=ver?'Фрагмент підтверджений':'Чернетка мелодії';$('qualityBtn').classList.toggle('ok',ver);$('confirmTarget').checked=ver;
- $('micToggle').textContent=s.stream?'Вимкнути мікрофон':'Увімкнути лише мікрофон';$('micToggle').disabled=active||s.busy||s.awaitFinish;$('takesPanel').hidden=!s.takes.length;$('takesPanel').dataset.open=prefs.takesOpen?'1':'0';$('takesToggle').setAttribute('aria-expanded',String(prefs.takesOpen));$('takesCount').textContent=s.takes.length;
- $('lyricsBtn').setAttribute('aria-pressed',String(prefs.lyrics));
+ $('micToggle').textContent=s.stream?'Вимкнути мікрофон':'Увімкнути лише мікрофон';$('micToggle').disabled=active||s.busy||s.awaitFinish;$('takesPanel').dataset.open=prefs.takesOpen?'1':'0';$('takesToggle').setAttribute('aria-expanded',String(prefs.takesOpen));$('takesCount').textContent=s.takes.length;
+ $('lyricsBtn').setAttribute('aria-pressed',String(prefs.lyrics));$('shadowBtn').setAttribute('aria-pressed',String(prefs.shadow));$('recordAudio').checked=prefs.audio;
+ refreshShadow();renderProgress();
  for(const b of document.querySelectorAll('[data-view]')){b.classList.toggle('active',b.dataset.view===prefs.view);b.setAttribute('aria-pressed',String(b.dataset.view===prefs.view));b.disabled=active||s.busy||s.awaitFinish;}
  const rv=traceShown();$('reviewBar').hidden=$('reviewDivider').hidden=!rv;if(rv){const t=s.trace.take,runs=missRuns(s.trace.score);$('reviewLabel').textContent='Спроба '+String(t.id).padStart(2,'0');const pct=scorePct(s.trace.score);$('reviewPct').textContent=pct===null?'—':pct+'%';$('missCount').textContent=runs.length?runs.length+' '+plural(runs.length,'промах','промахи','промахів'):'без промахів';$('prevMiss').disabled=$('nextMiss').disabled=!runs.length||s.mode!=='idle';}
  $('chartWrap').classList.toggle('scrub',s.mode!=='singing');
@@ -216,59 +218,92 @@ function handleWorker(m){
 }
 function clearSources(){clearTimeout(s.endTimer);s.endTimer=null;for(const n of s.sources){n.onended=null;try{n.stop();n.disconnect();}catch(_){}}s.sources=[];}
 function addSource(buffer,gain,when,offset,duration,onended){const n=s.ctx.createBufferSource();n.buffer=buffer;n.connect(gain);n.onended=onended||null;const len=Math.min(duration,buffer.duration-offset);if(len>0){n.start(when,Math.max(0,offset),len);s.sources.push(n);}return n;}
-function capacity(){
- const size=s.takes.reduce((a,t)=>a+t.blob.size,0)+(s.undoPunch?.before.blob.size||0),seg=nextSegment(true),punch=seg.punch;
+// Two budgets, counted at once. Traces are ~4 bytes a frame and every attempt is already in the history, so the trace
+// budget never stops practice: when a new attempt needs room, the oldest attempt that is safe to drop leaves the tab by
+// itself. WAV is 96 KB/s, so its old limit stands — but only when the user asked for audio, and it only asks to turn
+// the recording off.
+const TRACE_TAKES=20,TRACE_POINTS=400000,AUDIO_TAKES=10,AUDIO_BYTES=100*1024*1024;
+// Safe to drop: its row is in the history, it holds no WAV, it is not on screen and undo does not lean on it.
+function evictable(t,stored){return !t.hasAudio&&!t.historyError&&s.trace?.take!==t&&s.undoPunch?.after!==t&&stored.has(t.runId);}
+// The attempts, oldest first, that leave so one more fits the trace budget; null when too few of them may go.
+function traceRoom(){
+ let count=s.takes.length,points=s.takes.reduce((a,t)=>a+t.points.length,0);const out=[];
+ if(count<TRACE_TAKES&&points<TRACE_POINTS)return out;
+ const stored=new Set(s.hist.runs.map(r=>r.id));
+ for(let i=s.takes.length-1;i>=0&&(count>=TRACE_TAKES||points>=TRACE_POINTS);i--){const t=s.takes[i];if(!evictable(t,stored))continue;out.push(t);count--;points-=t.points.length;}
+ return count<TRACE_TAKES&&points<TRACE_POINTS?out:null;
+}
+// fresh: a pass of the A–B auto-repeat, which is a new attempt even while the pass before it is still on screen.
+function capacity(fresh=false){
+ const seg=nextSegment(true,fresh),punch=seg.punch;
+ if(!punch&&!traceRoom())return{ok:false,kind:'trace',message:'Ліміт слідів: '+(s.takes.length>=TRACE_TAKES?TRACE_TAKES+' спроб':'400 000 точок голосу')+' у вкладці, і жодну з них вкладка не прибере сама: цих спроб немає в історії або в них WAV. Збережи потрібні (JSON, WAV) і видали зайві.'};
+ if(!prefs.audio&&!punch?.hasAudio)return{ok:true};
+ const size=s.takes.reduce((a,t)=>a+(t.blob?.size||0),0)+(s.undoPunch?.before.blob?.size||0);
  // Undo retains the old full WAV. Reserve the full merged replacement, even for a short selected punch region.
  const duration=punch?Math.max(punch.duration,(seg.end-punch.a)/punch.speed):Math.max(0,(seg.end-seg.start)/seg.speed);
  const bytes=44+Math.ceil(duration*(punch?.sampleRate||s.ctx?.sampleRate||48000))*2;
- return (punch||s.takes.length<10)&&size+bytes<100*1024*1024;
+ return (punch||s.takes.filter(t=>t.hasAudio).length<AUDIO_TAKES)&&size+bytes<AUDIO_BYTES?{ok:true}
+  :{ok:false,kind:'audio',message:'Ліміт пам’яті: 10 спроб або 100 МіБ. Збережи WAV або вимкни запис голосу в налаштуваннях.'};
+}
+// A new attempt is starting: what traceRoom() picked leaves the tab, and its row stays in the history.
+function makeRoom(){
+ const room=traceRoom();if(!room?.length)return;
+ for(const t of room){s.takes.splice(s.takes.indexOf(t),1);if(t.url)URL.revokeObjectURL(t.url);}
+ renderTakes();
+ if(!s.roomNotice){s.roomNotice=true;toast('У вкладці лишаються '+TRACE_TAKES+' останніх спроб. Старіші — в історії, вкладка «Прогрес».');}
 }
 // Punch-in: with a take on screen and the playhead inside it (same speed), "Співати" re-records that take from here instead of starting a new one.
-function punchTarget(){if(!traceShown()||s.mode!=='idle')return null;const t=s.trace.take;return t.speed===prefs.speed&&s.pos>=t.a-.01&&s.pos<t.endSong-.15?t:null;}
+function punchTarget(){if(!traceShown()||s.mode!=='idle')return null;const t=s.trace.take;return t.speed===prefs.speed&&!!t.hasAudio===!!prefs.audio&&s.pos>=t.a-.01&&s.pos<t.endSong-.15?t:null;}
 function wavHeaderBuf(count,rate){const b=new ArrayBuffer(44),v=new DataView(b);const text=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i));};text(0,'RIFF');v.setUint32(4,36+count*2,true);text(8,'WAVE');text(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,rate,true);v.setUint32(28,rate*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);text(36,'data');v.setUint32(40,count*2,true);return b;}
 // Splice a freshly recorded segment into an existing take: old audio before the punch point, new audio, then whatever old audio lies beyond the new end.
 function mergeTake(old,meta,m){
- const sr=m.sampleRate;if(sr!==old.sampleRate)return null;const speed=old.speed;const oldCount=Math.floor((old.blob.size-44)/2);
- const cut=clamp(Math.round((meta.a-old.a)/speed*sr),0,oldCount);const newCount=Math.floor((m.blob.size-44)/2);const newEndSong=meta.a+newCount/sr*speed;
- const parts=[old.blob.slice(44,44+cut*2),m.blob.slice(44,44+newCount*2)];let total=cut+newCount;let tailStart=null;
- if(old.endSong>newEndSong+.02){tailStart=clamp(Math.round((newEndSong-old.a)/speed*sr),0,oldCount);parts.push(old.blob.slice(44+tailStart*2));total+=oldCount-tailStart;}
- const blob=new Blob([wavHeaderBuf(total,sr),...parts],{type:'audio/wav'});const offT=(meta.a-old.a)/speed;
- const strip=p=>({t:p.t,f:p.f,confidence:p.confidence,db:p.db,rms:p.rms,peak:p.peak});
+ if(!!old.hasAudio!==!!m.hasAudio)return null;
+ const speed=old.speed,offT=(meta.a-old.a)/speed,newEndSong=meta.a+m.duration*speed,tail=old.endSong>newEndSong+.02;
+ let blob=null,duration=tail?old.duration:offT+m.duration;
+ if(old.hasAudio){
+  const sr=m.sampleRate;if(sr!==old.sampleRate)return null;const oldCount=Math.floor((old.blob.size-44)/2);
+  const cut=clamp(Math.round(offT*sr),0,oldCount),newCount=Math.floor((m.blob.size-44)/2);
+  const parts=[old.blob.slice(44,44+cut*2),m.blob.slice(44,44+newCount*2)];let total=cut+newCount;
+  if(tail){const tailStart=clamp(Math.round((newEndSong-old.a)/speed*sr),0,oldCount);parts.push(old.blob.slice(44+tailStart*2));total+=oldCount-tailStart;}
+  blob=new Blob([wavHeaderBuf(total,sr),...parts],{type:'audio/wav'});duration=total/sr;
+ }
+ const strip=p=>({t:p.t,f:p.f,confidence:p.confidence,db:p.db});
  const points=[...old.points.filter(p=>p.songT<meta.a).map(strip),...m.points.map(p=>({...strip(p),t:p.t+offT}))];
- if(tailStart!==null)points.push(...old.points.filter(p=>p.songT>=newEndSong).map(strip));
- const duration=total/sr;const meta2={...meta,id:old.id,a:old.a,b:Math.max(old.b,meta.b),speed,startedAt:old.startedAt,punches:(old.punches||0)+1,lastPunchAt:meta.a};
- return {meta:meta2,m:{...m,id:old.id,blob,duration,start:0,end:duration,points,gap:0}};
+ if(tail)points.push(...old.points.filter(p=>p.songT>=newEndSong).map(strip));
+ const meta2={...meta,id:old.id,a:old.a,b:Math.max(old.b,meta.b),speed,startedAt:old.startedAt,punches:(old.punches||0)+1,lastPunchAt:meta.a};
+ return {meta:meta2,m:{...m,id:old.id,blob,duration,start:0,end:duration,points,gap:0,clipped:!!old.clipped||!!m.clipped}};
 }
 // Where the next Listen or Sing pass runs, without touching state. The A–B fragment applies from inside it and from its
 // end (a finished pass parks the playhead there); with the loop on, from anywhere; otherwise the song plays on to its end.
-// A punch-in re-records the shown take from the playhead. capacity() reads this, startTransport() applies it.
-function nextSegment(sing){
- const speed=prefs.speed,punch=sing?punchTarget():null;let pos=s.pos>=song.duration-.1?0:s.pos;
+// A punch-in re-records the shown take from the playhead, except on a fresh pass of the auto-repeat. capacity() reads
+// this, startTransport() applies it.
+function nextSegment(sing,fresh=false){
+ const speed=prefs.speed,punch=sing&&!fresh?punchTarget():null;let pos=s.pos>=song.duration-.1?0:s.pos;
  if(punch)return{start:pos,end:Math.max(s.range.b,punch.endSong),speed,loop:null,punch};
  const cr=customRange(),atEnd=cr&&pos>=s.range.b-.1&&pos<=s.range.b+.25;
  if(cr&&(atEnd||prefs.loop&&(pos<s.range.a||pos>=s.range.b-.1)))pos=s.range.a;
  const inside=pos>=s.range.a-.01&&pos<s.range.b-.1;
  return inside?{start:Math.max(pos,s.range.a),end:s.range.b,speed,loop:!sing&&prefs.loop&&cr?{a:s.range.a,b:s.range.b}:null,punch:null}:{start:pos,end:song.duration,speed,loop:null,punch:null};
 }
-function takeMeta(offset,end,speed){const L=levelOpt();return{id:++s.takeCounter,a:offset,b:end,speed,octave:prefs.octave,view:prefs.view,tolerance:L.tolerance,slack:L.slack,ratio:L.ratio,octaveFree:L.octaveFree,level:L.level,latency:prefs.latency,referenceId:song.id,rangeId:s.rangeId,verified:structuredClone(s.verified),startedAt:new Date().toISOString()};}
+function takeMeta(offset,end,speed){const L=levelOpt();return{id:++s.takeCounter,a:offset,b:end,speed,octave:prefs.octave,view:prefs.view,tolerance:L.tolerance,slack:L.slack,ratio:L.ratio,octaveFree:L.octaveFree,level:L.level,latency:prefs.latency,referenceId:song.id,rangeId:s.rangeId,verified:structuredClone(s.verified),startedAt:new Date().toISOString(),hasAudio:!!prefs.audio,mapVersion:mapVersion()};}
 function scheduleSources(b,when,offset,end,speed,loop,token){
  const duration=(end-offset)/speed;
  const back=addSource(b.back,s.gains.back,when,offset/speed,loop?b.back.duration-offset/speed:duration,loop?null:()=>naturalEnd(token)),fore=addSource(b.fore,s.gains.fore,when,offset/speed,loop?b.fore.duration-offset/speed:duration);
  if(loop)for(const n of [back,fore]){n.loop=true;n.loopStart=loop.a/speed;n.loopEnd=loop.b/speed;}
  return duration;}
-async function startTransport(sing,quick=false){
+async function startTransport(sing,quick=false,fresh=false){
  if(s.awaitFinish)return;if(s.busy){s.cancel++;s.busy=false;await releaseMic();sync();return;}
  if(s.mode!=='idle'){stopTransport('user');return;}
  clearTimeout(s.nextTimer);const token=++s.cancel;s.busy=true;s.busyFor=sing?'sing':'listen';$('errorBanner').hidden=true;sync();
  try{
-  await ensureContext();if(sing&&!capacity())throw Error('Ліміт пам’яті: 10 спроб або 100 МіБ. Збережи й видали стару спробу перед новою.');
+  await ensureContext();const cap=capacity(fresh);if(sing&&!cap.ok)throw Error(cap.message);
   if(sing&&!await ensureMic(token))return;
   const b=await buffers(prefs.speed);if(token!==s.cancel)return;await s.ctx.resume();
-  const seg=nextSegment(sing),punch=seg.punch;if(sing&&!punch)s.trace=null;if(seg.start!==s.pos){s.pos=seg.start;setRangeScale();}// only a moved playhead is framed at once; otherwise the eased planner takes over
+  const seg=nextSegment(sing,fresh),punch=seg.punch;if(sing&&!punch){makeRoom();s.trace=null;}if(seg.start!==s.pos){s.pos=seg.start;setRangeScale();}// only a moved playhead is framed at once; otherwise the eased planner takes over
   const speed=seg.speed,when=s.ctx.currentTime+(sing?(quick?.6:2.1):.12),offset=seg.start,end=seg.end,loop=seg.loop;
   s.transport={token,when,offset,end,speed,loop};s.mode=sing?'singing':'listen';s.history=punch?punch.points.filter(p=>p.songT<offset).map(p=>({...p,raw:p.m})):[];s.current=null;s.liveSmooth=null;s.busy=false;s.live=null;
   const duration=scheduleSources(b,when,offset,end,speed,loop,token);
-  if(sing){const lag=prefs.latency/1000,meta=takeMeta(offset,end,speed);if(punch){meta.punchInto=punch.id;s.trace=null;}s.pending.set(meta.id,meta);s.live=newScore(meta);s.worker.postMessage({type:'record',id:meta.id,start:when+lag,end:when+duration+lag});if(punch)say('Перезапис спроби '+punch.id+' від '+fmt(offset));}
+  if(sing){const lag=prefs.latency/1000,meta=takeMeta(offset,end,speed);if(punch){meta.punchInto=punch.id;s.trace=null;}s.pending.set(meta.id,meta);s.live=newScore(meta);s.worker.postMessage({type:'record',id:meta.id,start:when+lag,end:when+duration+lag,audio:meta.hasAudio});if(punch)say('Перезапис спроби '+punch.id+' від '+fmt(offset));}
   if(!loop)s.endTimer=setTimeout(()=>{if(s.transport?.token===token){if(s.mode==='singing'){s.worker?.postMessage({type:'stop',time:when+duration+prefs.latency/1000,reason:'end'});}else naturalEnd(token);}},(when-s.ctx.currentTime+duration+1.1)*1000);
   sync();say(sing?'Запис почнеться після відліку.':loop?'Повтор фрагмента без пауз.':'Відтворення.');
  }catch(e){if(token===s.cancel){error(micError(e),errorKind(e));await releaseMic();}}
@@ -280,12 +315,14 @@ function seekLive(t){
  if(s.mode==='review'){const tk=s.trace.take;t=clamp(t,tk.a,tk.endSong-.05);}else{t=clamp(t,0,song.duration-.05);const inside=t>=s.range.a-.01&&t<s.range.b-.1;if(!inside&&prefs.loop&&customRange()){prefs.loop=false;toast('Повтор вимкнено: позиція поза вибраним фрагментом.');}end=inside?s.range.b:song.duration;loop=inside&&prefs.loop&&customRange()?{a:s.range.a,b:s.range.b}:null;}
  clearSources();const b=s.bufs.get(String(speed));if(!b)return;const when=s.ctx.currentTime+.04;const token=tr.token;
  s.transport={token,when,offset:t,end,speed,loop};s.pos=t;
- if(s.mode==='review'){const tk=s.trace.take,off=t-tk.a,dur=tk.duration-off/speed;addSource(b.back,s.gains.back,when,t/speed,dur);addSource(b.fore,s.gains.fore,when,t/speed,dur);addSource(tk.buffer,s.gains.voice,when,off/speed,dur,()=>naturalEnd(token));}
+ if(s.mode==='review'){const tk=s.trace.take,off=t-tk.a,dur=tk.duration-off/speed;const lead=addSource(b.back,s.gains.back,when,t/speed,dur);addSource(b.fore,s.gains.fore,when,t/speed,dur);
+  if(tk.hasAudio)addSource(tk.buffer,s.gains.voice,when,off/speed,dur,()=>naturalEnd(token));else lead.onended=()=>naturalEnd(token);}
  else{const duration=scheduleSources(b,when,t,end,speed,loop,token);if(!loop)s.endTimer=setTimeout(()=>{if(s.transport?.token===token)naturalEnd(token);},(when-s.ctx.currentTime+duration+1.1)*1000);}
  s.dirty=true;sync();
 }
 function naturalEnd(token){if(!s.transport||s.transport.token!==token)return;if(s.mode==='singing')return;const wasReview=s.mode==='review';s.pos=s.transport.end;clearSources();s.transport=null;s.mode='idle';sync();renderTakes();if(!wasReview&&prefs.loop&&customRange()&&s.pos>=s.range.b-.05)scheduleLoop(false);}
-function scheduleLoop(sing){clearTimeout(s.nextTimer);const token=s.cancel;s.nextTimer=setTimeout(()=>{if(s.cancel!==token||!prefs.loop||s.mode!=='idle'||s.awaitFinish)return;s.pos=s.range.a;startTransport(sing,true);},60);}
+// Every sung pass is an attempt of its own: as a punch-in it would overwrite the pass before it, in the tab and in the history.
+function scheduleLoop(sing){clearTimeout(s.nextTimer);const token=s.cancel;s.nextTimer=setTimeout(()=>{if(s.cancel!==token||!prefs.loop||s.mode!=='idle'||s.awaitFinish)return;s.pos=s.range.a;startTransport(sing,true,true);},60);}
 function stopTransport(reason='user'){
  clearTimeout(s.nextTimer);s.cancel++;
  if(s.busy){s.busy=false;releaseMic();sync();return;}
@@ -306,18 +343,388 @@ function analyzeTake(meta,points,duration){
  const score=newScore(meta);scoreAdvance(score,out,meta.a+duration*meta.speed);
  return {points:out,score,stats:{targetTime,compared,coverage:targetTime?100*compared/targetTime:null,accuracy:compared?100*inside/compared:null,median:errors.length?errors[Math.floor(errors.length/2)]:null}};
 }
+// ── Practice history ──────────────────────────────────────────────────────────────────────────────────────────────
+// Every finished attempt lands in IndexedDB in this page's origin, automatically: no accounts, no network, nothing
+// leaves this computer. Studio serves its own page and the trainers from the same origin, so a progress panel there
+// can read the very same base. Schema, retention and the export format: docs/HISTORY_SCHEMA.md.
+const HIST={name:'luma',version:1,dayEdge:4,keepTraces:20,minPhraseFrames:75,minSongFrames:200,songCover:.95,phraseCover:.8,lamp:85,trendRuns:30,sessionGap:45*60*1000,streakFrames:6000,noPitch:-32768};
+function historyAvailable(){return location.protocol!=='file:'&&typeof indexedDB!=='undefined'&&!!indexedDB;}
+function newRunId(){try{if(crypto.randomUUID)return crypto.randomUUID();}catch(_){}return 'r-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10);}
+// The song, not the file: re-preparing the same audio gives a new song.id but the same sourceId, so the history stays.
+function songHash(){return song.sourceId||song.id;}
+// Two FNV-1a accumulators over the drawn target: a short stable fingerprint. Editing a note opens a new comparison
+// group; confirming a fragment by ear does not, because targetAt().m never reads `verified`.
+function hash16(text){let a=0x811c9dc5,b=0x1b873593;for(let i=0;i<text.length;i++){const c=text.charCodeAt(i);a=Math.imul(a^c,16777619)>>>0;b=Math.imul(b^(c+i),2246822519)>>>0;}return (a>>>0).toString(16).padStart(8,'0')+(b>>>0).toString(16).padStart(8,'0');}
+let mapVersionCache='',totalsCache=new Map();
+function invalidateMap(){mapVersionCache='';totalsCache=new Map();s.shadowSig='';s.progressSig='';}
+function mapVersion(){return mapVersionCache||(mapVersionCache=song.id+':'+hash16(JSON.stringify(song.notes.map(n=>[n.id,Math.round(n.a*1000),Math.round(n.b*1000),Math.round(n.m*100),n.ignored?1:0]))));}
+function levelKey(meta){return meta.level==='custom'?'custom:'+meta.tolerance:meta.level;}
+// The ruler a score was measured with. Two numbers may stand side by side only when all five agree. The vocal octave
+// is not in it: it moves the target and leaves the difficulty alone.
+function cmpKeyOf(meta){return [songHash(),meta.mapVersion||mapVersion(),levelKey(meta),meta.view,meta.speed].join('|');}
+function currentKey(){const L=levelOpt();return cmpKeyOf({mapVersion:mapVersion(),level:L.level,tolerance:L.tolerance,view:prefs.view,speed:prefs.speed});}
+// Local day with its edge at 04:00, so singing at half past midnight counts towards the evening that just passed.
+function localDay(ms){const d=new Date(ms-HIST.dayEdge*3600e3);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function dayShift(day,delta){const [y,m,d]=String(day).split('-').map(Number),z=new Date(y,m-1,d+delta);return z.getFullYear()+'-'+String(z.getMonth()+1).padStart(2,'0')+'-'+String(z.getDate()).padStart(2,'0');}
+function median(a){if(!a.length)return -1;const z=[...a].sort((x,y)=>x-y);return Math.round(z[z.length>>1]);}
+
+// ── the compact trace: four bytes a frame instead of 96 000 a second ─────────────────────────────────────────────
+// cents = round(midi × 100); -32768 means "no pitch here". Time is not stored per frame: a segment carries its own t0
+// and the shared hop, and a new segment opens wherever the reconstructed time would drift by a quarter of a hop.
+function traceHop(points){
+ if(points.length<2)return .021333;const d=[];
+ for(let i=1;i<points.length;i++){const z=points[i].t-points[i-1].t;if(z>1e-6&&z<.5)d.push(z);}
+ if(!d.length)return .021333;d.sort((a,b)=>a-b);return d[d.length>>1];
+}
+function packTrace(points){
+ const hop=traceHop(points),segs=[];let cur=null;
+ for(const p of points){
+  if(!cur||Math.abs(p.t-(cur.t0+cur.cents.length*hop))>hop*.25){cur={t0:p.t,cents:[],conf:[],db:[]};segs.push(cur);}
+  cur.cents.push(p.f>0?clamp(Math.round((69+12*Math.log2(p.f/440))*100),-32767,32767):HIST.noPitch);
+  cur.conf.push(clamp(Math.round((p.confidence||0)*255),0,255));
+  cur.db.push(clamp(Math.round(Number.isFinite(p.db)?p.db:-120),-120,0));
+ }
+ return {hop,segments:segs.map(sg=>({t0:sg.t0,cents:Int16Array.from(sg.cents),conf:Uint8Array.from(sg.conf),db:Int8Array.from(sg.db)}))};
+}
+function unpackTrace(tr){
+ const out=[];
+ for(const sg of tr.segments)for(let i=0;i<sg.cents.length;i++){const c=sg.cents[i];
+  out.push({t:sg.t0+i*tr.hop,f:c===HIST.noPitch?null:440*Math.pow(2,(c/100-69)/12),confidence:sg.conf[i]/255,db:sg.db[i]});}
+ return out;
+}
+function b64(arr){const u=new Uint8Array(arr.buffer,arr.byteOffset,arr.byteLength);let out='';for(let i=0;i<u.length;i+=8192)out+=String.fromCharCode.apply(null,u.subarray(i,i+8192));return btoa(out);}
+function unb64(text,Type){
+ let raw;try{raw=atob(text);}catch(_){throw Error('Слід у файлі історії закодовано неправильно.');}
+ const u=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)u[i]=raw.charCodeAt(i);
+ if(u.byteLength%Type.BYTES_PER_ELEMENT)throw Error('Пошкоджений слід у файлі історії.');return new Type(u.buffer);}
+function encodeTrace(tr){return {runId:tr.runId,songHash:tr.songHash,hop:tr.hop,segments:tr.segments.map(sg=>({t0:sg.t0,cents:b64(sg.cents),conf:b64(sg.conf),db:b64(sg.db)}))};}
+function decodeTrace(tr){return {runId:tr.runId,songHash:tr.songHash,hop:tr.hop,segments:tr.segments.map(sg=>{
+ const cents=unb64(sg.cents,Int16Array),conf=unb64(sg.conf,Uint8Array),db=unb64(sg.db,Int8Array);
+ if(conf.length!==cents.length||db.length!==cents.length)throw Error('Канали сліду мають різну довжину.');
+ return {t0:sg.t0,cents,conf,db};})};}
+function encodeRun(r){return {...r,phraseIds:[...(r.phraseIds||[])],phraseStats:[...(r.phraseStats||[])]};}
+function decodeRun(r){return {...r,phraseIds:Int32Array.from(r.phraseIds||[]),phraseStats:Int32Array.from(r.phraseStats||[])};}
+
+// ── denominators: how many frames of target a phrase and the whole song hold under one view, and how many are draft ─
+function targetTotals(view){
+ const hit=totalsCache.get(view);if(hit)return hit;
+ const opt={octave:0,view},phr=song.phrases||[],per=new Map(),perDraft=new Map();let songFrames=0,draft=0;
+ for(const p of phr){per.set(p.id,0);perDraft.set(p.id,0);}
+ for(let i=0;;i++){const t=i*GRID;if(t>song.duration)break;const ref=targetAt(t,opt);if(!ref)continue;songFrames++;if(!ref.ok)draft++;
+  for(let j=0;j<phr.length;j++){const p=phr[j];if(p.a>t)break;if(p.b>=t){per.set(p.id,(per.get(p.id)||0)+1);if(!ref.ok)perDraft.set(p.id,(perDraft.get(p.id)||0)+1);}}}
+ const out={song:songFrames,draft,phrase:per,phraseDraft:perDraft};totalsCache.set(view,out);return out;
+}
+// One walk of an attempt's own scoring grid. A phrase enters the record only when the attempt covered at least 80 %
+// of its frames with a target: a pass that clipped the edge of a phrase must not spoil the weak-phrase map.
+function summarizeRun(t){
+ const opt=t.score.opt,frames=t.score.frames,phr=song.phrases||[],per=new Map(),perErrs=new Map(),errs=[];
+ for(const p of phr){per.set(p.id,{target:0,hit:0,sung:0});perErrs.set(p.id,[]);}
+ let target=0,hit=0,sung=0,draft=0,pi=0;
+ for(let i=0;i<frames.length;i++){const st=frames[i];if(!st)continue;const tt=t.score.a+i*GRID,ref=targetAt(tt,opt);
+  target++;if(st===1)hit++;if(st!==3)sung++;if(!ref||!ref.ok)draft++;
+  for(let j=pi;j<phr.length;j++){const p=phr[j];if(p.a>tt)break;if(p.b<tt){if(j===pi)pi++;continue;}
+   const q=per.get(p.id);q.target++;if(st===1)q.hit++;if(st!==3)q.sung++;}}
+ for(const p of t.points){if(p.m===null||p.m===undefined||p.ref===null||p.ref===undefined||p.confidence<.8)continue;
+  const e=Math.abs(centsOff(p.m,p.ref,opt));errs.push(e);
+  for(let j=0;j<phr.length;j++){const q=phr[j];if(q.a>p.songT)break;if(q.b>=p.songT)perErrs.get(q.id).push(e);}}
+ const totals=targetTotals(opt.view),phrases=[];
+ for(const p of phr){const q=per.get(p.id),whole=totals.phrase.get(p.id)||0;
+  if(!q.target||!whole||q.target<whole*HIST.phraseCover)continue;
+  phrases.push({id:p.id,target:q.target,hit:q.hit,sung:q.sung,median:median(perErrs.get(p.id))});}
+ return {target,hit,sung,draft,median:median(errs),phrases,songTarget:totals.song};
+}
+// match is stored as an integer in hundredths of a percent, so ties break on the median and not on rounding.
+function runRecord(t,sum){
+ const stat=[];for(const p of sum.phrases)stat.push(p.target,p.hit,p.sung,p.median);
+ const started=Date.parse(t.startedAt)||Date.now();
+ return {id:t.runId,songHash:songHash(),mapVersion:t.mapVersion||mapVersion(),cmpKey:cmpKeyOf(t),startedAt:t.startedAt,endedAt:new Date().toISOString(),localDay:localDay(started),
+  a:+t.a.toFixed(3),b:+t.endSong.toFixed(3),speed:t.speed,level:t.level,tolerance:t.tolerance,view:t.view,octave:t.octave,latency:t.latency,
+  hasAudio:!!t.hasAudio,clipped:!!t.clipped,punches:t.punches||0,
+  target:sum.target,hit:sum.hit,sung:sum.sung,draftFrames:sum.draft,medianCents:sum.median,match:sum.target?Math.round(10000*sum.hit/sum.target):null,songTarget:sum.songTarget,
+  strict:{targetTime:+(t.stats.targetTime||0).toFixed(3),compared:+(t.stats.compared||0).toFixed(3),inside:+((t.stats.compared||0)*(t.stats.accuracy||0)/100).toFixed(3),median:t.stats.median===null?-1:Math.round(t.stats.median)},
+  phraseIds:Int32Array.from(sum.phrases.map(p=>p.id)),phraseStats:Int32Array.from(stat),hasTrace:true};
+}
+function songEntry(runs){
+ const maps=new Map();
+ for(const r of runs)if(!maps.has(r.mapVersion))maps.set(r.mapVersion,{mapVersion:r.mapVersion,firstSeen:r.startedAt,notes:null,draftShare:null});
+ const cur=mapVersion(),totals=targetTotals(prefs.view);
+ if(!maps.has(cur))maps.set(cur,{mapVersion:cur,firstSeen:new Date().toISOString(),notes:null,draftShare:null});
+ Object.assign(maps.get(cur),{notes:song.notes.length,draftShare:totals.song?+(totals.draft/totals.song).toFixed(4):0});
+ const times=runs.map(r=>r.startedAt).sort();
+ return {songHash:songHash(),title:song.title,artist:song.artist||'',duration:song.duration,lessonId:song.lesson?.id||null,maps:[...maps.values()],
+  firstRunAt:times[0]||new Date().toISOString(),lastRunAt:times[times.length-1]||new Date().toISOString(),runCount:runs.length};
+}
+
+// ── IndexedDB ───────────────────────────────────────────────────────────────────────────────────────────────────
+let dbHandle=null;
+function openDB(){
+ if(dbHandle)return dbHandle;
+ const opened=new Promise((resolve,reject)=>{
+  if(!historyAvailable())return reject(Error('Історія працює лише зі сторінки, відкритої через Studio.'));
+  const req=indexedDB.open(HIST.name,HIST.version);
+  req.onupgradeneeded=()=>{const db=req.result;
+   if(!db.objectStoreNames.contains('songs'))db.createObjectStore('songs',{keyPath:'songHash'});
+   if(!db.objectStoreNames.contains('runs')){const runs=db.createObjectStore('runs',{keyPath:'id'});
+    runs.createIndex('bySong',['songHash','startedAt']);runs.createIndex('byKey',['cmpKey','match']);runs.createIndex('byDay','localDay');}
+   if(!db.objectStoreNames.contains('traces'))db.createObjectStore('traces',{keyPath:'runId'});};
+  req.onsuccess=()=>resolve(req.result);
+  req.onerror=()=>reject(req.error||Error('Не вдалося відкрити сховище історії.'));
+  req.onblocked=()=>reject(Error('Сховище зайняте іншою вкладкою Luma.'));
+ });
+ opened.catch(()=>{dbHandle=null;});dbHandle=opened;return opened;
+}
+function idbAll(store,index,range){
+ return openDB().then(db=>new Promise((resolve,reject)=>{
+  const t=db.transaction(store,'readonly'),src=index?t.objectStore(store).index(index):t.objectStore(store);
+  const r=range===undefined?src.getAll():src.getAll(range);
+  r.onsuccess=()=>resolve(r.result||[]);t.onerror=()=>reject(t.error);t.onabort=()=>reject(t.error||Error('Читання перервано.'));
+ }));
+}
+function idbGet(store,key){
+ return openDB().then(db=>new Promise((resolve,reject)=>{
+  const t=db.transaction(store,'readonly'),r=t.objectStore(store).get(key);
+  r.onsuccess=()=>resolve(r.result);t.onerror=()=>reject(t.error);t.onabort=()=>reject(t.error||Error('Читання перервано.'));
+ }));
+}
+// ops: [store, 'put'|'delete', value|key]. One transaction, so an attempt and its trace never land half-written.
+function idbWrite(ops){
+ if(!ops.length)return Promise.resolve(true);
+ return openDB().then(db=>new Promise((resolve,reject)=>{
+  const t=db.transaction([...new Set(ops.map(o=>o[0]))],'readwrite');
+  t.oncomplete=()=>resolve(true);t.onerror=()=>reject(t.error);t.onabort=()=>reject(t.error||Error('Запис перервано.'));
+  try{for(const [store,op,arg]of ops)t.objectStore(store)[op](arg);}catch(e){try{t.abort();}catch(_){}reject(e);}
+ }));
+}
+function readable(e,fallback){
+ const m=e&&e.message?String(e.message):'';
+ return /[\u0400-\u04FF]/.test(m)?m:fallback+(e&&e.name?' ('+e.name+')':'');
+}
+function storeNote(e){return e&&e.name==='QuotaExceededError'?'Сховище переповнене. Зроби експорт і очисти історію пісні.':readable(e,'Історію не записано.');}
+function askPersist(){
+ if(s.hist.persisted!==null||!navigator.storage||!navigator.storage.persist)return;
+ s.hist.persisted=false;
+ navigator.storage.persist().then(ok=>{s.hist.persisted=!!ok;s.progressSig='';renderProgress();}).catch(()=>{});
+}
+// The whole in-memory view of the history, so importing another song cannot leave the previous song's runs behind it:
+// songHash() would then have moved while s.hist.runs had not, and the next attempt would write the mixed list back.
+function resetHistory(){s.hist={runs:[],days:[],loaded:false,note:'',persisted:s.hist.persisted,stamp:'',stale:false};s.shadow=null;s.shadowSig='';s.progressSig='';}
+// A caption is a statement about the history; when the history moves under the cards, every caption is recounted, and
+// an attempt whose row is no longer stored loses it altogether.
+function refreshCaptions(){
+ for(const t of s.takes){
+  const stored=!!t.runId&&s.hist.runs.some(r=>r.id===t.runId);
+  if(!stored||!t.summary||!historyAvailable()){t.record=null;continue;}
+  try{t.record=recordCaption(runRecord(t,t.summary));}catch(_){t.record=null;}
+ }
+ renderTakes();
+}
+async function loadHistory(){
+ s.hist.loaded=true;
+ if(!historyAvailable()){s.hist.note='Історія не ведеться: відкрий пісню з бібліотеки Studio (file:// не має сховища).';refreshCaptions();renderProgress();sync();return;}
+ try{
+  const key=songHash();
+  s.hist.runs=(await idbAll('runs','bySong',IDBKeyRange.bound([key,''],[key,'￿']))).sort(byNewest);
+  const recent=await idbAll('runs','byDay',IDBKeyRange.lowerBound(dayShift(localDay(Date.now()),-180)));
+  s.hist.days=recent.map(r=>({id:r.id,localDay:r.localDay,target:r.target}));
+  s.hist.note='';s.hist.stale=false;
+ }catch(e){s.hist.note=storeNote(e);s.hist.stale=true;}
+ s.hist.stamp=newRunId();refreshShadow();refreshCaptions();renderProgress();sync();
+}
+function byNewest(a,b){return a.startedAt<b.startedAt?1:a.startedAt>b.startedAt?-1:0;}
+// A record belongs to the day it was first reached: equal scores go to the smaller median |Δ|, then to the earlier date.
+function better(a,b){
+ if(!b)return true;if(a.match!==b.match)return a.match>b.match;
+ const am=a.medianCents<0?1e9:a.medianCents,bm=b.medianCents<0?1e9:b.medianCents;
+ if(am!==bm)return am<bm;return a.startedAt<b.startedAt;
+}
+function phraseCandidates(r){
+ const ids=r.phraseIds||[],st=r.phraseStats||[],out=[];
+ for(let i=0;i<ids.length;i++){const target=st[i*4];if(!target)continue;
+  out.push({id:ids[i],target,hit:st[i*4+1],sung:st[i*4+2],medianCents:st[i*4+3],match:clamp(Math.round(10000*st[i*4+1]/target),0,10000),startedAt:r.startedAt,run:r});}
+ return out;
+}
+// Records inside one ruler: a song record needs a full pass (95 % of the song's target frames, at least 4 s of it);
+// a phrase record needs the 80 % coverage that put the phrase in the attempt at all, plus 1.5 s of target.
+function records(list){
+ let song_=null;const phrases=new Map();
+ for(const r of list){
+  if(r.match!==null&&r.target>=HIST.minSongFrames&&r.songTarget&&r.target>=r.songTarget*HIST.songCover&&better(r,song_))song_=r;
+  for(const c of phraseCandidates(r)){if(c.target<HIST.minPhraseFrames)continue;const cur=phrases.get(c.id);if(better(c,cur))phrases.set(c.id,c);}}
+ return {song:song_,phrases};
+}
+function recordHolders(runs){
+ const out=new Set(),byKey=new Map();
+ for(const r of runs){if(!byKey.has(r.cmpKey))byKey.set(r.cmpKey,[]);byKey.get(r.cmpKey).push(r);}
+ for(const list of byKey.values()){const rec=records(list);if(rec.song)out.add(rec.song.id);for(const c of rec.phrases.values())out.add(c.run.id);}
+ return out;
+}
+// Retention: the trace of every standing record, plus the last 20 attempts of the song. Summaries are never deleted.
+function staleTraces(runs){
+ const keep=recordHolders(runs);for(const r of runs.slice(0,HIST.keepTraces))keep.add(r.id);
+ return runs.filter(r=>r.hasTrace&&!keep.has(r.id));
+}
+function runScope(run){
+ if(run.match===null)return null;
+ if(run.target>=HIST.minSongFrames&&run.songTarget&&run.target>=run.songTarget*HIST.songCover)return {kind:'song'};
+ const big=phraseCandidates(run).filter(c=>c.target>=HIST.minPhraseFrames);
+ return big.length===1?{kind:'phrase',id:big[0].id,match:big[0].match}:null;
+}
+// One calm line under the attempt: «+4 до рекорду», «рекорд», «−7 від рекорду». No animation, no badge, no sound.
+function recordCaption(run){
+ const scope=runScope(run);if(!scope)return null;
+ const prev=s.hist.runs.filter(r=>r.id!==run.id&&r.cmpKey===run.cmpKey),rec=records(prev);
+ const mine=scope.kind==='song'?run.match:scope.match;
+ const best=scope.kind==='song'?rec.song:rec.phrases.get(scope.id);
+ const what=scope.kind==='song'?'рекорд пісні':'рекорд фрази «'+phraseLabel(scope.id)+'»';
+ if(!best)return {delta:0,text:'перший зарахований прохід',title:what+' · порівнювати поки нема з чим'};
+ const d=Math.round(mine/100)-Math.round(best.match/100);
+ const tail=' · попередній '+Math.round(best.match/100)+'% від '+String(best.startedAt).slice(0,10);
+ return d>0?{delta:d,text:'+'+d+' до рекорду',title:what+tail}:d<0?{delta:d,text:'−'+(-d)+' від рекорду',title:what+tail}:{delta:0,text:'рекорд',title:what+tail};
+}
+function phraseLabel(id){const p=(song.phrases||[]).find(p=>p.id===id);return p?(p.label||'Фрагмент '+id):'Фрагмент '+id;}
+function exerciseOf(p){return p.exercise||String(p.label||'').split(' · ')[0]||'Вправа';}
+let saveQueue=Promise.resolve();
+function saveRun(take){
+ if(!take)return Promise.resolve(false);
+ let run,trace;
+ try{const sum=summarizeRun(take);take.summary=sum;run=runRecord(take,sum);trace=packTrace(take.points);
+  // No caption before the history is on hand: «перший зарахований прохід» would be a guess, not a fact.
+  take.record=historyAvailable()&&s.hist.loaded?recordCaption(run):null;}
+ catch(e){take.historyError=true;markUnsaved();s.hist.note=readable(e,'Не вдалося підсумувати спробу.');return Promise.resolve(false);}
+ if(!historyAvailable()){take.historyError=false;markUnsaved();return Promise.resolve(false);}
+ // One write at a time: each one counts its summary row and its retention from the list the write before it left, so
+ // attempts saved back to back never write a list that is missing the others.
+ const step=saveQueue.then(()=>{
+  const runs=[run,...s.hist.runs.filter(r=>r.id!==run.id)].sort(byNewest);
+  // s.hist.runs is what songEntry() counts; when the last read failed it is empty, and a summary row built from it
+  // would claim this attempt is the song's first. The attempt itself is written either way.
+  const ops=[['runs','put',run],['traces','put',{runId:run.id,songHash:run.songHash,hop:trace.hop,segments:trace.segments}]];
+  if(!s.hist.stale)ops.unshift(['songs','put',songEntry(runs)]);
+  for(const r of staleTraces(runs)){r.hasTrace=false;ops.push(['runs','put',r],['traces','delete',r.id]);}
+  return idbWrite(ops).then(()=>{
+   s.hist.runs=runs;s.hist.stamp=run.id+':'+run.endedAt;take.historyError=false;markUnsaved();s.hist.note='';
+   s.hist.days=[...s.hist.days.filter(d=>d.id!==run.id),{id:run.id,localDay:run.localDay,target:run.target}];
+   askPersist();refreshShadow();s.progressSig='';renderProgress();renderTakes();return true;
+  });
+ }).catch(e=>{take.historyError=true;markUnsaved();s.hist.note=storeNote(e);s.progressSig='';renderTakes();renderProgress();return false;});
+ saveQueue=step;return step;
+}
+// The shadow of the personal best for what is framed now: one dim line under the live trace, so «how am I moving»
+// has an answer while singing and not only afterwards.
+function refreshShadow(){
+ const sig=prefs.shadow?[currentKey(),s.trendScope||'',s.range.a.toFixed(2),s.range.b.toFixed(2),s.hist.stamp||'',s.trace?.take?.runId||''].join('|'):'off';
+ if(sig===s.shadowSig)return;s.shadowSig=sig;
+ if(!prefs.shadow){s.shadow=null;s.dirty=true;requestDraw();return;}
+ const key=currentKey(),skip=s.trace?.take?.runId;
+ // Same population as the numbers above the graph: under a fragment the best line is the best pass of that fragment,
+ // never a whole-song pass that happened to cover it.
+ let entry=null;
+ for(const e of scopeEntries(s.hist.runs.filter(r=>r.cmpKey===key&&r.hasTrace&&r.id!==skip)))if(better(e,entry))entry=e;
+ if(!entry){s.shadow=null;s.dirty=true;requestDraw();return;}
+ const best=entry.run;
+ if(s.shadow?.id===best.id)return;
+ idbGet('traces',best.id).then(tr=>{
+  if(s.shadowSig!==sig||!tr)return;
+  // The octave is out of the comparison key because it moves the target and leaves the difficulty alone; the shadow
+  // has to move with it, or a record sung an octave away silently falls off the plot.
+  s.shadow={id:best.id,match:entry.match,octave:best.octave||0,points:unpackTrace(tr).map(p=>({songT:best.a+p.t*best.speed,m:p.f?69+12*Math.log2(p.f/440):null,confidence:p.confidence}))};
+  s.dirty=true;requestDraw();
+ }).catch(()=>{});
+}
+function optOfRun(r){const L=LEVELS[r.level]||LEVELS.normal;return {a:r.a,octave:r.octave,view:r.view,tolerance:r.tolerance,slack:L.slack,ratio:L.ratio,octaveFree:L.octaveFree,level:r.level};}
+
+// ── export, import, clearing ────────────────────────────────────────────────────────────────────────────────────
+async function exportPayload(all){
+ const songs=await idbAll('songs'),runs=await idbAll('runs'),traces=await idbAll('traces');
+ const key=songHash(),keep=r=>all||r.songHash===key;
+ return {schema:'luma.history.v1',exportedAt:new Date().toISOString(),app:'luma',
+  songs:songs.filter(x=>all||x.songHash===key),runs:runs.filter(keep).map(encodeRun),traces:traces.filter(keep).map(encodeTrace)};
+}
+function validHistory(d){
+ if(!d||d.schema!=='luma.history.v1')return 'Потрібен файл історії Luma (схема luma.history.v1).';
+ if(!Array.isArray(d.songs)||!Array.isArray(d.runs)||!Array.isArray(d.traces))return 'У файлі бракує розділів songs / runs / traces.';
+ if(d.songs.length>1000||d.runs.length>50000||d.traces.length>50000)return 'Файл завеликий: більше 50 000 спроб.';
+ for(const x of d.songs){
+  if(!x||typeof x.songHash!=='string'||!x.songHash||x.songHash.length>100)return 'У записі пісні немає ключа songHash.';
+  if(x.title!==undefined&&(typeof x.title!=='string'||x.title.length>300))return 'Невірна назва пісні у файлі.';
+  if(x.artist!==undefined&&(typeof x.artist!=='string'||x.artist.length>300))return 'Невірний виконавець у файлі.';
+  if(x.duration!==undefined&&(!Number.isFinite(x.duration)||x.duration<0||x.duration>36000))return 'Невірна тривалість пісні у файлі.';
+  if(x.maps!==undefined&&(!Array.isArray(x.maps)||x.maps.length>500))return 'Невірний перелік версій карти у файлі.';
+ }
+ for(const r of d.runs){
+  if(typeof r.id!=='string'||!r.id||r.id.length>100||typeof r.songHash!=='string'||!r.songHash||r.songHash.length>100)return 'Невірний ідентифікатор спроби.';
+  if(typeof r.startedAt!=='string'||r.startedAt.length>40||typeof r.cmpKey!=='string'||r.cmpKey.length>400)return 'Невірні метадані спроби.';
+  for(const k of ['target','hit','sung'])if(!Number.isFinite(r[k])||r[k]<0||r[k]>5e6)return 'Невірні лічильники кадрів у спробі.';
+  if(r.hit>r.target||r.sung>r.target)return 'У спробі більше влучань, ніж кадрів із ціллю.';
+  if(r.match!==null&&(!Number.isFinite(r.match)||r.match<0||r.match>10000))return 'Невірний збіг у спробі.';
+  if(!Array.isArray(r.phraseIds)||!Array.isArray(r.phraseStats)||r.phraseIds.length>5000||r.phraseStats.length!==r.phraseIds.length*4)return 'Невірна розбивка по фразах.';
+  if(!r.phraseIds.every(Number.isFinite)||!r.phraseStats.every(Number.isFinite))return 'Невірні числа в розбивці по фразах.';
+ }
+ let frames=0;
+ for(const tr of d.traces){
+  if(typeof tr.runId!=='string'||!Array.isArray(tr.segments)||tr.segments.length>20000)return 'Невірний слід у файлі.';
+  if(!Number.isFinite(tr.hop)||tr.hop<=0||tr.hop>1)return 'Невірний крок сліду.';
+  for(const sg of tr.segments){if(typeof sg.cents!=='string'||typeof sg.conf!=='string'||typeof sg.db!=='string')return 'Невірний слід у файлі.';
+   if(!Number.isFinite(sg.t0)||sg.t0<0||sg.t0>36000)return 'Невірний час у сліді.';frames+=sg.cents.length;}}
+ if(frames>6e7)return 'Сліди у файлі завеликі.';
+ return '';
+}
+// Merging is by attempt id, so the same file may be imported twice with no effect.
+async function importHistory(d){
+ const bad=validHistory(d);if(bad)throw Error(bad);
+ try{return await mergeHistory(d);}catch(e){throw Error(readable(e,'Файл історії не прийнято.'));}
+}
+async function mergeHistory(d){
+ const have=new Set((await idbAll('runs')).map(r=>r.id));
+ const songs=new Map((await idbAll('songs')).map(x=>[x.songHash,x]));
+ const fresh=d.runs.filter(r=>!have.has(r.id)),ids=new Set(fresh.map(r=>r.id));
+ const ops=[];
+ for(const r of fresh)ops.push(['runs','put',decodeRun(r)]);
+ for(const tr of d.traces)if(ids.has(tr.runId))ops.push(['traces','put',decodeTrace(tr)]);
+ // The row this browser already has stays in charge: a file adds its attempts, the map versions it knows and a wider
+ // span of dates, and a file with nothing new for a song leaves that song's row as it is, byte for byte.
+ for(const x of d.songs){const cur=songs.get(x.songHash),added=fresh.filter(r=>r.songHash===x.songHash);
+  if(!cur){ops.push(['songs','put',x]);continue;}
+  if(!added.length)continue;
+  const maps=new Map([...(x.maps||[]),...(cur.maps||[])].map(m=>[m.mapVersion,m]));
+  const times=[cur.firstRunAt,cur.lastRunAt,...added.map(r=>r.startedAt)].filter(Boolean).sort();
+  ops.push(['songs','put',{...x,...cur,maps:[...maps.values()],firstRunAt:times[0],lastRunAt:times[times.length-1],runCount:(cur.runCount||0)+added.length}]);}
+ await idbWrite(ops);
+ await loadHistory();
+ return {imported:fresh.length,skipped:d.runs.length-fresh.length};
+}
+async function clearSongHistory(){
+ const key=songHash(),runs=await idbAll('runs','bySong',IDBKeyRange.bound([key,''],[key,'￿']));
+ const ops=[['songs','delete',key]];
+ for(const r of runs)ops.push(['runs','delete',r.id],['traces','delete',r.id]);
+ await idbWrite(ops);
+ s.shadow=null;s.shadowSig='';await loadHistory();// loadHistory ends in refreshCaptions(), which drops the caption of an attempt whose row is gone
+ // Clearing is what the quota message asks for, so an attempt the full store refused gets its write now that there is room.
+ await Promise.all(s.takes.filter(t=>t.historyError).map(saveRun));
+ return runs.length;
+}
+function takePayload(t){
+ const sum=t.summary||(t.summary=summarizeRun(t)),run=runRecord(t,sum),trace=packTrace(t.points);
+ return {schema:'luma.history.v1',exportedAt:new Date().toISOString(),app:'luma',
+  songs:[songEntry([run])],runs:[encodeRun(run)],traces:[encodeTrace({runId:run.id,songHash:run.songHash,hop:trace.hop,segments:trace.segments})]};
+}
+function saveTakeJSON(t){download(new Blob([JSON.stringify(takePayload(t))],{type:'application/json'}),takeFilename(t,'json'));}
+// What closing the tab would lose for good: a WAV nobody downloaded, or an attempt the history refused to take.
+function markUnsaved(){s.unsaved=s.takes.some(t=>t.hasAudio&&!t.saved||t.historyError);}
 function storeTake(meta,m){
  let replaced=null;
  if(meta.punchInto!==undefined){const old=s.takes.find(t=>t.id===meta.punchInto);const merged=old?mergeTake(old,meta,m):null;if(merged){meta=merged.meta;m=merged.m;replaced=old;}else{s.takeCounter++;meta={...meta,id:s.takeCounter};m={...m,id:meta.id};}}
- const a=analyzeTake(meta,m.points,m.duration);const take={...meta,...m,...a,saved:false,url:URL.createObjectURL(m.blob),endSong:meta.a+m.duration*meta.speed};
+ const a=analyzeTake(meta,m.points,m.duration);
+ const take={...meta,...m,...a,hasAudio:!!m.blob,clipped:!!m.clipped,saved:false,url:m.blob?URL.createObjectURL(m.blob):null,endSong:meta.a+m.duration*meta.speed,runId:replaced?.runId||newRunId()};
  if(replaced){clearUndoPunch();s.undoPunch={before:replaced,after:take};s.takes[s.takes.indexOf(replaced)]=take;}else s.takes.unshift(take);
- s.unsaved=true;s.trace={take,points:take.points,score:take.score};s.current=null;renderTakes();say(replaced?'Спробу '+String(take.id)+' перезаписано від '+fmt(meta.lastPunchAt)+'.':'Спробу '+String(take.id)+' збережено в пам’яті вкладки.');return take;
+ s.trace={take,points:take.points,score:take.score};s.current=null;saveRun(take);markUnsaved();renderTakes();
+ say(replaced?'Спробу '+String(take.id)+' перезаписано від '+fmt(meta.lastPunchAt)+'.':'Спробу '+String(take.id)+(take.hasAudio?' збережено в пам’яті вкладки.':' записано: слід і оцінка в історії.'));return take;
 }
-function clearUndoPunch(){if(s.undoPunch){URL.revokeObjectURL(s.undoPunch.before.url);s.undoPunch=null;}}
+function clearUndoPunch(){if(s.undoPunch){if(s.undoPunch.before.url)URL.revokeObjectURL(s.undoPunch.before.url);s.undoPunch=null;}}
 function undoPunch(){
  if(!s.undoPunch||s.mode!=='idle'||s.busy||s.awaitFinish)return;
  const {before,after}=s.undoPunch,index=s.takes.indexOf(after);if(index<0){clearUndoPunch();sync();return;}
- URL.revokeObjectURL(after.url);s.takes[index]=before;s.undoPunch=null;s.unsaved=s.takes.some(t=>!t.saved);
+ if(after.url)URL.revokeObjectURL(after.url);s.takes[index]=before;s.undoPunch=null;saveRun(before);markUnsaved();
  s.trace={take:before,points:before.points,score:before.score};s.pos=clamp(s.pos,before.a,before.endSong);setRangeScale();renderTakes();sync();toast('Попередню версію спроби відновлено.');
 }
 function onFinished(m){
@@ -325,36 +732,311 @@ function onFinished(m){
  if(s.mode==='singing'&&m.reason==='end'&&s.transport&&s.ctx){const end=s.transport.when+(s.transport.end-s.transport.offset)/s.transport.speed;if(s.ctx.currentTime<end-.01){setTimeout(()=>onFinished(m),(end-s.ctx.currentTime)*1000+20);return;}}
  s.pending.delete(m.id);const auto=s.mode==='singing'&&m.reason==='end'&&prefs.loop;s.awaitFinish=false;
  if(s.transport)s.pos=Math.min(s.transport.end,meta.a+m.duration*meta.speed);clearSources();s.transport=null;s.mode='idle';s.live=null;
- if(m.duration>.15&&m.blob.size>44)storeTake(meta,m);
+ if(m.duration>.15&&(!m.hasAudio||m.blob?.size>44))storeTake(meta,m);
  if(['discontinuity','late-start'].includes(m.reason))error('Розрив аудіопотоку: запис завершено, щоб не зсувати його відносно пісні.');
  if(s.resumeAt!==null){const t=s.resumeAt;s.resumeAt=null;s.pos=t;sync();startTransport(true,true);return;}// seek during singing: new take from the new spot
- const canLoop=auto&&customRange();if(canLoop&&capacity())scheduleLoop(true);else{if(canLoop)toast('Повтор зупинено: досягнуто ліміт пам’яті. Збережи WAV.');releaseMic();}sync();
+ const canLoop=auto&&customRange(),cap=capacity(true);if(canLoop&&cap.ok)scheduleLoop(true);
+ else{if(canLoop)toast(cap.kind==='audio'?'Повтор зупинено: ліміт пам’яті для WAV. Вимкни запис голосу в налаштуваннях — слід і оцінка збережуться однаково.':'Повтор зупинено: '+cap.message);releaseMic();}sync();
 }
 function download(blob,filename){const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=filename;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),15000);}
 function takeFilename(t,ext){return 'Luma_'+song.title.replace(/[^\p{L}\p{N}_-]+/gu,'_')+'_take_'+String(t.id).padStart(2,'0')+'.'+ext;}
-function saveWav(t){download(t.blob,takeFilename(t,'wav'));t.saved=true;s.unsaved=s.takes.some(t=>!t.saved);renderTakes();}
+function saveWav(t){download(t.blob,takeFilename(t,'wav'));t.saved=true;markUnsaved();renderTakes();}
 function saveCSV(t){const header='take_seconds,song_seconds,frequency_hz,midi,target_midi,cents_from_target,eligible_target,match_state,yin_periodicity,dbfs,speed,target_octave,mic_shift_ms\n';const rows=t.points.map(p=>[p.t.toFixed(5),p.songT.toFixed(5),p.f??'',p.m??'',p.ref??'',p.cents??'',p.eligible?1:0,frameState(t.score,p.songT),p.confidence,p.db,t.speed,t.octave,t.latency].join(','));download(new Blob([header+rows.join('\n')],{type:'text/csv;charset=utf-8'}),takeFilename(t,'csv'));}
 function selectTrace(t){if(s.mode!=='idle'||s.busy||s.awaitFinish)return;s.trace={take:t,points:t.points,score:t.score};s.pos=clamp(s.pos,t.a,t.endSong);if(s.pos<=t.a||s.pos>=t.endSong)s.pos=t.a;setRangeScale();renderTakes();sync();}
 function closeTrace(){s.trace=null;setRangeScale();renderTakes();sync();}
-// Re-score a take under a new view or octave: audio and pitch points stay, only the comparison rules change.
-function rescoreTake(t,patch){Object.assign(t,patch,analyzeTake({...t,...patch},t.points,t.duration));if(s.trace?.take===t)s.trace={take:t,points:t.points,score:t.score};renderTakes();}
+// Re-score a take under a new view or octave: audio and pitch points stay, only the comparison rules change. The
+// history keeps the attempt as it was measured when it finished — the view is part of the comparison key, so a
+// re-scored take belongs to a different ruler and does not overwrite the one it was sung under.
+function rescoreTake(t,patch){
+ Object.assign(t,patch,analyzeTake({...t,...patch},t.points,t.duration));
+ // The summary and the record line were counted from the score that just went away. Both are recounted against the
+ // ruler the attempt now carries — including the target map they are counted from, so the JSON the card exports
+ // cannot stamp new frame counts with the map version the attempt happened to be sung under.
+ t.mapVersion=mapVersion();
+ try{const sum=summarizeRun(t);t.summary=sum;t.record=historyAvailable()&&s.hist.loaded?recordCaption(runRecord(t,sum)):null;}
+ catch(_){t.summary=null;t.record=null;}
+ if(s.trace?.take===t)s.trace={take:t,points:t.points,score:t.score};renderTakes();
+}
 function renderTakes(){const root=$('takesList');root.replaceChildren();for(const t of s.takes){
- const el=document.createElement('div');el.className='take'+(s.trace?.take===t?' current':'');const playing=s.trace?.take===t&&s.mode==='review';const play=document.createElement('button');play.className='play';play.innerHTML=icon(playing?'pause':'play');play.ariaLabel=(playing?'Зупинити':'Прослухати')+' спробу '+t.id;play.title=playing?'Зупинити':'Прослухати свій голос поверх мінусу';play.onclick=()=>playTake(t);
- const title=document.createElement('button');title.className='take-title';title.title='Показати слід цієї спроби на графіку · перемотай усередину і натисни «Дописати», щоб перезаписати з цього місця';title.innerHTML='Спроба '+String(t.id).padStart(2,'0')+' · '+fmt(t.a)+'–'+fmt(t.endSong)+'<small>'+t.speed+'× · '+levelLabel(t.score.opt)+' · '+(t.octave?(t.octave>0?'+':'')+t.octave+' пт · ':'')+(t.sampleRate/1000).toFixed(1)+' kHz'+(t.punches?' · перезаписів: '+t.punches:'')+(t.saved?' · збережено':'')+'</small>';title.onclick=()=>selectTrace(t);
+ const el=document.createElement('div');el.className='take'+(s.trace?.take===t?' current':'');const playing=s.trace?.take===t&&s.mode==='review';const play=document.createElement('button');play.className='play';play.innerHTML=icon(playing?'pause':'play');play.ariaLabel=(playing?'Зупинити':t.hasAudio?'Прослухати':'Слухати з мінусом')+' спробу '+t.id;play.title=playing?'Зупинити':t.hasAudio?'Прослухати свій голос поверх мінусу':'Слухати з мінусом: голос не записувався, слід іде синхронно';play.onclick=()=>playTake(t);
+ const title=document.createElement('button');title.className='take-title';title.title='Показати слід цієї спроби на графіку · перемотай усередину і натисни «Дописати», щоб перезаписати з цього місця';title.innerHTML='Спроба '+String(t.id).padStart(2,'0')+' · '+fmt(t.a)+'–'+fmt(t.endSong)+'<small>'+t.speed+'× · '+levelLabel(t.score.opt)+' · '+(t.octave?(t.octave>0?'+':'')+t.octave+' пт · ':'')+(t.hasAudio?(t.sampleRate/1000).toFixed(1)+' kHz':'без аудіо')+(t.clipped?' · перевантаження':'')+(t.punches?' · перезаписів: '+t.punches:'')+(t.hasAudio&&t.saved?' · збережено':'')+(t.historyError?' · не збережено в історію':'')+'</small>';title.onclick=()=>selectTrace(t);
  const st=document.createElement('div');st.className='take-stats';const pct=scorePct(t.score);const vals=[['Збіг',pct===null?'—':pct+'%',pct===null?'у фрагменті немає намальованих нот':'влучання '+(t.score.hit*GRID).toFixed(1)+' с із '+(t.score.target*GRID).toFixed(1)+' с цілі · ±'+t.tolerance+'¢ '+levelLabel(t.score.opt)+' · тиша = промах']];
  if(t.stats.targetTime>.1)vals.push(['У коридорі',t.stats.accuracy===null?'—':Math.round(t.stats.accuracy)+'%','підтверджена ціль · серед порівняних точок'],['Покриття',Math.round(t.stats.coverage||0)+'%','порівняно '+t.stats.compared.toFixed(1)+' с із '+t.stats.targetTime.toFixed(1)+' с підтвердженої цілі'],['Медіана |Δ|',t.stats.median===null?'—':Math.round(t.stats.median)+'¢','']);
  for(const [label,value,tip]of vals){const span=document.createElement('span'),b=document.createElement('strong');b.textContent=value;span.append(b,document.createTextNode(label));span.title=tip;st.append(span);}
+ if(t.record){const n=document.createElement('span');n.className='rec-delta'+(t.record.delta>0?' up':t.record.delta<0?' down':'');n.textContent=t.record.text;n.title=t.record.title;st.append(n);}
  if(t.stats.targetTime<=.1){const n=document.createElement('span');n.className='none';n.textContent='Попередня оцінка за чернеткою';n.title='Прослухай накладання та перевір мелодію-ціль. Сам факт знайденої ноти не доводить, що це головний вокал.';st.append(n);}
- const actions=document.createElement('div');actions.className='take-actions';for(const [label,fn,tip]of[['WAV',()=>saveWav(t),'Зберегти WAV'],['CSV',()=>saveCSV(t),'Зберегти CSV зі слідом нот і станом кожної точки'],['×',()=>removeTake(t),'Видалити спробу']]){const b=document.createElement('button');b.textContent=label;b.title=tip;b.setAttribute('aria-label',tip);b.onclick=fn;actions.append(b);}
+ const actions=document.createElement('div');actions.className='take-actions';
+ const buttons=[...(t.hasAudio?[['WAV',()=>saveWav(t),'Зберегти WAV']]:[]),['CSV',()=>saveCSV(t),'Зберегти CSV зі слідом нот і станом кожної точки'],['JSON',()=>saveTakeJSON(t),'Зберегти спробу файлом: метадані, оцінка і стиснутий слід'],['×',()=>removeTake(t),t.historyError?'Видалити спробу з вкладки · в історії її немає':'Видалити спробу з вкладки · в історії вона лишається']];
+ for(const [label,fn,tip]of buttons){const b=document.createElement('button');b.textContent=label;b.title=tip;b.setAttribute('aria-label',tip);b.onclick=fn;actions.append(b);}
  el.append(play,title,st,actions);root.append(el);
- }$('takesPanel').hidden=!s.takes.length;$('takesCount').textContent=s.takes.length;}
-function removeTake(t){if(s.mode!=='idle'||s.awaitFinish||s.busy){toast('Спочатку зупини відтворення або запис.');return;}if(!t.saved&&!confirm('Спробу ще не завантажено. Видалити її з пам’яті?'))return;if(s.undoPunch?.after===t)clearUndoPunch();s.takes=s.takes.filter(x=>x.id!==t.id);URL.revokeObjectURL(t.url);if(s.trace?.take===t)s.trace=null;s.unsaved=s.takes.some(t=>!t.saved);renderTakes();sync();}
+ }
+ if(!s.takes.length&&s.hist.runs.length){const p=document.createElement('p');p.className='takes-empty';
+  p.textContent='У цій вкладці спроб ще немає. Те, що ти співав раніше, — у вкладці «Прогрес».';root.append(p);}
+ $('takesCount').textContent=s.takes.length;renderProgress();}
+// ── Progress tab ────────────────────────────────────────────────────────────────────────────────────────────────
+// The attempt panel gets two tabs instead of one heading; nothing is added inside .stage, so the geometry the stage
+// redesign made reliable stays untouched. Mint means better, muted rose means worse, and every bar carries its number.
+const WEAK_SHOWN=12;let trendWatch=null;
+function pct100(v){return v===null||v===undefined?null:clamp(Math.round(v/100),0,100);}
+function pctText(v){const p=pct100(v);return p===null?'—':p+'%';}
+function underTarget(frames){const sec=frames*GRID;return sec<60?Math.round(sec)+' с':Math.round(sec/60)+' хв';}
+function streakDays(){
+ const byDay=new Map();for(const d of s.hist.days)byDay.set(d.localDay,(byDay.get(d.localDay)||0)+d.target);
+ let day=localDay(Date.now()),n=0;
+ if((byDay.get(day)||0)<HIST.streakFrames)day=dayShift(day,-1);// today may simply not have happened yet
+ while((byDay.get(day)||0)>=HIST.streakFrames){n++;day=dayShift(day,-1);}
+ return n;
+}
+// A session is attempts less than 45 minutes apart. The newest one is what the footer reports.
+function lastSession(runs,eligible){
+ if(!runs.length)return null;
+ const out=[runs[0]];
+ for(let i=1;i<runs.length;i++){const gap=Date.parse(out[out.length-1].startedAt)-Date.parse(runs[i].startedAt);if(gap>HIST.sessionGap)break;out.push(runs[i]);}
+ // Attempts and minutes count everything sung in the session; the best number obeys the same coverage floors as the
+ // record above it, so a three-second fragment can never sit under «найкраще» next to a record over the whole song.
+ const best=out.reduce((a,r)=>eligible.has(r.id)&&(a===null||eligible.get(r.id)>a)?eligible.get(r.id):a,null);
+ return {count:out.length,frames:out.reduce((a,r)=>a+r.target,0),best};
+}
+function trendScope(){return s.trendScope==='song'||!customRange()?'song':'range';}
+// The phrase the A–B region is currently sitting on, if it is sitting on one at all.
+function scopePhrase(){
+ if(trendScope()==='song')return null;
+ const p=(song.phrases||[]).find(p=>Math.abs(p.a-s.range.a)<=.25&&Math.abs(p.b-s.range.b)<=.25);
+ return p?p.id:null;
+}
+// What every number on the panel is counted over, as {id, match, medianCents, startedAt, localDay, target}. A full pass
+// of the song carries a whole-song percentage, which says nothing about one phrase — so when the fragment lines up with
+// a phrase, that phrase's own frames are read out of the attempt instead, the way docs/PROGRESS_DESIGN.md §4.2 has it:
+// an arbitrary A–B has no entity of its own and decomposes into the phrases it covered. An A–B that is not a phrase can
+// only be spoken for by an attempt recorded at that very fragment.
+function scopeEntries(runs){
+ const of=(r,match,medianCents,target)=>({id:r.id,run:r,match,medianCents,target,startedAt:r.startedAt,localDay:r.localDay});
+ if(trendScope()==='song')
+  return runs.filter(r=>r.match!==null&&r.songTarget&&r.target>=r.songTarget*HIST.songCover&&r.target>=HIST.minSongFrames)
+   .map(r=>of(r,r.match,r.medianCents,r.target));
+ const id=scopePhrase();
+ if(id!==null){
+  const out=[];
+  for(const r of runs)for(const c of phraseCandidates(r))if(c.id===id&&c.target>=HIST.minPhraseFrames)out.push(of(r,c.match,c.medianCents,c.target));
+  return out;
+ }
+ return runs.filter(r=>r.match!==null&&Math.abs(r.a-s.range.a)<=.25&&Math.abs(r.b-s.range.b)<=.25&&r.target>=HIST.minPhraseFrames)
+  .map(r=>of(r,r.match,r.medianCents,r.target));
+}
+function trendRuns(runs){return scopeEntries(runs).slice(0,HIST.trendRuns).reverse();}
+// Draft frames over frames with a target, for what the panel is about: the song, the phrase, or the A–B on screen.
+function scopeDraft(view){
+ const totals=targetTotals(view);
+ if(trendScope()==='song')return {frames:totals.song,draft:totals.draft};
+ const id=scopePhrase();
+ if(id!==null)return {frames:totals.phrase.get(id)||0,draft:totals.phraseDraft.get(id)||0};
+ const opt={octave:0,view};let frames=0,draft=0;
+ for(let i=Math.ceil(s.range.a/GRID);i*GRID<=s.range.b;i++){const ref=targetAt(i*GRID,opt);if(!ref)continue;frames++;if(!ref.ok)draft++;}
+ return {frames,draft};
+}
+function drawTrend(cv,list){
+ const w=cv.clientWidth,h=cv.clientHeight,dpr=Math.min(window.devicePixelRatio||1,2);
+ if(!w||!h)return;// a folded panel has no size to draw into; the observer draws once it has one
+ cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr);const c=cv.getContext('2d');c.setTransform(dpr,0,0,dpr,0,0);c.clearRect(0,0,w,h);
+ const pad=6,x=i=>list.length<2?w/2:pad+i/(list.length-1)*(w-2*pad),y=v=>h-pad-v/100*(h-2*pad);
+ c.strokeStyle='#ffffff12';c.lineWidth=1;
+ for(const line of [0,50,100]){c.beginPath();c.moveTo(0,Math.round(y(line))+.5);c.lineTo(w,Math.round(y(line))+.5);c.stroke();}
+ if(!list.length)return;
+ const vals=list.map(r=>pct100(r.match)??0);
+ c.strokeStyle='#a1eed8a8';c.lineWidth=1.6;c.beginPath();// moving average over five attempts
+ for(let i=0;i<vals.length;i++){const from=Math.max(0,i-4),avg=vals.slice(from,i+1).reduce((a,b)=>a+b,0)/(i-from+1);
+  const xx=x(i),yy=y(avg);if(i)c.lineTo(xx,yy);else c.moveTo(xx,yy);}
+ c.stroke();
+ for(let i=0;i<vals.length;i++){c.beginPath();c.arc(x(i),y(vals[i]),2.4,0,Math.PI*2);c.fillStyle=i===vals.length-1?'#d9fdf4':'#9fb0c8';c.fill();}
+}
+// value is the number on the bar and in the column; mark is a second, named number drawn as a notch on the same track.
+function barRow(label,value,mark,markLabel,onclick,note){
+ const row=document.createElement('button');row.className='prog-bar';row.type='button';
+ if(onclick)row.onclick=onclick;else row.disabled=true;
+ const name=document.createElement('span');name.className='nm';name.textContent=label;
+ const track=document.createElement('span');track.className='track';
+ if(value===null){const em=document.createElement('em');em.className='none';em.textContent=note||'не співано';track.append(em);}
+ else{const fill=document.createElement('span');fill.className='fill'+(value>=70?' good':value<40?' low':'');fill.style.width=clamp(value,0,100)+'%';track.append(fill);}
+ if(value!==null&&mark!==null&&mark!==undefined){const i=document.createElement('i');i.className='mark';i.style.left=clamp(mark,0,100)+'%';i.title=markLabel+' '+mark+'%';track.append(i);}
+ const num=document.createElement('span');num.className='num';num.textContent=value===null?'—':value+'%';
+ row.append(name,track,num);
+ row.title=label+' · '+(value===null?(note||'ще не зараховано жодної спроби')
+  :'найкраще '+value+'%'+(mark!==null&&mark!==undefined?' · '+markLabel.toLowerCase()+' '+mark+'%':''));
+ return row;
+}
+function weakRows(runs){
+ const rec=records(runs),totals=targetTotals(prefs.view),out=[];
+ for(const p of song.phrases||[]){
+  const best=rec.phrases.get(p.id);
+  // under 1.5 s of target in the whole phrase no attempt can ever count it: the phrase is short, not unsung
+  const short=(totals.phrase.get(p.id)||0)<HIST.minPhraseFrames;
+  // the same 1.5 s floor the record uses, so the notch can never mark an attempt too short to be counted
+  let last=null;for(const r of runs){const c=phraseCandidates(r).find(c=>c.id===p.id&&c.target>=HIST.minPhraseFrames);if(c){last=c.match;break;}}
+  out.push({id:p.id,label:p.label||('Фрагмент '+p.id),best:pct100(best?best.match:null),last:pct100(last),short});
+ }
+ // Worst first by the personal best: one bad take must not reshuffle the practice list, a phrase nobody has sung yet
+ // stands at the bottom rather than pretending to be the weakest, and a phrase too short to count stands under it.
+ out.sort((a,b)=>(a.best===null)-(b.best===null)||a.short-b.short||(a.best-b.best)||a.id-b.id);
+ return out;
+}
+// A lesson trains a skill, not nine separate keys: rows are exercises, and each carries one lamp per level.
+function exerciseRows(){
+ const groups=new Map();
+ for(const p of song.phrases||[]){const ex=exerciseOf(p);if(!groups.has(ex))groups.set(ex,[]);groups.get(ex).push(p.id);}
+ const rows=[];
+ for(const [ex,ids]of groups){
+  const lamps=[];
+  for(const level of ['easy','normal','strict']){
+   const key=cmpKeyOf({mapVersion:mapVersion(),level,tolerance:LEVELS[level].tolerance,view:prefs.view,speed:prefs.speed});
+   const list=s.hist.runs.filter(r=>r.cmpKey===key),rec=records(list);
+   let best=null,count=0;
+   for(const r of list)if(phraseCandidates(r).some(c=>ids.includes(c.id)))count++;
+   for(const id of ids){const c=rec.phrases.get(id);if(c&&(best===null||c.match>best))best=c.match;}
+   lamps.push({level,label:LEVELS[level].label,best:pct100(best),count});
+  }
+  rows.push({ex,ids,lamps});
+ }
+ return rows;
+}
+function progressSignature(){
+ return [prefs.tab,prefs.shadow,currentKey(),s.trendScope||'',s.rangeId,s.range.a.toFixed(2),s.range.b.toFixed(2),
+  s.hist.runs.length,s.hist.stamp||'',s.hist.note,s.hist.persisted,s.takes.length,s.weakAll].join('|');
+}
+function renderProgress(){
+ const panel=$('takesPanel'),box=$('progressPanel');
+ const has=s.takes.length||s.hist.runs.length;
+ panel.hidden=!has;panel.dataset.tab=prefs.tab;
+ $('tabTakes').setAttribute('aria-selected',String(prefs.tab==='takes'));
+ $('tabProgress').setAttribute('aria-selected',String(prefs.tab==='progress'));
+ $('takesList').hidden=prefs.tab!=='takes';box.hidden=prefs.tab!=='progress';
+ $('takesHint').textContent=s.takes.some(t=>t.hasAudio&&!t.saved)?'Збережи WAV перед закриттям вкладки'
+  :s.takes.some(t=>t.historyError)?'Спробу не записано в історію: збережи її JSON перед закриттям вкладки'
+  :!historyAvailable()?'Історія не ведеться: відкрий пісню з бібліотеки Studio'
+  :s.hist.note?s.hist.note
+  :'Кожна спроба лягає в історію на цьому комп’ютері';
+ if(panel.hidden||prefs.tab!=='progress')return;
+ const sig=progressSignature();if(sig===s.progressSig)return;s.progressSig=sig;
+ buildProgress(box);
+}
+function buildProgress(box){
+ box.replaceChildren();
+ const key=currentKey(),runs=s.hist.runs.filter(r=>r.cmpKey===key),today=localDay(Date.now());
+ const whole=trendScope()==='song',phraseId=scopePhrase(),scored=scopeEntries(runs);
+ let best=null;for(const e of scored)if(better(e,best))best=e;
+ const last5=scored.slice(0,5),bestToday=scored.filter(e=>e.localDay===today).reduce((a,e)=>a===null||e.match>a?e.match:a,null);
+ const of=whole?'повних проходів пісні':phraseId!==null?'зарахованих проходів цієї фрази':'спроб цього фрагмента';
+ // 1 · the numbers, all counted over the same attempts as the trend below
+ // A record over draft targets is a preliminary one, and says so the way the attempt card does.
+ const share=scopeDraft(prefs.view),soft=!!best&&share.draft>0;
+ const draftPct=!share.draft?'0%':share.draft*200<share.frames?'<1%':Math.round(100*share.draft/share.frames)+'%';
+ const row=document.createElement('div');row.className='prog-nums';
+ const cells=[[soft?'Рекорд · за чернеткою':'Рекорд',best?pctText(best.match):'—',best?(whole?'найкращий повний прохід':'найкраща спроба цього фрагмента')+' · '+String(best.startedAt).slice(0,10)+(soft?' · попередній: '+draftPct+' цілей тут — чернетка мелодії':''):whole?'Ще немає повного проходу цієї пісні':'Ще немає зарахованої спроби цього фрагмента'],
+  ['Останні 5',last5.length?Math.round(last5.reduce((a,e)=>a+e.match,0)/last5.length/100)+'%':'—','середній збіг останніх '+last5.length+' '+of],
+  ['Сьогодні',pctText(bestToday),'найкраще за цю добу серед '+of],
+  ['Серія днів',String(streakDays()),'дні поспіль, у кожному щонайменше 2 хв кадрів із ціллю']];
+ for(const [label,value,tip]of cells){const cell=document.createElement('div');cell.className='prog-num';cell.title=tip;
+  const v=document.createElement('b');v.textContent=value;const l=document.createElement('span');l.textContent=label;cell.append(v,l);row.append(cell);}
+ const ruler=document.createElement('p');ruler.className='prog-ruler';
+ ruler.textContent='Лінійка: '+levelLabel(levelOpt())+' · '+(prefs.view==='notes'?'Ноти':'Контур')+' · '+prefs.speed+'× · карта '+mapVersion().slice(-8)
+  +' · чернеткових цілей '+draftPct+' · область: '+(whole?'вся пісня':phraseId!==null?phraseLabel(phraseId):'фрагмент '+fmt(s.range.a)+'–'+fmt(s.range.b));
+ box.append(row,ruler);
+ // 2 · trend
+ const head=document.createElement('div');head.className='prog-head';
+ const title=document.createElement('h3');title.textContent='Тренд';head.append(title);
+ const seg=document.createElement('div');seg.className='segmented';seg.setAttribute('aria-label','Область тренду');
+ for(const [id,label]of [['song','Вся пісня'],['range','Поточний фрагмент']]){
+  const b=document.createElement('button');b.textContent=label;b.className=trendScope()===id?'active':'';b.setAttribute('aria-pressed',String(trendScope()===id));
+  b.disabled=id==='range'&&!customRange();b.onclick=()=>{s.trendScope=id;s.progressSig='';renderProgress();};seg.append(b);}
+ head.append(seg);box.append(head);
+ const list=trendRuns(runs);
+ const cv=document.createElement('canvas');cv.className='prog-trend';cv.setAttribute('role','img');
+ cv.setAttribute('aria-label','Збіг останніх '+list.length+' спроб: '+(list.map(e=>pctText(e.match)).join(', ')||'спроб ще немає'));
+ box.append(cv);
+ const note=document.createElement('p');note.className='prog-note';
+ const octaves=new Set(list.map(e=>e.run.octave));
+ note.textContent=list.length?(list.length+' '+plural(list.length,'спроба','спроби','спроб')+' · точки в часі, лінія — середнє по п’яти'
+  +(octaves.size>1?' · спроби співано в різних вокальних октавах':'')):'Тут з’явиться крива збігу, коли буде хоча б одна зарахована спроба цієї лінійки.';
+ box.append(note);
+ // drawn whenever the canvas takes a size: now, when a folded panel opens, when the window narrows
+ trendWatch?.disconnect();trendWatch=new ResizeObserver(()=>drawTrend(cv,list));trendWatch.observe(cv);
+ // 3 · weak places, or the lesson's exercises
+ const h2=document.createElement('h3');h2.textContent=song.lesson?'Вправи':'Слабкі місця';box.append(h2);
+ const rows=document.createElement('div');rows.className='prog-rows';
+ if(song.lesson){
+  for(const r of exerciseRows()){
+   const line=document.createElement('div');line.className='prog-ex';
+   const nm=document.createElement('span');nm.className='nm';nm.textContent=r.ex;line.append(nm);
+   for(const lamp of r.lamps){
+    const el=document.createElement('span');const on=lamp.best!==null&&lamp.best>=HIST.lamp;
+    el.className='lamp'+(on?' on':lamp.best===null?' empty':'');
+    el.textContent=lamp.label+' '+(lamp.best===null?'—':lamp.best+'%');
+    el.title=lamp.label+' · найкраще '+(lamp.best===null?'ще не співано':lamp.best+'%')+' · спроб: '+lamp.count+' · лампа світиться від '+HIST.lamp+'%';
+    line.append(el);}
+   rows.append(line);}
+ }else if(!(song.phrases||[]).length){
+  const empty=document.createElement('p');empty.className='prog-note';empty.textContent='У цій пісні немає готових фраз, тож карта слабких місць порожня. Виділи фрагмент — тренд рахуватиметься по ньому.';rows.append(empty);
+ }else{
+  // A four-minute song has dozens of phrases and most of them are still unsung: the worst twelve are the map, the rest
+  // are one line until you ask for them.
+  const all=weakRows(runs),shown=s.weakAll?all:all.slice(0,WEAK_SHOWN);
+  for(const w of shown){const bar=barRow(w.label,w.best,w.last,'Остання спроба',()=>{
+   const p=(song.phrases||[]).find(p=>p.id===w.id);if(!p||s.mode!=='idle'||s.busy||s.awaitFinish)return;
+   closeTrace();setRange(p.a,p.b,p.id);s.pos=p.a;setRangeScale();sync();toast('Фрагмент: '+(p.label||('Фрагмент '+p.id)));},w.short?'закоротка для рекорду':'');
+   if(w.short)bar.title+=': у фразі менше 1.5 с нот';
+   rows.append(bar);}
+  if(all.length>shown.length){const more=document.createElement('button');more.className='ghost sm prog-more';
+   const rest=all.length-shown.length,unsung=all.slice(shown.length).filter(w=>w.best===null&&!w.short).length;
+   more.textContent='Показати решту '+rest+' '+plural(rest,'фразу','фрази','фраз')+(unsung?' · без зарахованої спроби: '+unsung:'');
+   more.onclick=()=>{s.weakAll=true;s.progressSig='';renderProgress();};rows.append(more);}
+ }
+ box.append(rows);
+ // 4 · footer: where the history lives and what you can do with it
+ const foot=document.createElement('div');foot.className='prog-foot';
+ const state=document.createElement('p');state.className='prog-note';
+ const session=lastSession(runs,new Map(scored.map(e=>[e.id,e.match])));
+ state.textContent=(s.hist.note?s.hist.note+' ':'')
+  +(session?'Остання сесія: '+session.count+' '+plural(session.count,'спроба','спроби','спроб')+' · '+underTarget(session.frames)+' під ціллю'
+   +(session.best===null?' · '+(whole?'без повного проходу':'без зарахованої спроби цього фрагмента'):' · найкраще '+pctText(session.best))+'. ':'')
+  +(historyAvailable()?'Історія лежить у цьому браузері, на цьому комп’ютері. '+(s.hist.persisted===false?'Браузер може її очистити — роби експорт.':''):'');
+ foot.append(state);
+ const acts=document.createElement('div');acts.className='prog-actions';
+ for(const [label,tip,fn]of [
+  ['Експорт пісні','Зберегти історію цієї пісні файлом',()=>doExport(false)],
+  ['Експорт усього','Зберегти історію всіх пісень',()=>doExport(true)],
+  ['Імпорт','Прочитати файл історії; повтори пропускаються',()=>$('historyFile').click()],
+  ['Очистити пісню','Видалити історію цієї пісні з цього браузера',doClear]]){
+  const b=document.createElement('button');b.className='ghost sm';b.textContent=label;b.title=tip;b.setAttribute('aria-label',tip);b.onclick=fn;b.disabled=!historyAvailable();acts.append(b);}
+ foot.append(acts);box.append(foot);
+}
+function doExport(all){
+ exportPayload(all).then(payload=>{
+  const name='Luma_'+(all?'history':song.title.replace(/[^\p{L}\p{N}_-]+/gu,'_')+'_history')+'.json';
+  download(new Blob([JSON.stringify(payload)],{type:'application/json'}),name);
+  toast('Експортовано '+payload.runs.length+' '+plural(payload.runs.length,'спробу','спроби','спроб')+'.');
+ }).catch(e=>error(readable(e,'Не вдалося експортувати історію.')));
+}
+function doClear(){
+ if(!confirm('Видалити історію цієї пісні з цього браузера? Експорт треба зробити заздалегідь.'))return;
+ clearSongHistory().then(n=>toast('Видалено '+n+' '+plural(n,'спробу','спроби','спроб')+' з історії.')).catch(e=>error(readable(e,'Не вдалося очистити історію.')));
+}
+async function importHistoryFile(file){
+ if(!file)return;
+ if(file.size>200*1024*1024){error('Файл історії завеликий: максимум 200 МіБ.');return;}
+ try{const d=JSON.parse(await file.text());const r=await importHistory(d);
+  toast(r.imported?'Імпортовано '+r.imported+' '+plural(r.imported,'спробу','спроби','спроб')+(r.skipped?', пропущено повторів: '+r.skipped:'')+'.':'Нових спроб у файлі не було: усі вже в історії.');
+ }catch(e){error(readable(e,'Не вдалося прочитати файл історії.'));}
+}
+function removeTake(t){if(s.mode!=='idle'||s.awaitFinish||s.busy){toast('Спочатку зупини відтворення або запис.');return;}
+ const ask=t.historyError?'Цієї спроби немає в історії'+(t.hasAudio&&!t.saved?', а її WAV не завантажено':'')+': з вкладки вона зникне назавжди. Зберегти її можна кнопкою JSON. Видалити?'
+  :t.hasAudio&&!t.saved?'WAV цієї спроби ще не завантажено. Видалити його з пам’яті? Слід і оцінка лишаться в історії.':'';
+ if(ask&&!confirm(ask))return;if(s.undoPunch?.after===t)clearUndoPunch();s.takes=s.takes.filter(x=>x.id!==t.id);if(t.url)URL.revokeObjectURL(t.url);if(s.trace?.take===t)s.trace=null;markUnsaved();renderTakes();sync();}
 async function playTake(t){
  if(s.busy||s.awaitFinish)return;if(s.mode!=='idle'){stopTransport('user');renderTakes();return;}clearTimeout(s.nextTimer);const token=++s.cancel;s.busy=true;s.busyFor='review';sync();
- try{await ensureContext();const b=await buffers(t.speed);if(!t.buffer)t.buffer=await s.ctx.decodeAudioData(await t.blob.arrayBuffer());if(token!==s.cancel)return;
+ try{await ensureContext();const b=await buffers(t.speed);if(t.hasAudio&&!t.buffer)t.buffer=await s.ctx.decodeAudioData(await t.blob.arrayBuffer());if(token!==s.cancel)return;
   const changed=s.trace?.take!==t||s.pos<t.a||s.pos>=t.endSong-1;s.trace={take:t,points:t.points,score:t.score};if(s.pos<t.a||s.pos>=t.endSong-1)s.pos=t.a;// under a second left: replay from the start
   const off=s.pos-t.a,when=s.ctx.currentTime+.15,dur=t.duration-off/t.speed;s.transport={token,when,offset:s.pos,end:t.endSong,speed:t.speed,loop:null};s.mode='review';
-  addSource(b.back,s.gains.back,when,s.pos/t.speed,dur);addSource(b.fore,s.gains.fore,when,s.pos/t.speed,dur);addSource(t.buffer,s.gains.voice,when,off/t.speed,dur,()=>{naturalEnd(token);});if(changed)setRangeScale();
+  const lead=addSource(b.back,s.gains.back,when,s.pos/t.speed,dur);addSource(b.fore,s.gains.fore,when,s.pos/t.speed,dur);
+  if(t.hasAudio)addSource(t.buffer,s.gains.voice,when,off/t.speed,dur,()=>{naturalEnd(token);});else lead.onended=()=>naturalEnd(token);if(changed)setRangeScale();
  }catch(e){error(e.message);}finally{if(token===s.cancel){s.busy=false;sync();renderTakes();}}
 }
 function resize(){const r=$('chartWrap').getBoundingClientRect(),q=$('timelineWrap').getBoundingClientRect();W=r.width;H=r.height;TW=q.width;TH=q.height;DPR=Math.min(window.devicePixelRatio||1,2);canvas.width=Math.round(W*DPR);canvas.height=Math.round(H*DPR);g.setTransform(DPR,0,0,DPR,0,0);tl.width=Math.round(TW*DPR);tl.height=Math.round(TH*DPR);tg.setTransform(DPR,0,0,DPR,0,0);measureStage();if(W>0&&H>0){s.dirty=false;draw(now());}else s.dirty=true;requestDraw();}
@@ -469,6 +1151,13 @@ function draw(t){
    else{g.fillStyle='#0d121b';g.fill();g.strokeStyle='#dd8f97';g.lineWidth=1.3;g.setLineDash([3,2.4]);g.stroke();g.setLineDash([]);}
    g.font='600 11px '+sans;g.fillStyle=hit?'#0d2620':'#f0b5bb';g.fillText(hit?'✓':'×',xx,yy+.5);}
  }
+ // shadow of the personal best for this fragment: 1 px, no halo, under everything the current attempt draws
+ if(prefs.shadow&&s.shadow&&s.shadow.points.length){const path=new Path2D();let last=null;const shift=opt.octave-s.shadow.octave;
+  for(const p of s.shadow.points){if(p.songT>v.b)break;
+   if(p.m===null||p.confidence<.8){last=null;continue;}
+   if(last&&p.songT>=v.a-.3&&p.songT-last.songT<=.11&&Math.abs(p.m-last.m)<=3.5){path.moveTo(x(last.songT),y(last.m+shift));path.lineTo(x(p.songT),y(p.m+shift));}
+   last=p;}
+  g.lineWidth=1;g.lineJoin='round';g.lineCap='round';g.strokeStyle='#95a3b899';g.stroke(path);}
  // sung trace: a soft halo around the voice, crisp core on top; mint inside the corridor, subdued red outside, dim with no target
  if(pts.length){const review=s.mode!=='singing';const upTo=review?v.b+.1:t+.03;const paths=tracePaths(pts,x,y,sc,upTo);
   g.lineJoin='round';g.lineCap='round';
@@ -537,10 +1226,10 @@ function openEditor(){if(s.mode!=='idle')return;const ns=song.notes.filter(n=>n.
 function selectEdit(id){const n=song.notes.find(n=>n.id===+id);if(!n)return;s.edit=structuredClone(n);$('editNoteName').textContent=name(s.edit.m);$('editStart').value=n.a;$('editEnd').value=n.b;$('editIgnore').checked=!!n.ignored;}
 function exportTarget(){const data={...song,verified:s.verified};download(new Blob([JSON.stringify(data)],{type:'application/json'}),'Luma_'+song.title+'_target.json');}
 function validateSong(d){return d&&d.schema==='luma.song.v1'&&typeof d.title==='string'&&d.title.length<200&&Number.isFinite(d.duration)&&d.duration>0&&d.duration<=600&&Number.isFinite(d.hop)&&d.hop>.001&&d.hop<.25&&Array.isArray(d.points)&&d.points.length<300001&&d.points.length>0&&d.points.every(p=>Array.isArray(p)&&Number.isFinite(p[0])&&(p[1]===null||Number.isFinite(p[1])&&p[1]>=24&&p[1]<=108))&&validNotes(d.notes,d.duration)&&Array.isArray(d.phrases)&&d.phrases.length<1001&&d.phrases.every(p=>Number.isFinite(p.a)&&Number.isFinite(p.b)&&p.a>=0&&p.b<=d.duration&&p.b>p.a);}
-async function importFile(file){if(!file)return;if(file.size>100*1024*1024){error('Пакет завеликий: максимум 100 МіБ.');return;}try{const d=JSON.parse(await file.text());const packed=d.schema==='luma.pack.v1',newSong=packed?d.song:d;if(!validateSong(newSong))throw Error('Непідтримуваний формат цілі. Потрібен target.json або готовий .luma.json, не сире аудіо.');if(s.unsaved&&!confirm('Перед заміною пісні збережи WAV. Продовжити й видалити спроби з вкладки?'))return;
+async function importFile(file){if(!file)return;if(file.size>100*1024*1024){error('Пакет завеликий: максимум 100 МіБ.');return;}try{const d=JSON.parse(await file.text());const packed=d.schema==='luma.pack.v1',newSong=packed?d.song:d;if(!validateSong(newSong))throw Error('Непідтримуваний формат цілі. Потрібен target.json або готовий .luma.json, не сире аудіо.');if(s.unsaved&&!confirm('У вкладці є незбережене: WAV або спроби, яких немає в історії. Продовжити й видалити спроби з вкладки?'))return;
  if(!packed){if(Math.abs(newSong.duration-song.duration)>.1||newSong.title!==song.title||(newSong.sourceId&&song.sourceId&&newSong.sourceId!==song.sourceId))throw Error('Ціль належить іншому аудіо. Імпортуй повний підготовлений пакет.');if(!validLyrics(newSong.lyrics))newSong.lyrics=song.lyrics;}
  else{if(!d.assets?.['1']?.backing||!d.assets?.['1']?.foreground)throw Error('У пакеті відсутні аудіодоріжки.');assets=d.assets;s.bufs.clear();}
- stopTransport('import');await releaseMic();s.takes.forEach(t=>URL.revokeObjectURL(t.url));clearUndoPunch();s.takes=[];s.unsaved=false;s.trace=null;s.history=[];song=newSong;song.notes.sort((a,b)=>a.a-b.a);song.points.sort((a,b)=>a[0]-b[0]);populateSong();if(Array.isArray(newSong.verified)){s.verified=newSong.verified.filter(r=>Number.isFinite(r.a)&&Number.isFinite(r.b)&&r.a>=0&&r.b<=song.duration);saveEdits();}renderTakes();sync();toast('Ціль імпортовано. Перевір мелодію перед тренуванням.');
+ stopTransport('import');await releaseMic();s.takes.forEach(t=>{if(t.url)URL.revokeObjectURL(t.url);});clearUndoPunch();s.takes=[];s.unsaved=false;s.trace=null;s.history=[];song=newSong;song.notes.sort((a,b)=>a.a-b.a);song.points.sort((a,b)=>a[0]-b[0]);resetHistory();populateSong();if(Array.isArray(newSong.verified)){s.verified=newSong.verified.filter(r=>Number.isFinite(r.a)&&Number.isFinite(r.b)&&r.a>=0&&r.b<=song.duration);saveEdits();}renderTakes();sync();await loadHistory();toast('Ціль імпортовано. Перевір мелодію перед тренуванням.');
  }catch(e){error(e.message||'Не вдалося прочитати пакет.');}}
 function seekTo(t,keepRange){if(s.mode!=='idle'){applySeek(t);return;}clearTimeout(s.nextTimer);s.cancel++;s.pos=clamp(t,0,song.duration);s.history=[];s.current=null;setRangeScale();sync();}
 // One entry point for every seek gesture: idle → move the playhead; listen/review → rebuild audio live; singing → close the take and restart from there.
@@ -554,7 +1243,11 @@ $('scaleSelect').onchange=()=>{setRangeScale();requestDraw();};
 $('newTakeBtn').onclick=()=>{if(s.mode!=='idle'||s.busy||s.awaitFinish)return;closeTrace();startTransport(true);};$('undoPunchBtn').onclick=undoPunch;
 $('repeatMissBtn').onclick=()=>{if(!traceShown()||s.mode!=='idle'||s.busy||s.awaitFinish)return;const runs=missRuns(s.trace.score),r=runs.find(r=>r.b>s.pos)||runs[0];if(!r)return;const a=Math.max(0,r.a-.6),b=Math.min(song.duration,r.b+.8);closeTrace();setRange(a,b);prefs.loop=true;s.pos=a;setRangeScale();sync();startTransport(false);};
 function markRange(which){if(s.busy||s.awaitFinish)return;const t=now();const ok=which==='a'?setRange(t,Math.max(s.range.b,t+.5)):setRange(Math.min(s.range.a,t-.5),t);if(ok)toast((which==='a'?'Фрагмент від':'Фрагмент до')+' '+fmt(t));}
-$('markA').onclick=()=>markRange('a');$('markB').onclick=()=>markRange('b');$('rangeSettings').onclick=()=>{modal('settingsDialog');$('rangeA').focus();};$('prevMiss').onclick=()=>jumpMiss(-1);$('nextMiss').onclick=()=>jumpMiss(1);$('closeReview').onclick=closeTrace;$('takesToggle').onclick=()=>{prefs.takesOpen=!prefs.takesOpen;savePrefs();sync();};$('lyricsBtn').onclick=()=>{prefs.lyrics=!prefs.lyrics;savePrefs();s.lyricKey='~';resize();sync();};
+$('markA').onclick=()=>markRange('a');$('markB').onclick=()=>markRange('b');$('rangeSettings').onclick=()=>{modal('settingsDialog');$('rangeA').focus();};$('prevMiss').onclick=()=>jumpMiss(-1);$('nextMiss').onclick=()=>jumpMiss(1);$('closeReview').onclick=closeTrace;$('takesToggle').onclick=()=>{prefs.takesOpen=!prefs.takesOpen;savePrefs();sync();};
+for(const [id,tab]of [['tabTakes','takes'],['tabProgress','progress']])$(id).onclick=()=>{prefs.tab=tab;savePrefs();s.progressSig='';renderProgress();};
+$('shadowBtn').onclick=()=>{prefs.shadow=!prefs.shadow;savePrefs();s.shadowSig='';refreshShadow();sync();toast(prefs.shadow?'Тінь особистого рекорду увімкнена.':'Тінь особистого рекорду вимкнена.');};
+$('recordAudio').onchange=()=>{prefs.audio=$('recordAudio').checked;savePrefs();sync();toast(prefs.audio?'Голос записується у WAV: спробу можна буде прослухати й зберегти.':'Запис голосу вимкнено. Слід і оцінка зберігаються як завжди.');};
+$('historyFile').onchange=()=>{importHistoryFile($('historyFile').files[0]);$('historyFile').value='';};$('lyricsBtn').onclick=()=>{prefs.lyrics=!prefs.lyrics;savePrefs();s.lyricKey='~';resize();sync();};
 for(const b of document.querySelectorAll('[data-close]'))b.onclick=()=>$(b.dataset.close).close();
 $('loopBtn').onclick=()=>{prefs.loop=!prefs.loop;if(!prefs.loop)clearTimeout(s.nextTimer);if(prefs.loop&&!customRange())toast('Виділи фрагмент: тягни під хвилею або клавіші A / B під час прослуховування.');
  if(s.mode==='listen'&&s.transport){const t=now();seekLive(prefs.loop&&customRange()&&(t<s.range.a||t>=s.range.b-.1)?s.range.a:t);}sync();};$('speedSelect').onchange=()=>{prefs.speed=Number($('speedSelect').value);$('songMeta').textContent=fmt(song.duration)+(prefs.speed!==1?' · '+prefs.speed+'×':'');if(s.mode==='listen'){const t=now();stopTransport('speed');s.pos=t;startTransport(false);}sync();};
@@ -562,7 +1255,7 @@ $('phraseSelect').onchange=()=>{if($('phraseSelect').value==='-1'){s.rangeId=-1;
 function adjacent(dir){const opts=[...$('phraseSelect').options].filter(o=>+o.value>=0),idx=opts.findIndex(o=>+o.value===s.rangeId),j=clamp(idx+dir,0,opts.length-1);chooseRange(opts[j].value);}
 $('prevPhrase').onclick=()=>adjacent(-1);$('nextPhrase').onclick=()=>adjacent(1);$('clearRange').onclick=()=>{clearRange();toast('Повтор знято: вся пісня.');};
 $('vocalBtn').onclick=()=>{prefs.vocal=!prefs.vocal;applyMix();sync();toast(prefs.vocal?'Оригінальний вокал увімкнено.':'Тільки мінус: оригінальний вокал вимкнено.');};
-for(const b of document.querySelectorAll('[data-level]'))b.onclick=()=>{prefs.level=b.dataset.level;prefs.tolerance=LEVELS[prefs.level].tolerance;savePrefs();sync();toast('Рівень: '+LEVELS[prefs.level].label+' · коридор ±'+prefs.tolerance+'¢');};
+for(const b of document.querySelectorAll('[data-level]'))b.onclick=()=>{prefs.level=b.dataset.level;prefs.tolerance=LEVELS[prefs.level].tolerance;savePrefs();s.progressSig='';sync();toast('Рівень: '+LEVELS[prefs.level].label+' · коридор ±'+prefs.tolerance+'¢');};
 // timeline: click/drag on the wave seeks (live while playing); drag in the loop lane or Shift-drag sets the A–B region; handles are draggable
 const tlw=$('timelineWrap');const tlTime=e=>{const r=tlw.getBoundingClientRect();return clamp((e.clientX-r.left)/r.width,0,1)*song.duration;};
 tlw.addEventListener('pointerdown',e=>{if(e.button!==0||s.busy||s.awaitFinish)return;const r=tlw.getBoundingClientRect(),t=tlTime(e),lane=e.clientY-r.top>r.height-LOOP_LANE,px=r.width/song.duration;tlw.setPointerCapture(e.pointerId);
@@ -602,18 +1295,63 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden){if(s.raf)c
 addEventListener('resize',fitStage);
 new ResizeObserver(resize).observe($('chartWrap'));new ResizeObserver(resize).observe($('timelineWrap'));
 function silentWav(seconds,rate=48000){const n=Math.round(seconds*rate),b=new ArrayBuffer(44+n*2),v=new DataView(b);const text=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i));};text(0,'RIFF');v.setUint32(4,36+n*2,true);text(8,'WAVE');text(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,rate,true);v.setUint32(28,rate*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);text(36,'data');v.setUint32(40,n*2,true);return new Blob([b],{type:'audio/wav'});}
+// Test hooks for the history: everything below is read-only except seedRun, which exists so a suite can build a
+// week of practice without a microphone and without waiting for real time to pass.
+const historyHooks={
+ available:historyAvailable,key:currentKey,mapVersion,songHash,note:()=>s.hist.note,persisted:()=>s.hist.persisted,
+ runs:()=>s.hist.runs.map(r=>({id:r.id,cmpKey:r.cmpKey,level:r.level,view:r.view,speed:r.speed,match:r.match,target:r.target,hit:r.hit,sung:r.sung,draftFrames:r.draftFrames,
+  medianCents:r.medianCents,localDay:r.localDay,startedAt:r.startedAt,hasAudio:r.hasAudio,hasTrace:r.hasTrace,a:r.a,b:r.b,songTarget:r.songTarget,
+  phrases:phraseCandidates(r).map(c=>({id:c.id,target:c.target,hit:c.hit,match:c.match,median:c.medianCents}))})),
+ records:()=>{const rec=records(s.hist.runs.filter(r=>r.cmpKey===currentKey()));
+  return {song:rec.song?{id:rec.song.id,match:rec.song.match}:null,phrases:[...rec.phrases].map(([id,c])=>({id,match:c.match,run:c.run.id}))};},
+ recordsFor:level=>{const key=cmpKeyOf({mapVersion:mapVersion(),level,tolerance:(LEVELS[level]||LEVELS.normal).tolerance,view:prefs.view,speed:prefs.speed});
+  const rec=records(s.hist.runs.filter(r=>r.cmpKey===key));return {key,song:rec.song?{id:rec.song.id,match:rec.song.match}:null,phrases:[...rec.phrases].map(([id,c])=>({id,match:c.match}))};},
+ reload:()=>loadHistory(),
+ // Re-score a stored trace: proof that the packed frames rebuild the same numbers the attempt was saved with.
+ rescore:async id=>{const run=s.hist.runs.find(r=>r.id===id),tr=await idbGet('traces',id);if(!run||!tr)return null;
+  const meta=optOfRun(run),pts=unpackTrace(tr).map(p=>{const songT=run.a+p.t*run.speed,ref=targetAt(songT,meta);
+   return {...p,songT,m:p.f?69+12*Math.log2(p.f/440):null,ref:ref?ref.m:null};});
+  const sc=newScore(meta);scoreAdvance(sc,pts,run.b);
+  return {points:pts.length,target:sc.target,hit:sc.hit,stored:{target:run.target,hit:run.hit}};},
+ exportPayload:all=>exportPayload(all),importPayload:d=>importHistory(d),clearSong:()=>clearSongHistory(),draft:()=>scopeDraft(prefs.view),
+ takeJSON:id=>{const t=s.takes.find(x=>x.id===id);return t?takePayload(t):null;},
+ shadow:()=>s.shadow?{id:s.shadow.id,match:s.shadow.match,points:s.shadow.points.length}:null,
+ streak:streakDays,trend:()=>trendRuns(s.hist.runs.filter(r=>r.cmpKey===currentKey())).map(r=>r.match),
+ totals:()=>({song:targetTotals(prefs.view).song,draft:targetTotals(prefs.view).draft}),
+ weak:()=>weakRows(s.hist.runs.filter(r=>r.cmpKey===currentKey())),exercises:exerciseRows,
+ // Write attempts straight into the store, dated freely: the seed a progress test needs.
+ seedRun:async spec=>{const ids=await historyHooks.seedMany([spec]);return ids[0];},
+ seedMany:async list=>{
+  const make=({match=8000,target=600,startedAt,level=prefs.level,view=prefs.view,speed=prefs.speed,a=0,b=song.duration,phrases=[],songTarget,medianCents=20,id})=>{
+   const started=startedAt||new Date().toISOString(),hit=Math.round(target*match/10000),L=LEVELS[level]||LEVELS.normal;
+   const stat=[];for(const p of phrases)stat.push(p.target,p.hit,p.sung??p.hit,p.median??-1);
+   return {id:id||newRunId(),songHash:songHash(),mapVersion:mapVersion(),cmpKey:cmpKeyOf({mapVersion:mapVersion(),level,tolerance:level==='custom'?prefs.tolerance:L.tolerance,view,speed}),
+    startedAt:started,endedAt:started,localDay:localDay(Date.parse(started)),a,b,speed,level,tolerance:L.tolerance,view,octave:0,latency:0,
+    hasAudio:false,clipped:false,punches:0,target,hit,sung:hit,draftFrames:0,medianCents,match:Math.round(10000*hit/target),
+    songTarget:songTarget??targetTotals(view).song,strict:{targetTime:0,compared:0,inside:0,median:-1},
+    phraseIds:Int32Array.from(phrases.map(p=>p.id)),phraseStats:Int32Array.from(stat),hasTrace:false};};
+  const runs=list.map(make),ops=runs.map(r=>['runs','put',r]);
+  ops.push(['songs','put',songEntry([...s.hist.runs,...runs].sort(byNewest))]);
+  await idbWrite(ops);await loadHistory();return runs.map(r=>r.id);},
+ reloadMs:async()=>{const t0=performance.now();await loadHistory();return +(performance.now()-t0).toFixed(1);}
+};
 window.Luma={diagnostics:()=>({mode:s.mode,busy:s.busy,pending:s.awaitFinish,time:now(),range:{...s.range},takeCount:s.takes.length,takes:s.takes.map(t=>({id:t.id,duration:t.duration,samples:t.duration*t.sampleRate,sampleRate:t.sampleRate,points:t.points.length,stats:t.stats,match:scorePct(t.score),frames:t.score.frames.length})),mic:!!s.stream,frequency:s.current?.f??null,computeMs:s.computeMs,windowMs:s.windowMs,contextState:s.ctx?.state,bufferDurations:[...s.bufs].map(([k,b])=>({speed:k,back:b.back.duration,fore:b.fore.duration}))}),targetAt:t=>targetAt(t),song:()=>({title:song.title,duration:song.duration,metrics:song.metrics,notes:song.notes.length,phrases:song.phrases.length,lyrics:song.lyrics.length}),
  // Test hooks: pure scoring and synthetic takes (silent WAV) so the review path can be exercised without a microphone.
  test:{GRID,score:(points,meta,upTo)=>{const sc=newScore(meta);scoreAdvance(sc,points,upTo??Infinity);return {target:sc.target,hit:sc.hit,sung:sc.sung,pct:scorePct(sc),frames:sc.frames,notes:[...sc.notes]};},
-  injectTake:({a,b,speed=1,points,tolerance,octave=prefs.octave,view=prefs.view})=>{const duration=(b-a)/speed,meta={...takeMeta(a,b,speed),octave,view};if(tolerance!==undefined){meta.tolerance=tolerance;meta.level='custom';}const id=meta.id;const m={id,blob:silentWav(duration),sampleRate:48000,duration,start:0,end:duration,reason:'end',points:points.filter(p=>p.t>=0&&p.t<duration),gap:0};const t=storeTake(meta,m);s.pos=a;sync();return {id:t.id,pct:scorePct(t.score),frames:t.score.frames.length,points:t.points.length};},
+  injectTake:({a,b,speed=1,points,tolerance,octave=prefs.octave,view=prefs.view,audio=prefs.audio,startedAt})=>{const duration=(b-a)/speed,meta={...takeMeta(a,b,speed),octave,view,hasAudio:!!audio};if(tolerance!==undefined){meta.tolerance=tolerance;meta.level='custom';}if(startedAt)meta.startedAt=startedAt;const id=meta.id;const m={id,blob:audio?silentWav(duration):null,hasAudio:!!audio,clipped:false,sampleRate:48000,duration,start:0,end:duration,reason:'end',points:points.filter(p=>p.t>=0&&p.t<duration),gap:0};const t=storeTake(meta,m);s.pos=a;sync();return {id:t.id,runId:t.runId,pct:scorePct(t.score),frames:t.score.frames.length,points:t.points.length,hasAudio:!!t.hasAudio};},
   livePush:(p)=>{handleWorker({type:'pitch',computeMs:0,windowMs:64,...p});},
   seek:t=>seekTo(t,true),applySeek,selectTake:id=>{const t=s.takes.find(t=>t.id===id);if(t)selectTrace(t);},closeTrace,jumpMiss,draw:()=>{draw(now());updateReadout(now());},
   setLevel:l=>{document.querySelector('[data-level="'+l+'"]').click();return levelOpt();},viewWindow:t=>view(t),plot:()=>({...bounds()}),dpr:()=>DPR,// one frame drawn with the label rectangles recorded, so a test can read the real canvas pixels behind the type
-  noteBoxes:()=>{probe=[];draw(now());const r=probe;probe=null;return r;},scale:()=>({...SCALE,goalLo:sc.goalLo,goalHi:sc.goalHi}),setRange,clearRange,levelOpt,centsOff,now,punchTarget:()=>punchTarget()?.id??null,gains:()=>s.gains?{back:s.gains.back.gain.value,fore:s.gains.fore.gain.value,vocal:prefs.vocal}:null,takes:()=>s.takes.map(t=>({id:t.id,a:t.a,endSong:t.endSong,duration:t.duration,bytes:t.blob.size,points:t.points.length,punches:t.punches||0,pct:scorePct(t.score)})),
+  noteBoxes:()=>{probe=[];draw(now());const r=probe;probe=null;return r;},scale:()=>({...SCALE,goalLo:sc.goalLo,goalHi:sc.goalHi}),setRange,clearRange,levelOpt,centsOff,now,punchTarget:()=>punchTarget()?.id??null,gains:()=>s.gains?{back:s.gains.back.gain.value,fore:s.gains.fore.gain.value,vocal:prefs.vocal}:null,takes:()=>s.takes.map(t=>({id:t.id,runId:t.runId,a:t.a,endSong:t.endSong,duration:t.duration,bytes:t.blob?.size||0,hasAudio:!!t.hasAudio,clipped:!!t.clipped,points:t.points.length,punches:t.punches||0,pct:scorePct(t.score),record:t.record?.text||null,historyError:!!t.historyError})),
   state:()=>({mode:s.mode,pos:s.pos,time:now(),trace:s.trace?{id:s.trace.take.id,points:s.trace.points.length,frames:s.trace.score.frames.length,pct:scorePct(s.trace.score),missRuns:missRuns(s.trace.score)}:null,liveScore:s.live?{target:s.live.target,hit:s.live.hit,sung:s.live.sung,pct:scorePct(s.live)}:null,history:s.history.length,matchText:$('matchPct').textContent,matchDetail:$('matchDetail').textContent,reviewHidden:$('reviewBar').hidden,missCount:$('missCount').textContent,lyric:$('lyricNow').textContent,liveNote:$('liveNote').textContent,deviation:$('deviation').textContent,range:{...s.range},rangeId:s.rangeId,rangeText:$('rangeText').textContent,loop:prefs.loop,transportLoop:s.transport?.loop??null,level:prefs.level,tolerance:prefs.tolerance,rangeLo:s.rangeLo,rangeHi:s.rangeHi}),
   fakeSing:({a,b,speed=1})=>{// enter singing mode without audio: transport clock driven by a fake context
    if(s.mode!=='idle')return false;const meta=takeMeta(a,b,speed),id=meta.id;if(!s.ctx)s.ctx={currentTime:0,state:'running',sampleRate:48000,resume(){},get _fake(){return true;}};const when=s.ctx.currentTime;s.transport={token:++s.cancel,when,offset:a,end:b,speed,loop:null};s.mode='singing';s.history=[];s.live=newScore(meta);s.pending.set(id,meta);sync();return {id,when};},
   fakeTick:(ctxTime)=>{if(s.ctx&&'_fake' in s.ctx)s.ctx.currentTime=ctxTime;const t=now();if(s.mode==='singing'&&s.live&&s.transport)scoreAdvance(s.live,s.history,Math.min(t-.18*s.transport.speed,s.transport.end));draw(t);updateReadout(t);return t;},
-  fakeFinish:()=>{const id=s.takeCounter,meta=s.pending.get(id);if(!meta)return null;const pts=s.history.map(p=>({t:(p.songT-meta.a)/meta.speed,f:p.f,confidence:p.confidence,db:p.db,rms:p.rms??0,peak:p.peak??0}));s.pending.delete(id);const duration=(s.pos=now())-meta.a;s.transport=null;s.mode='idle';s.live=null;const m={id,blob:silentWav(duration/meta.speed),sampleRate:48000,duration:duration/meta.speed,start:0,end:duration/meta.speed,reason:'end',points:pts,gap:0};const t=storeTake(meta,m);sync();return {id:t.id,pct:scorePct(t.score)};}}};
-populateSong();fitStage();resize();setRangeScale();updateReadout(s.pos);
+  fakeFinish:()=>{const id=s.takeCounter,meta=s.pending.get(id);if(!meta)return null;const pts=s.history.map(p=>({t:(p.songT-meta.a)/meta.speed,f:p.f,confidence:p.confidence,db:p.db}));s.pending.delete(id);const duration=(s.pos=now())-meta.a;s.transport=null;s.mode='idle';s.live=null;const m={id,blob:meta.hasAudio?silentWav(duration/meta.speed):null,hasAudio:!!meta.hasAudio,clipped:false,sampleRate:48000,duration:duration/meta.speed,start:0,end:duration/meta.speed,reason:'end',points:pts,gap:0};const t=storeTake(meta,m);sync();return {id:t.id,pct:scorePct(t.score)};},
+  history:historyHooks}};
+populateSong();fitStage();resize();setRangeScale();updateReadout(s.pos);loadHistory();
+// A profile that has never opened Luma before did not live through the change, so it is told nothing; the flag is set
+// either way, so the notice can never surface later.
+if(!prefs.audioNotice){const upgrade=hadSettings;prefs.audioNotice=true;savePrefs();
+ if(upgrade)setTimeout(()=>toast('Запис голосу у WAV тепер вимикається і типово вимкнений. Слід і оцінка кожної спроби зберігаються завжди — вкладка «Прогрес». WAV вмикається в налаштуваннях.'),900);}
 })();

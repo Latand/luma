@@ -122,6 +122,7 @@ button[aria-pressed=true]{color:var(--mint);border-color:#a1eed840;background:#a
 .legend i.draft{height:9px;background:#9a94b422;border:1px dashed #aba5c7}
 .legend i.hit{background:#a1eed899;border:1px solid #c4f9eb;height:9px}
 .legend i.miss{background:#c9707a26;border:1px dashed #dd8f97;height:9px}
+.legend i.best{background:var(--dim);height:1px;border-radius:0}
 .legend .glyph{font:12px var(--mono);color:#bff7e8}
 .legend .glyph.x{color:#eea8af}
 .stage-tools{display:flex;align-items:center;gap:9px;margin-left:auto;flex-wrap:wrap}
@@ -163,10 +164,12 @@ button[aria-pressed=true]{color:var(--mint);border-color:#a1eed840;background:#a
 
 /* ── attempts ── */
 .takes{flex:none;display:flex;flex-direction:column;border-top:1px solid var(--border);background:#0a0e15;max-height:38vh;min-height:0}
+.takes[data-tab="progress"]{max-height:44vh}
 .takes-head{display:flex;align-items:center;gap:12px;padding:7px 16px;font-size:12px;letter-spacing:1.2px;color:var(--ink-3);flex:none}
 .takes-head #takesToggle{display:flex;align-items:center;gap:9px;color:inherit;font-size:inherit;letter-spacing:inherit;min-height:var(--tap-sm)}
 .takes-head .chev{transition:transform .2s var(--ease)}
 .takes[data-open="0"] .chev{transform:rotate(-90deg)}
+.takes[data-open="0"] .takes-list,.takes[data-open="0"] .progress-panel{display:none}
 .takes-head .hint{margin-left:auto;font-size:12px;letter-spacing:0;color:var(--ink-3)}
 .takes-list{overflow:auto;padding:0 10px 10px;min-height:0}
 .take{display:grid;grid-template-columns:34px minmax(0,1fr) auto auto;gap:12px;align-items:center;padding:8px;border-radius:var(--r-md);border:1px solid transparent;box-shadow:inset 0 -1px 0 var(--hair)}
@@ -179,8 +182,48 @@ button[aria-pressed=true]{color:var(--mint);border-color:#a1eed840;background:#a
 .take-stats{display:flex;gap:16px;font-size:12px;color:var(--ink-3);white-space:nowrap}
 .take-stats strong{font:13px var(--mono);font-weight:400;color:#dae9e4;margin-right:4px}
 .take-stats .none{color:var(--ink-3)}
+.takes-empty{margin:10px 8px 4px;font-size:13px;color:var(--ink-3)}
 .take-actions{display:flex;gap:6px;align-items:center}
 .take-actions button{font-size:12px;padding:0 10px;min-width:var(--tap-sm);min-height:var(--tap-sm);border-radius:var(--r-sm);border:1px solid var(--border);color:#bfcadb;background:#ffffff05}
+.take-stats .rec-delta{color:var(--ink-3)}
+.take-stats .rec-delta.up{color:var(--mint)}
+.take-stats .rec-delta.down{color:#e3a3ab}
+
+/* ── progress: the trend, the weak phrases and where the history lives ── */
+.takes-head .tabs{padding:2px;gap:2px}
+.takes-head .tabs button{padding:0 12px;min-height:var(--tap-sm);border-radius:var(--r-xs);font-size:12px;letter-spacing:.6px;color:var(--ink-3)}
+.takes-head .tabs button[aria-selected=true]{background:#2b3549;color:#e5ecf7}
+.progress-panel{overflow:auto;padding:4px 16px 14px;min-height:0}
+.prog-nums{display:flex;gap:26px;flex-wrap:wrap;padding:8px 0 2px}
+.prog-num{display:flex;flex-direction:column;gap:2px;min-width:76px}
+.prog-num b{font:400 24px/1.1 var(--mono);color:#e6eef8;font-variant-numeric:tabular-nums}
+.prog-num span{font-size:12px;color:var(--ink-3)}
+.prog-ruler{margin:6px 0 0;font:12px var(--mono);color:var(--ink-3)}
+.prog-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:16px}
+.prog-head h3{margin:0;font-size:12px;letter-spacing:1.2px;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+.progress-panel>h3{margin:18px 0 6px;font-size:12px;letter-spacing:1.2px;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+.prog-trend{display:block;width:100%;max-width:620px;height:70px;margin-top:8px;background:#080d16;border:1px solid var(--hair);border-radius:var(--r-md)}
+.prog-note{margin:7px 0 0;font-size:12px;line-height:1.6;color:var(--ink-3);max-width:78ch}
+.prog-rows{display:flex;flex-direction:column;gap:3px;max-width:620px}
+.prog-bar{display:grid;grid-template-columns:minmax(90px,1.4fr) minmax(120px,3fr) 52px;gap:12px;align-items:center;text-align:left;padding:5px 6px;border-radius:var(--r-sm);min-height:var(--tap-sm);color:var(--ink-2);width:100%}
+.prog-bar:hover:not(:disabled){background:#ffffff07}
+.prog-bar:disabled{opacity:1;cursor:default}
+.prog-bar .nm{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prog-bar .track{position:relative;height:9px;border-radius:5px;background:#1b2434;overflow:visible}
+.prog-bar .fill{display:block;height:100%;border-radius:5px;background:#7f8fa8}
+.prog-bar .fill.good{background:var(--mint)}
+.prog-bar .fill.low{background:#d99aa2}
+.prog-bar .track .none{position:absolute;inset:-3px 0 auto 0;font:normal 12px var(--sans);font-style:normal;color:var(--ink-3);line-height:15px}
+.prog-bar .mark{position:absolute;top:-3px;width:2px;height:15px;background:#e6edf8;border-radius:1px;transform:translateX(-1px)}
+.prog-bar .num{font:12px var(--mono);color:var(--ink-2);text-align:right;font-variant-numeric:tabular-nums}
+.prog-ex{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:5px 6px;border-radius:var(--r-sm);max-width:620px}
+.prog-ex .nm{font-size:12px;color:var(--ink-2);flex:1 1 150px;min-width:0}
+.prog-ex .lamp{font:12px var(--mono);color:var(--ink-3);border:1px solid var(--border);border-radius:var(--r-sm);padding:3px 9px;white-space:nowrap}
+.prog-ex .lamp.on{color:#0d2620;background:var(--mint);border-color:var(--mint)}
+.prog-ex .lamp.empty{color:#8391a6}
+.prog-more{align-self:flex-start;margin-top:8px}
+.prog-foot{border-top:1px solid var(--hair);margin-top:16px;padding-top:10px}
+.prog-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px}
 
 /* ── dialogs ── */
 dialog{max-width:min(580px,calc(100vw - 28px));width:580px;padding:0;color:var(--text);background:var(--panel);border:1px solid #2f394e;border-radius:16px;max-height:calc(100dvh - 36px);overflow:auto;box-shadow:0 28px 90px #00000085}
@@ -276,6 +319,10 @@ dialog details{font-size:13px;color:var(--ink-3)}
  .take-title{white-space:normal}
  .take-stats{grid-column:2;flex-wrap:wrap;white-space:normal;gap:6px 14px}
  .take-actions{grid-column:2;flex-wrap:wrap}
+ .takes-head .tabs{order:-1}
+ .progress-panel{overflow:visible;padding:4px 12px 14px}
+ .prog-nums{gap:14px 22px}
+ .prog-bar{grid-template-columns:minmax(72px,1.2fr) minmax(80px,2fr) 46px;gap:8px}
  .dialog-body{padding:18px}
  .row{flex-direction:column;gap:0}
 }
@@ -332,16 +379,17 @@ dialog details{font-size:13px;color:var(--ink-3)}
 <div class="score"><div class="lbl" id="scoreLabel">Збіг із мелодією</div><div class="pct" id="matchPct">—</div><div class="detail" id="matchDetail">Заспівай фрагмент — рахую по намальованих нотах</div><div class="meter" aria-hidden="true"><span id="level"></span></div></div>
 <p class="invite" id="invite" hidden><b>Натисни «Слухати»</b>, щоб почути мелодію, потім «Співати» — твій голос ляже поверх неї, а влучені ноти засвітяться. Після запису спробу можна переглянути й повторити складне місце.</p></div>
 <div class="lyric-band" id="lyricBand"><div class="lyric-line now" id="lyricNow" aria-live="off"></div><div class="lyric-line next" id="lyricNext" aria-hidden="true"></div></div>
-<div class="stage-rail" id="stageRail"><div class="legend"><span><i class="target"></i>Мелодія</span><span><i class="draft"></i>Непевна мелодія</span><span><i></i>Ти</span><span><i class="hit"></i><span class="glyph">✓</span>влучив</span><span><i class="miss"></i><span class="glyph x">×</span>промах</span></div><div class="stage-tools"><label class="scale-control"><span>Масштаб</span> <select id="scaleSelect" aria-label="Масштаб висоти нот"><option value="1">Фрагмент</option><option value="2">Детальніше</option><option value="0.5">Ширше</option></select></label><button class="ghost" id="lyricsBtn" aria-pressed="true" title="Показувати слова пісні">Слова</button><div class="segmented" aria-label="Вигляд цілі"><button data-view="contour" class="active" aria-pressed="true" title="Плавний рух висоти голосу">Контур</button><button data-view="notes" aria-pressed="false" title="Окремі ноти та позначки влучань">Ноти</button></div><button class="ghost" id="editBtn" title="Змінити ноту, межі або виключити її">✎ Ціль</button></div></div>
+<div class="stage-rail" id="stageRail"><div class="legend"><span><i class="target"></i>Мелодія</span><span><i class="draft"></i>Непевна мелодія</span><span><i></i>Ти</span><span><i class="hit"></i><span class="glyph">✓</span>влучив</span><span><i class="miss"></i><span class="glyph x">×</span>промах</span><span><i class="best"></i>твій рекорд</span></div><div class="stage-tools"><label class="scale-control"><span>Масштаб</span> <select id="scaleSelect" aria-label="Масштаб висоти нот"><option value="1">Фрагмент</option><option value="2">Детальніше</option><option value="0.5">Ширше</option></select></label><button class="ghost" id="lyricsBtn" aria-pressed="true" title="Показувати слова пісні">Слова</button><button class="ghost" id="shadowBtn" aria-pressed="true" title="Бліда лінія найкращої спроби цього фрагмента під твоїм слідом">Рекорд</button><div class="segmented" aria-label="Вигляд цілі"><button data-view="contour" class="active" aria-pressed="true" title="Плавний рух висоти голосу">Контур</button><button data-view="notes" aria-pressed="false" title="Окремі ноти та позначки влучань">Ноти</button></div><button class="ghost" id="editBtn" title="Змінити ноту, межі або виключити її">✎ Ціль</button></div></div>
 <div class="countdown" id="countdown" hidden><b id="countNumber">2</b><span>Приготуйся. Вдихни спокійно.</span></div></main>
 <div class="transport"><button class="primary" id="singBtn"><svg><use href="#i-mic"/></svg><span id="singLabel">Співати</span></button><button class="secondary" id="newTakeBtn" hidden>Нова спроба</button><button class="secondary" id="listenBtn" aria-label="Слухати пісню" title="Слухати / пауза (пробіл)"><svg><use id="listenIcon" href="#i-play"/></svg><span id="listenLabel">Слухати</span></button><button class="icon-btn" id="stopBtn" disabled aria-label="Зупинити і зберегти спробу" title="Зупинити (Esc)"><svg><use href="#i-stop"/></svg></button><span class="divider" aria-hidden="true"></span><span class="time"><span id="timeNow">00:00</span> <small>/ <span id="timeEnd">04:49</span></small></span>
 <span class="divider" id="reviewDivider" aria-hidden="true" hidden></span><div class="review" id="reviewBar" hidden><span id="reviewLabel">Спроба 01</span><b id="reviewPct">—</b><button class="icon-btn" id="prevMiss" title="Попередній промах" aria-label="Попередній промах"><svg><use href="#i-skipl"/></svg></button><span class="cnt" id="missCount">0 промахів</span><button class="icon-btn" id="nextMiss" title="Наступний промах" aria-label="Наступний промах"><svg><use href="#i-skipr"/></svg></button><button class="icon-btn" id="closeReview" title="Сховати запис із графіка" aria-label="Сховати запис"><svg><use href="#i-close"/></svg></button></div>
 <div class="extras"><span class="next-level" id="levelContext">Рівень</span><div class="segmented" id="levelSeg" aria-label="Рівень складності" title="Коридор і суворість оцінки"><button data-level="easy" aria-pressed="false">Легко</button><button data-level="normal" class="active" aria-pressed="true">Звично</button><button data-level="strict" aria-pressed="false">Точно</button></div><button class="icon-btn compact" id="vocalBtn" aria-pressed="true" title="Оригінальний вокал: увімкнено (V)"><svg><use href="#i-headphones"/></svg><span id="vocalLabel">Вокал</span></button><button class="icon-btn compact" id="loopBtn" aria-pressed="false" title="Повторювати виділений фрагмент без пауз · клавіша L"><svg><use href="#i-loop"/></svg><span>Повторювати</span></button><select id="speedSelect" aria-label="Швидкість зі збереженням висоти"><option value="1">1×</option><option value="0.8">0.8×</option></select><button class="icon-btn" id="mixBtn" aria-label="Гучність акомпанементу та голосу" title="Мікс · акомпанемент у навушниках, у мікрофоні лише твій голос"><svg><use href="#i-mix"/></svg></button></div></div>
 <div class="strip"><div class="range-actions"><button class="ghost" id="markA" title="Почати фрагмент тут · клавіша A">Від сюди</button><button class="ghost" id="markB" title="Закінчити фрагмент тут · клавіша B">До сюди</button><button class="ghost" id="rangeSettings" title="Ввести точний час початку й кінця фрагмента">Точні межі</button></div><div class="timeline" id="timelineWrap" role="slider" tabindex="0" aria-label="Позиція у пісні; нижня смужка — виділення повтору" aria-valuemin="0" aria-valuemax="289" aria-valuenow="0"><canvas id="timeline" aria-hidden="true"></canvas></div><span class="strip-meta" id="rangeText">Вся пісня</span><button class="ghost sm" id="clearRange" hidden title="Зняти повтор, грати всю пісню">✕ повтор</button><span class="strip-meta" id="qualityCoverage" title="Частка треку з надійною розміткою"></span></div>
-<section class="takes" id="takesPanel" aria-label="Записані спроби" hidden data-open="1"><div class="takes-head"><button id="takesToggle" aria-expanded="true"><svg class="chev"><use href="#i-chev"/></svg>СПРОБИ <span id="takesCount">0</span></button><button class="ghost" id="repeatMissBtn" hidden>Повторити складну фразу</button><button class="ghost" id="undoPunchBtn" hidden>Скасувати перезапис</button><span class="hint">Збережи WAV перед закриттям вкладки</span></div><div class="takes-list" id="takesList"></div></section>
+<section class="takes" id="takesPanel" aria-label="Спроби і прогрес" hidden data-open="1" data-tab="takes"><div class="takes-head"><button id="takesToggle" aria-expanded="true" aria-label="Згорнути панель спроб" title="Згорнути панель"><svg class="chev"><use href="#i-chev"/></svg></button><div class="segmented tabs" role="tablist" aria-label="Спроби і прогрес"><button id="tabTakes" role="tab" aria-selected="true" aria-controls="takesList">Спроби <span id="takesCount">0</span></button><button id="tabProgress" role="tab" aria-selected="false" aria-controls="progressPanel">Прогрес</button></div><button class="ghost" id="repeatMissBtn" hidden>Повторити складну фразу</button><button class="ghost" id="undoPunchBtn" hidden>Скасувати перезапис</button><span class="hint" id="takesHint">Кожна спроба лягає в історію на цьому комп’ютері</span></div><div class="takes-list" id="takesList" role="tabpanel" aria-labelledby="tabTakes"></div><div class="progress-panel" id="progressPanel" role="tabpanel" aria-labelledby="tabProgress" hidden></div></section>
 </div>
 <dialog id="settingsDialog" aria-labelledby="settingsDialogTitle"><div class="dialog-body"><div class="dialog-head"><h2 id="settingsDialogTitle">Налаштування</h2><button class="icon-btn" data-close="settingsDialog" aria-label="Закрити"><svg><use href="#i-close"/></svg></button></div>
-<div class="field"><label for="micSelect">Мікрофон</label><select class="select" id="micSelect"><option value="">Системний мікрофон</option></select><p>Пристрій зміниться під час наступного підключення. Мікрофон не звучить у колонках. Аудіо лишається на твоєму пристрої — записи нікуди не надсилаються.</p><p class="mic-state" id="micState">Мікрофон вимкнено</p><button class="subtle-btn" id="micToggle">Увімкнути лише мікрофон</button></div>
+<div class="field"><label for="micSelect">Мікрофон</label><select class="select" id="micSelect"><option value="">Системний мікрофон</option></select><p>Пристрій зміниться під час наступного підключення. Мікрофон не звучить у колонках. Аудіо та історія тренувань лишаються на твоєму пристрої — нікуди не надсилаються.</p><p class="mic-state" id="micState">Мікрофон вимкнено</p><button class="subtle-btn" id="micToggle">Увімкнути лише мікрофон</button></div>
+<div class="field"><label class="check" for="recordAudio"><input id="recordAudio" type="checkbox"><span>Записувати голос у WAV</span></label><p>Типово вимкнено. Мікрофон працює завжди — без нього немає висоти. Увімкнений запис повертає прослуховування власного голосу, перезапис місця і кнопку WAV, і разом з ними ліміт 10 спроб / 100 МіБ. Слід і оцінка спроби зберігаються в будь-якому разі.</p></div>
 <div class="field"><label for="gate">Поріг тиші <output id="gateOut">−48 dBFS</output></label><input id="gate" type="range" min="-70" max="-25" value="-48"><small>Не змінює WAV; лише відсікає тихі точки графіка.</small></div>
 <div class="field"><label for="octave">Вокальна октава</label><select class="select" id="octave"><option value="0">Як у цілі</option><option value="-12">На октаву нижче · мінус без змін</option><option value="12">На октаву вище · мінус без змін</option></select><p>Це перенос тільки вокальної партії, не зміна тональності пісні.</p></div>
 <div class="row"><div class="field"><label for="tolerance">Допуск, центи</label><input id="tolerance" type="number" min="10" max="100" step="5" value="35"></div><div class="field"><label for="latency">Зсув мікрофона, мс</label><input id="latency" type="number" min="-500" max="1000" step="5" value="0"></div></div>
@@ -358,15 +406,17 @@ dialog details{font-size:13px;color:var(--ink-3)}
 <h3>Позначки на графіку</h3><p>Лавандова смуга — мелодія-ціль, пунктирна — непевна ділянка авторозмітки. Світна лінія — твій голос. У вигляді «Ноти» влучена нота стає суцільною м’ятною смугою з <b>✓</b> і назвою ноти, промах — штрихованою червонуватою з <b>×</b>. У вигляді «Контур» те саме показують кружечки під нотами.</p>
 <h3>Повтор фрагмента</h3><p>За замовчуванням грає вся пісня. Щоб повторювати шматок, протягни мишею по нижній смужці під хвилею (або Shift + тягни по хвилі), або натисни <b>A</b> і <b>B</b> під час прослуховування. Ручки країв можна тягнути. «Повтор» (L) крутить фрагмент без пауз; під час співу кожен прохід — окрема спроба з коротким відліком. ✕ біля напису повтору повертає всю пісню.</p>
 <h3>Перемотування</h3><p>Тягни по хвилі або по графіку, крути колесо, натискай ← → (Shift — 5 с) — і під час відтворення теж: музика підхоплюється з нового місця. Під час співу перемотування завершує поточну ділянку. Повернення всередину запису перезаписує ту саму спробу; перехід за її межі створює нову.</p>
-<h3>Перегляд спроби</h3><p>Після запису слід не зникає: тягни графік, стрибай між промахами кнопками ‹ › у панелі спроби або клавішами , і . Кнопка ▶ у списку спроб відтворює твій голос поверх мінусу синхронно зі слідом. Кожна спроба зберігає повний слід нот і помилок.</p>
+<h3>Перегляд спроби</h3><p>Після запису слід не зникає: тягни графік, стрибай між промахами кнопками ‹ › у панелі спроби або клавішами , і . Кнопка ▶ у списку спроб відтворює спробу синхронно зі слідом — з твоїм голосом, якщо запис голосу був увімкнений, інакше з самим мінусом. Кожна спроба зберігає повний слід нот і помилок.</p>
+<h3>Прогрес</h3><p>Кожна завершена спроба сама лягає в історію на цьому комп’ютері: слід, оцінка, розбивка по фразах. Вкладка «Прогрес» унизу показує рекорд, середнє за останні п’ять спроб, найкраще за добу, серію днів, тренд і слабкі фрази; клік по фразі ставить на неї повтор. Кнопка «Рекорд» у смузі під графіком малює бліду лінію твоєї найкращої спроби цього фрагмента під твоїм слідом.</p>
+<p>Оцінки порівнюються тільки в межах однієї лінійки: та сама пісня, та сама карта нот, той самий рівень, той самий вигляд і та сама швидкість. Правка ноти відкриває нову лінійку, підтвердження фрагмента на слух — ні. Рекорд пісні потребує повного проходу (95 % кадрів із ціллю), рекорд фрази — 80 % її кадрів. Історія не виходить за межі цього браузера; в ній немає аудіо, лише числа. Експорт, імпорт і очищення — у підвалі вкладки «Прогрес».</p>
 <h3>Перезапис місця</h3><p>Поки спроба на екрані, перемотай усередину неї — кнопка «Співати» стає «Перезаписати з …». Вона перезаписує ту саму спробу від цього місця: старе аудіо до точки лишається, далі йде новий запис, а хвіст старого запису після нього — теж. Так само працює перемотування назад під час співу. Потрібна та сама швидкість, що й у спроби. «Нова спроба» записує окремий дубль. «Скасувати перезапис» повертає одну попередню версію.</p>
 <h3>Оригінальний вокал</h3><p>Кнопка «Вокал» (V) вимикає оригінальний вокал: грає тільки мінус і ти чуєш лише себе. Діє і під час прослуховування, і під час співу; гучність вокалу для увімкненого стану — у міксі.</p>
 <h3>Слова</h3><p>Слова пісні розпізнані автоматично (Soniox): можливі помилки у словах, час подано по кожному слову. Поточний рядок — угорі, а кожне слово сидить над самою мелодією в момент звучання; якщо слова тісно, вони складаються сходинками вгору. Кнопка «Слова» ховає їх.</p>
 <h3>Мелодія-ціль</h3><p>Вокал відділено локально нейромережею Demucs (htdemucs_ft) з оригінального запису; висоту знято CREPE і перевірено pYIN. Це все ще автоматична чернетка без перевірки на слух: сумнівні ділянки пунктирні, октавні помилки можливі, крик і хрип розпізнаються гірше за чистий спів.</p>
 <h3>Суворе оцінювання</h3><p>«У коридорі» і «покриття» в картці спроби рахуються тільки для підтвердженого фрагмента з надійними нотами. Підтверди фразу через мітку «Чернетка мелодії» у шапці.</p>
-<p><b>«Повтор»</b> запускає фрагмент знову; кожен прохід — окремий WAV. Максимум 10 спроб / 100 МіБ у пам’яті. Швидкість <b>0.8×</b> використовує заздалегідь уповільнені доріжки без зниження нот.</p>
+<p><b>«Повтор»</b> запускає фрагмент знову; кожен прохід — окрема спроба. У вкладці тримається до 20 слідів; ліміт 10 спроб / 100 МіБ стосується лише WAV і діє тільки з увімкненим записом голосу. Видалена з вкладки спроба лишається в історії. Швидкість <b>0.8×</b> використовує заздалегідь уповільнені доріжки без зниження нот.</p>
 <p>Для мікрофона відкривай пісню з бібліотеки Luma Studio. Подвійний клік по HTML відкриває file://, де запис не працює. Альтернатива: локальний сервер:</p><pre class="help-code">python3 -m http.server 8000 --bind 127.0.0.1
 http://localhost:8000/</pre><p>Нову пісню готує Luma Studio (див. README проєкту): Demucs, CREPE і pYIN працюють локально. Кнопка «Інша пісня» імпортує тільки готові пакети, не сирий MP3.</p>
 <p><b>Клавіші:</b> пробіл — слухати / пауза; R — співати / зупинка; Esc — зупинка; A / B — «Від сюди» / «До сюди»; L — повтор; V — голос / мінус; ← → — перемотування на 1 с (Shift — 5 с); , і . — попередній / наступний промах; [ і ] — готові фрагменти авторозмітки.</p>
-<p>Збережи WAV перед закриттям. Записи не завантажуються в інтернет. Згорнута вкладка може призупинити аудіо — поточна спроба тоді завершується.</p><div class="dialog-foot"><span></span><button class="primary" data-close="helpDialog">Почнемо</button></div></div></dialog>
-<input type="file" id="importFile" accept=".json,.luma" hidden><div class="toast" id="toast" role="status" aria-live="polite"></div><span class="sr-only" id="srStatus" aria-live="polite"></span><noscript><p>Увімкни JavaScript для роботи тренажера.</p></noscript>
+<p>WAV живе тільки в пам’яті вкладки — збережи його перед закриттям, якщо запис голосу увімкнено. Нічого не завантажується в інтернет. Згорнута вкладка може призупинити аудіо — поточна спроба тоді завершується.</p><div class="dialog-foot"><span></span><button class="primary" data-close="helpDialog">Почнемо</button></div></div></dialog>
+<input type="file" id="importFile" accept=".json,.luma" hidden><input type="file" id="historyFile" accept=".json" hidden><div class="toast" id="toast" role="status" aria-live="polite"></div><span class="sr-only" id="srStatus" aria-live="polite"></span><noscript><p>Увімкни JavaScript для роботи тренажера.</p></noscript>

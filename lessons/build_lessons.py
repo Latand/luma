@@ -68,7 +68,8 @@ def plan(lesson: Lesson):
                               'syllable': p.syllable, 'vowel': p.vowel, 'rep': len(reps)})
                 t += d
             reps.append({'section': index, 'a': round(start, 3), 'b': round(t, 3), 'root': lesson.root + key,
-                         'label': f'{p.name} · {note_name(lesson.root + key)}', 'first': first, 'last': len(notes) - 1})
+                         'exercise': p.name, 'label': f'{p.name} · {note_name(lesson.root + key)}',
+                         'first': first, 'last': len(notes) - 1})
             t += p.rest * beat
     return notes, reps, round(t + TAIL, 3), beat
 
@@ -158,7 +159,7 @@ def target(lesson: Lesson, notes, reps, duration, mix) -> dict:
     song['points'] = points
     song['notes'] = [{k: v for k, v in n.items() if k not in ('syllable', 'vowel', 'rep')} for n in notes]
     song['phrases'] = [{'id': i + 1, 'a': round(max(0, r['a'] - .8), 2), 'b': round(min(duration, r['b'] + .2), 2),
-                        'label': r['label'], 'verified': False} for i, r in enumerate(reps)]
+                        'label': r['label'], 'exercise': r['exercise'], 'verified': False} for i, r in enumerate(reps)]
     song['waveform'] = [round(float(np.max(np.abs(z))), 3) for z in np.array_split(mix, 1000)]
     song['lyrics'] = [{'a': notes[r['first']]['a'], 'b': notes[r['last']]['b'],
                        'words': [{'a': n['a'], 'b': n['b'], 'w': n['syllable'], 'c': .99} for n in notes[r['first']:r['last'] + 1]]}
