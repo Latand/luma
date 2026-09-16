@@ -257,6 +257,38 @@ class CorrectionReplayTests(unittest.TestCase):
         self.assertIsNone(report['correction'])
 
 
+class CorrectionSourcePreferenceTests(unittest.TestCase):
+    """A cached lyrics correction must replay from the transcript the song is already published from
+    (lyrics_text.preferred_source), not transcript()'s own vocal-first default for 'auto' — otherwise a plain
+    re-align silently moves a mix-published correction onto the vocal transcript, where it was never checked
+    (round 3, finding 2)."""
+
+    def setUp(self):
+        self.directory = tempfile.mkdtemp(prefix='luma-align-source-pref-')
+        self.pkg = synthetic_package(Path(self.directory))
+
+    def tearDown(self):
+        shutil.rmtree(self.directory, ignore_errors=True)
+
+    def _cache_source(self, text):
+        d = self.pkg / 'lyrics'; d.mkdir(exist_ok=True)
+        (d / 'source.txt').write_text(text, encoding='utf-8')
+        (d / 'source.meta.json').write_text(json.dumps({'title': '', 'artist': ''}), encoding='utf-8')
+
+    def test_auto_replays_a_cached_correction_from_the_published_transcript_not_vocal_first(self):
+        al.align_package(self.pkg, write=True, rebuild=False)   # stores lyrics/mix.json, publishes from mix
+        # a vocal transcript also exists for this song, with different text so the test can tell which was used
+        vocal_words = [dict(w) for w in al.flat(json.loads((self.pkg / 'target.json').read_text())['lyrics'])]
+        for w in vocal_words: w['w'] += '_V'
+        al.save_transcript(self.pkg, 'vocal', [{'a': vocal_words[0]['a'], 'b': vocal_words[-1]['b'], 'words': vocal_words}], 'vocal note')
+        self._cache_source('one two THREE four five six')   # a correction built against the MIX transcript's words
+        report = al.align_package(self.pkg, write=True, rebuild=False)
+        self.assertEqual(report['source'], 'mix', "auto must not silently move a mix-published song's correction to vocal")
+        self.assertEqual(report['correction'], 'applied')
+        after = json.loads((self.pkg / 'target.json').read_text(encoding='utf-8'))
+        self.assertEqual([w['w'] for w in al.flat(after['lyrics'])], ['one', 'two', 'THREE', 'four', 'five', 'six'])
+
+
 class TranscriptTests(unittest.TestCase):
     def test_a_full_stop_far_from_the_word_does_not_stretch_it(self):
         tokens = [{'text': 'hold', 'start_ms': 1000, 'end_ms': 1200, 'confidence': .9},
@@ -306,7 +338,9 @@ class PaidCallTests(unittest.TestCase):
         self.assertFalse(rt.PAID_CALLS_ALLOWED)
 
     def test_nothing_in_the_repo_invokes_the_command(self):
-        allowed = {Path(__file__).name, 'retranscribe_song_test.py'}   # tests that deliberately audit the paid command
+        allowed = {Path(__file__).name, 'retranscribe_song_test.py', 'run.sh'}   # deliberate: the paid command's own
+                                                                                   # test, this audit, and run.sh
+                                                                                   # naming that test file to run it
         callers = []
         for f in [*(ROOT / 'app').rglob('*'), *(ROOT / 'studio').rglob('*'), *(ROOT / 'tests').rglob('*')]:
             if not f.is_file() or f.suffix not in {'.py', '.js', '.mjs', '.html', '.sh'} or f.name == 'retranscribe_song.py': continue

@@ -102,10 +102,11 @@ class MatchWordsTests(unittest.TestCase):
         self.assertIsNone(entries[3]['a']); self.assertEqual(entries[3]['kind'], 'inserted')
 
     def test_leftover_heard_words_in_a_replace_block_are_reported_by_find_leftover_runs(self):
-        # 5 heard words but only 1 true word there: 4 heard words are leftover, a repeat candidate shape
+        # 5 heard words but only 1 true word there: 4 heard words are leftover, a repeat candidate shape, offered
+        # as two mirror candidates (leftover from the tail, inserted at the end; from the head, at the start)
         asr = [{'a': float(i), 'b': i + .3, 'w': f'h{i}', 'c': .9} for i in range(5)]
         runs = lt.find_leftover_runs(asr, ['one'])
-        self.assertEqual(runs, [(1, 5, 1)])
+        self.assertEqual(runs, [((1, 5, 1), (0, 4, 0))])
 
 
 class RepeatedSectionTests(unittest.TestCase):
@@ -126,18 +127,39 @@ class RepeatedSectionTests(unittest.TestCase):
         self.assertFalse(lt.repeated_insertions(asr, words))
 
     def test_a_replace_shaped_leftover_is_recovered_not_just_a_pure_delete(self):
-        # the source has one word where the two sections join, so difflib reports a 'replace' (5 heard words for
-        # 1 true word), not a clean 'delete' — the exact shape a chorus written out once but sung twice takes
-        # when the join happens to share a word (the Salt case).
+        # the word at the join was MISHEARD (asr text 'zjoin' vs published 'join'), so difflib cannot match it and
+        # reports a real 'replace' (5 heard words for 1 true word) spanning the seam — not a clean 'delete' next to
+        # an 'equal' on a shared word, which collapses to two independent opcodes and tests nothing about the
+        # replace shape. This is the shape a chorus written out once but sung twice takes when the join word is
+        # heard differently from how it is published, and the repeat happens to belong on the tail side.
         words = ['aa', 'bb', 'cc', 'dd']
         asr = [{'a': float(i) * 4, 'b': float(i) * 4 + 3.5, 'w': w, 'c': .9} for i, w in enumerate(words)]
-        asr += [{'a': 20.0, 'b': 20.3, 'w': 'join', 'c': .9}]   # shares a word with the true text at the seam
+        asr += [{'a': 20.0, 'b': 20.3, 'w': 'zjoin', 'c': .9}]   # misheard: the published text says 'join'
         asr += [{'a': 24 + float(i) * 4, 'b': 24 + float(i) * 4 + 3.5, 'w': w, 'c': .9} for i, w in enumerate(words)]
         text = words + ['join']
         insertions = lt.repeated_insertions(asr, text)
         self.assertTrue(insertions, 'a replace-shaped leftover run must still be recognised as a repeat')
         pos, tokens = insertions[0]
         self.assertEqual(tokens, words)
+        self.assertEqual(lt.apply_repeats(text, insertions), words + ['join'] + words,
+                          'the repeat belongs next to its twin, on the tail side of the seam')
+
+    def test_a_replace_shaped_leftover_can_belong_on_the_head_side_of_the_seam(self):
+        # mirror of the case above: the chorus is sung TWICE before the misheard word, against a source that writes
+        # the chorus once and the word once — the leftover chorus repeat must be spliced in next to its twin
+        # (chorus, chorus, word), not stranded on the far side of the word (finding 5: round 2 always took the
+        # leftover from the block's tail, which here would produce chorus, word, chorus).
+        chorus = ['flim', 'borp', 'vex', 'zant']
+        text = chorus + ['glorp']
+        asr = [{'a': float(i) * 4, 'b': float(i) * 4 + 3.5, 'w': w, 'c': .9} for i, w in enumerate(chorus)]
+        asr += [{'a': 20 + float(i) * 4, 'b': 20 + float(i) * 4 + 3.5, 'w': w, 'c': .9} for i, w in enumerate(chorus)]
+        asr += [{'a': 40.0, 'b': 40.3, 'w': 'gwomp', 'c': .9}]   # misheard: the published text says 'glorp'
+        insertions = lt.repeated_insertions(asr, text)
+        self.assertTrue(insertions, 'the second chorus must still be recognised as a repeat')
+        pos, tokens = insertions[0]
+        self.assertEqual(tokens, chorus)
+        self.assertEqual(lt.apply_repeats(text, insertions), chorus + chorus + ['glorp'],
+                          'the restored chorus must land next to its twin, not on the far side of the misheard word')
 
     def test_fuzzy_matching_tolerates_one_missing_word_at_the_seam(self):
         words = ['aa', 'bb', 'cc', 'dd', 'ee']
@@ -201,7 +223,17 @@ class FillGapsTests(unittest.TestCase):
         times = [e['a'] for e in out[1:-1]]
         self.assertLess(times[-1] - times[0], 1.0, 'with no voice at all between the neighbours, cluster tightly rather than spread through silence')
 
-    def test_gap_words_are_never_closer_together_than_the_minimum_spacing(self):
+    def test_gap_words_are_never_closer_together_than_the_minimum_spacing_when_the_window_can_fit_it(self):
+        # 3 inserted words need at least 3 * MIN_WORD_SPACING_S; the window here (2.0s) has plenty of room
+        entries = [{'a': 0.0, 'kind': 'matched'}] + [{'a': None, 'kind': 'inserted'} for _ in range(3)] + [{'a': 2.0, 'kind': 'matched'}]
+        out = lt.fill_gaps(entries, {'regions': [(0.0, 2.0)], 'duration': 2.0})
+        times = [e['a'] for e in out]
+        gaps = [b - a for a, b in zip(times, times[1:])]
+        self.assertTrue(all(g >= lt.MIN_WORD_SPACING_S - 1e-9 for g in gaps), gaps)
+
+    def test_gap_words_stay_ordered_even_when_the_window_cannot_fit_the_minimum_spacing(self):
+        # 6 inserted words in a 1.0s window can't all be MIN_WORD_SPACING_S apart (6 * .18 > 1.0): the minimum
+        # spacing is not enforced here (fill_gaps only enforces it when the window can fit it), but order must hold
         entries = [{'a': 0.0, 'kind': 'matched'}] + [{'a': None, 'kind': 'inserted'} for _ in range(6)] + [{'a': 1.0, 'kind': 'matched'}]
         out = lt.fill_gaps(entries, {'regions': [(0.0, 1.0)], 'duration': 1.0})
         times = [e['a'] for e in out]
@@ -381,10 +413,12 @@ class ProcessPackageTests(unittest.TestCase):
         self.assertFalse((self.pkg / 'lyrics' / 'source.txt').exists(), 'a rejected source must not be cached')
 
     def test_a_small_leftover_run_from_a_replace_does_not_trip_the_gate(self):
-        # 3 heard words become 2 published words: 1 leftover heard word, far below MIN_REPEAT_WORDS and
-        # negligible sung time — must not read as a missing section.
+        # 3 heard words (borp, dax, oops) become 2 published words in one 'replace' opcode (neither shares text with
+        # the other, so this is a genuine merge, not two independent single-word deletes around a matching 'dax'):
+        # 1 leftover heard word, far below MIN_REPEAT_WORDS and negligible sung time — must not read as a missing
+        # section.
         text_file = Path(self.directory) / 'small.txt'
-        text_file.write_text('flim dax shuzzle', encoding='utf-8')   # drops 'borp' and merges oops into nothing
+        text_file.write_text('flim newa newb shuzzle', encoding='utf-8')
         r = lt.process_package(self.pkg, str(text_file), write=True, rebuild=False)
         self.assertNotIn('skipped', r)
 
@@ -405,15 +439,16 @@ class ProcessPackageTests(unittest.TestCase):
 
 
 class ReplaceShapedRepeatIntegrationTests(unittest.TestCase):
-    """A chorus written once but sung twice, with one shared word at the seam so difflib reports the leftover as a
-    'replace' rather than a clean 'delete' — restored end to end through process_package (round 2, finding 1)."""
+    """A chorus written once but sung twice, with the join word MISHEARD (asr text differs from the published word),
+    so difflib reports the leftover as a real 'replace' rather than a clean 'delete' next to an 'equal' on a shared
+    word — restored end to end through process_package (round 2, finding 1; genuine replace seam, round 3 finding 4)."""
 
     def setUp(self):
         self.directory = tempfile.mkdtemp(prefix='luma-lyrics-repeat-')
-        # burst[0..3]: first chorus (flim/dax/wug/zant); burst 4: the seam word 'join'; burst[5..8]: the repeat
+        # burst[0..3]: first chorus (flim/dax/wug/zant); burst 4: the seam word, misheard; burst[5..8]: the repeat
         self.repeat_bursts = [(.5, .9), (1.4, 1.8), (2.3, 2.7), (3.2, 3.6), (4.1, 4.5),
                                (5.4, 5.8), (6.3, 6.7), (7.2, 7.6), (8.1, 8.5)]
-        heard = ['flim', 'dax', 'wug', 'zant', 'join', 'flim', 'dax', 'wug', 'zant']
+        heard = ['flim', 'dax', 'wug', 'zant', 'mishear', 'flim', 'dax', 'wug', 'zant']
         self.pkg = synthetic_package(Path(self.directory), name='Repeat', bursts=self.repeat_bursts, asr_words=heard,
                                       duration=9.0)
         self.text_file = Path(self.directory) / 'lyrics.txt'
@@ -483,10 +518,38 @@ class PlacementGateTests(unittest.TestCase):
     def test_tight_spacing_alone_is_informational_not_blocking(self):
         v = np.ones(1000, dtype=bool)
         entries = [{'kind': 'inserted', 'src': None}, {'kind': 'inserted', 'src': None}]
-        words = [{'a': 5.0}, {'a': 5.01}]   # well inside the voice, but far closer than MIN_WORD_SPACING_S
+        words = [{'a': 5.0}, {'a': 5.1}]   # well inside the voice, closer than MIN_WORD_SPACING_S but past the 50ms line
         blocking, info = lt.placement_problems(entries, words, {'voiced': v})
         self.assertFalse(blocking, 'tight spacing forced by a crowded sung stretch must not refuse a correction that is otherwise safe')
         self.assertTrue(info)
+
+    def test_crowding_under_the_onset_dedup_window_blocks(self):
+        v = np.ones(1000, dtype=bool)
+        entries = [{'kind': 'inserted', 'src': None}, {'kind': 'inserted', 'src': None}]
+        words = [{'a': 5.0}, {'a': 5.02}]   # closer than MIN_INSERTED_SPACING_S: not a real, distinguishable placement
+        blocking, info = lt.placement_problems(entries, words, {'voiced': v})
+        self.assertTrue(blocking, 'crowding this tight must refuse, the same squeeze that shrinks uncovered_seconds')
+
+    def test_a_neighbour_of_any_kind_counts_for_the_dedup_window_check(self):
+        v = np.ones(1000, dtype=bool)
+        # the inserted word is crowded against a MATCHED neighbour, not another inserted word
+        entries = [{'kind': 'matched', 'src': 0}, {'kind': 'inserted', 'src': None}]
+        words = [{'a': 5.0}, {'a': 5.02}]
+        blocking, info = lt.placement_problems(entries, words, {'voiced': v})
+        self.assertTrue(blocking, 'the 50ms check looks at any neighbour, not only another inserted word')
+
+    def test_flashing_word_growth_past_the_tolerance_blocks(self):
+        before = {'flashing_words': 10}
+        after = {'flashing_words': 10 + lt.FLASHING_WORDS_TOLERANCE + 1}
+        blocking, info = lt.placement_problems([], [], {'voiced': np.ones(10, dtype=bool)}, before, after)
+        self.assertTrue(blocking)
+        self.assertIn('flashing', blocking[0])
+
+    def test_flashing_word_growth_within_the_tolerance_does_not_block(self):
+        before = {'flashing_words': 10}
+        after = {'flashing_words': 10 + lt.FLASHING_WORDS_TOLERANCE}
+        blocking, info = lt.placement_problems([], [], {'voiced': np.ones(10, dtype=bool)}, before, after)
+        self.assertFalse(blocking)
 
 
 class HarmGateTests(unittest.TestCase):
@@ -505,6 +568,46 @@ class HarmGateTests(unittest.TestCase):
         self.assertNotIn('skipped', r)
         after = json.loads((self.pkg / 'target.json').read_text(encoding='utf-8'))
         self.assertNotEqual(after['lyrics'], self.before['lyrics'])
+
+    def test_process_package_refuses_on_real_harm(self):
+        # 'before' is a synthetic wide-span word covering a long burst end to end — decoupled from the raw ASR
+        # transcript used for matching, so this measures the harm gate on its own, not confidence or placement.
+        # The correction drops that burst's word entirely, leaving far more of it uncovered than before.
+        directory = Path(tempfile.mkdtemp(prefix='luma-lyrics-harm2-'))
+        bursts = BURSTS + [(9.0, 17.0)]
+        asr_words = ASR_WORDS + ['holdnote']
+        pkg = synthetic_package(directory, bursts=bursts, asr_words=asr_words, duration=18.0)
+        song = json.loads((pkg / 'target.json').read_text(encoding='utf-8'))
+        song['lyrics'][0]['words'][-1]['b'] = 17.0; song['lyrics'][0]['b'] = 17.0
+        (pkg / 'target.json').write_text(json.dumps(song, ensure_ascii=False), encoding='utf-8')
+        text_file = directory / 'harm.txt'; text_file.write_text(' '.join(TRUE_TOKENS), encoding='utf-8')
+        try:
+            r = lt.process_package(pkg, str(text_file), write=True, rebuild=False)
+            self.assertIn('skipped', r)
+            self.assertIn('uncovered', r['skipped'])
+            self.assertNotIn('placement', r['skipped'], 'this refusal must be about harm, not a placement fault')
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
+
+    def test_process_package_refuses_on_placement_alone(self):
+        # a crowd of published words with no ASR counterpart nearby all have to squeeze into one short sung pocket;
+        # enough real matched words surround them to keep confidence at 'medium' and coverage never gets worse, so
+        # this measures the placement gate on its own.
+        directory = Path(tempfile.mkdtemp(prefix='luma-lyrics-placement2-'))
+        bursts = [(.5, .9), (2.0, 2.4), (3.5, 3.54), (4.5, 4.65), (5.0, 5.4), (6.5, 6.9),
+                  (8.0, 8.4), (9.0, 9.4), (10.0, 10.4), (11.0, 11.4)]
+        asr_words = ['flim', 'borp', 'dax', 'junkblip', 'oops', 'shuzzle', 'quor', 'lomp', 'fenn', 'trask']
+        pkg = synthetic_package(directory, bursts=bursts, asr_words=asr_words, duration=12.0)
+        text_file = directory / 'crowd.txt'
+        text_file.write_text('flim dax zog vlim quip jarn ozzo plix trin bozz fexx wug shuzzle zant quor lomp fenn trask',
+                              encoding='utf-8')
+        try:
+            r = lt.process_package(pkg, str(text_file), write=True, rebuild=False)
+            self.assertIn('skipped', r)
+            self.assertIn('placement', r['skipped'])
+            self.assertNotIn('uncovered', r['skipped'], 'this refusal must be about placement, not harm')
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
 
 
 class GuardTests(unittest.TestCase):

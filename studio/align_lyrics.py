@@ -263,9 +263,21 @@ def corrected_note_for(existing: str, src: str) -> str:
     import lyrics_text as lt
     return lt.corrected_note(existing, src)
 
+def resolved_prefer(pkg: Path, song: dict, prefer: str) -> str:
+    """When a cached, still-valid lyrics correction exists, `auto` must replay it from the transcript the song is
+    already published from (lyrics_text.preferred_source) rather than transcript()'s own vocal-first default —
+    otherwise a plain re-align can silently move a song correction onto the other transcript, where corrected_seed
+    then refuses or rebuilds it against words it was never checked against. With no cached correction to protect,
+    `auto` keeps its old vocal-first behaviour. An explicit --from is never overridden."""
+    if prefer != 'auto': return prefer
+    import lyrics_text as lt
+    if lt.cached_source_text(pkg) is None: return 'auto'
+    want = lt.preferred_source(song)
+    return want if (pkg / 'lyrics' / f'{want}.json').exists() else 'auto'
+
 def align_package(pkg: Path, write: bool, rebuild: bool = True, prefer: str = 'auto') -> dict:
     song = json.loads((pkg / 'target.json').read_text(encoding='utf-8'))
-    words, src, note = transcript(pkg, song, prefer)
+    words, src, note = transcript(pkg, song, resolved_prefer(pkg, song, prefer))
     ctx = context(pkg, song)
     before = song.get('lyrics') or []
     raw_words = flat(words)
@@ -334,6 +346,7 @@ def human(r: dict) -> str:
     b, a = r['before'], r['after']
     lines = [f"{r['package']}: {a['words']} words from the {r['source']} transcript, {r['snapped']} starts snapped to a vocal onset "
              f"(median move {r['moved']['med']:.2f} s, p90 {r['moved']['p90']:.2f} s)"]
+    if r.get('correction'): lines.append(f"  correction {r['correction']}")
     if b:
         lines += [f"  onset error vs the pitch map (independent of the onsets used for snapping) median "
                   f"{b['onset_error_pitchmap']['med']:+.3f} -> {a['onset_error_pitchmap']['med']:+.3f} s, "

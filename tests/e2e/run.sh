@@ -23,5 +23,6 @@ status=0
 for t in scoring audio ux studio scale lessons history progress; do echo "== $t"; LUMA_SHOT="tests/e2e/shot_$t.png" "$RUN" "tests/e2e/$t.mjs" || status=1; done
 "$PY" tests/studio_test.py || status=1
 "$PY" tests/lyrics_text_test.py || status=1
+"$PY" tests/retranscribe_song_test.py || status=1
 "$PY" tests/audio_stems_test.py || status=1   # last: it rebuilds the demo, so it must not race the suites served from it
 exit $status
