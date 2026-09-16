@@ -22,7 +22,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'studio'))
-from align_lyrics import aligned_note, build_html, context, flat, realign, save_transcript, write_song
+from align_lyrics import aligned_note, build_html, context, corrected_note_for, corrected_seed, flat, realign, save_transcript, write_song
 from prepare_song import ffmpeg, group_lines, log, merge_tokens, sha256, soniox_key, soniox_tokens
 
 MODEL = 'stt-async-v5'
@@ -76,9 +76,12 @@ def retranscribe(pkg: Path, lang: str, cache_only: bool = False, rebuild: bool =
     words = merge_tokens(payload['tokens'])
     note = f'Soniox {payload["model"]} on the Demucs vocal stem, {payload["created"][:10]}, automatic word timings'
     save_transcript(pkg, 'vocal', group_lines(words), note)
-    lines = realign(words, context(pkg, song))
-    assert [w['w'] for w in flat(lines)] == [w['w'] for w in words], 'the transcript text must survive re-alignment'
-    write_song(pkg, song, lines, aligned_note(note))
+    ctx = context(pkg, song)
+    corrected = corrected_seed(pkg, words, ctx)   # a stored lyrics correction must survive a fresh transcription too
+    seed = corrected if corrected is not None else words
+    lines = realign(seed, ctx)
+    assert [w['w'] for w in flat(lines)] == [w['w'] for w in seed], 'the transcript text must survive re-alignment'
+    write_song(pkg, song, lines, corrected_note_for(note, 'vocal') if corrected is not None else aligned_note(note))
     out = {'package': pkg.name, 'words': len(words), 'lines': len(lines), 'words_before': len(flat(before)), 'lines_before': len(before)}
     if rebuild: out['html'] = str(build_html(pkg, pkg.parent / f'Luma_{pkg.name}.html'))
     return out

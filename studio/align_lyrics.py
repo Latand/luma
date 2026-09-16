@@ -248,19 +248,46 @@ def aligned_note(lyrics_source: str) -> str:
     base = (lyrics_source or 'Soniox stt-async-v5').split('; aligned')[0]
     return base + '; aligned offline to vocal onsets (align_lyrics.py)'
 
+def corrected_seed(pkg: Path, asr_words: list[dict], ctx: dict) -> list[dict] | None:
+    """If lyrics_text.py has a cached lyrics source for this package, the seed words re-derived from applying that
+    correction to `asr_words` — otherwise None. A plain re-alignment must never regress a text correction back to
+    the raw ASR transcript, so every write path that seeds from a stored transcript checks this first. Imported
+    lazily: lyrics_text.py imports this module at load time, so importing it back here has to wait until the first
+    call, by which point this module has already finished loading."""
+    cache = pkg / 'lyrics' / 'source.txt'
+    if not cache.exists(): return None
+    import lyrics_text as lt
+    true_tokens = lt.tokenize(cache.read_text(encoding='utf-8'))
+    if not true_tokens: return None
+    entries = lt.match_words(asr_words, true_tokens)
+    insertions = lt.repeated_insertions(asr_words, true_tokens)
+    if insertions:
+        true_tokens = lt.apply_repeats(true_tokens, insertions)
+        entries = lt.match_words(asr_words, true_tokens)
+    return lt.seed_words(lt.fill_gaps(entries, ctx), asr_words)
+
+def corrected_note_for(existing: str, src: str) -> str:
+    import lyrics_text as lt
+    return lt.corrected_note(existing, src)
+
 def align_package(pkg: Path, write: bool, rebuild: bool = True, prefer: str = 'auto') -> dict:
     song = json.loads((pkg / 'target.json').read_text(encoding='utf-8'))
     words, src, note = transcript(pkg, song, prefer)
     ctx = context(pkg, song)
     before = song.get('lyrics') or []
-    after = realign(flat(words), ctx)
-    assert [w['w'] for w in flat(after)] == [w['w'] for w in flat(words)], 'the transcript text must survive re-alignment'
-    moved = [abs(b['a'] - a['a']) for a, b in zip(flat(words), flat(after))]
+    raw_words = flat(words)
+    corrected = corrected_seed(pkg, raw_words, ctx)
+    seed = corrected if corrected is not None else raw_words
+    after = realign(seed, ctx)
+    assert [w['w'] for w in flat(after)] == [w['w'] for w in seed], 'the transcript text must survive re-alignment'
+    moved = [abs(b['a'] - a['a']) for a, b in zip(seed, flat(after))]
     out = {'package': pkg.name, 'source': src, 'moved': stat(moved), 'snapped': sum(1 for m in moved if m > 1e-9),
-           'before': metrics(before, ctx) if before else None, 'after': metrics(after, ctx)}
+           'before': metrics(before, ctx) if before else None, 'after': metrics(after, ctx),
+           'corrected_from_source': corrected is not None}
     if write:
         save_transcript(pkg, src, words, note)
-        write_song(pkg, song, after, aligned_note(note))
+        out_note = corrected_note_for(note, src) if corrected is not None else aligned_note(note)
+        write_song(pkg, song, after, out_note)
         if rebuild: out['html'] = str(build_html(pkg, pkg.parent / f'Luma_{pkg.name}.html'))
     return out
 
