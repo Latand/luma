@@ -77,11 +77,12 @@ def retranscribe(pkg: Path, lang: str, cache_only: bool = False, rebuild: bool =
     note = f'Soniox {payload["model"]} on the Demucs vocal stem, {payload["created"][:10]}, automatic word timings'
     save_transcript(pkg, 'vocal', group_lines(words), note)
     ctx = context(pkg, song)
-    corrected = corrected_seed(pkg, words, ctx)   # a stored lyrics correction must survive a fresh transcription too
-    seed = corrected if corrected is not None else words
-    lines = realign(seed, ctx)
+    correction = corrected_seed(pkg, song, words, ctx)   # a passing lyrics correction must survive a fresh transcription too
+    applied = correction is not None and correction['passed']
+    seed = correction['seed'] if applied else words
+    lines = correction['lines'] if applied else realign(seed, ctx)
     assert [w['w'] for w in flat(lines)] == [w['w'] for w in seed], 'the transcript text must survive re-alignment'
-    write_song(pkg, song, lines, corrected_note_for(note, 'vocal') if corrected is not None else aligned_note(note))
+    write_song(pkg, song, lines, corrected_note_for(note, 'vocal') if applied else aligned_note(note))
     out = {'package': pkg.name, 'words': len(words), 'lines': len(lines), 'words_before': len(flat(before)), 'lines_before': len(before)}
     if rebuild: out['html'] = str(build_html(pkg, pkg.parent / f'Luma_{pkg.name}.html'))
     return out

@@ -248,23 +248,16 @@ def aligned_note(lyrics_source: str) -> str:
     base = (lyrics_source or 'Soniox stt-async-v5').split('; aligned')[0]
     return base + '; aligned offline to vocal onsets (align_lyrics.py)'
 
-def corrected_seed(pkg: Path, asr_words: list[dict], ctx: dict) -> list[dict] | None:
-    """If lyrics_text.py has a cached lyrics source for this package, the seed words re-derived from applying that
-    correction to `asr_words` — otherwise None. A plain re-alignment must never regress a text correction back to
-    the raw ASR transcript, so every write path that seeds from a stored transcript checks this first. Imported
-    lazily: lyrics_text.py imports this module at load time, so importing it back here has to wait until the first
-    call, by which point this module has already finished loading."""
-    cache = pkg / 'lyrics' / 'source.txt'
-    if not cache.exists(): return None
+def corrected_seed(pkg: Path, song: dict, asr_words: list[dict], ctx: dict) -> dict | None:
+    """If lyrics_text.py has a cached, still-valid lyrics correction for this package, the full build_correction()
+    result for it — otherwise None. Running the correction through the same checks a direct correction would (the
+    shared pipeline, not a re-implementation) means a plain re-alignment can never regress one that passed, and
+    never silently applies one that wouldn't have. Imported lazily: lyrics_text.py imports this module at load time,
+    so importing it back here has to wait until the first call, by which point this module has already loaded."""
     import lyrics_text as lt
-    true_tokens = lt.tokenize(cache.read_text(encoding='utf-8'))
-    if not true_tokens: return None
-    entries = lt.match_words(asr_words, true_tokens)
-    insertions = lt.repeated_insertions(asr_words, true_tokens)
-    if insertions:
-        true_tokens = lt.apply_repeats(true_tokens, insertions)
-        entries = lt.match_words(asr_words, true_tokens)
-    return lt.seed_words(lt.fill_gaps(entries, ctx), asr_words)
+    raw_text = lt.cached_source_text(pkg)
+    if raw_text is None: return None
+    return lt.build_correction(pkg, song, asr_words, ctx, raw_text, 'cached')
 
 def corrected_note_for(existing: str, src: str) -> str:
     import lyrics_text as lt
@@ -276,17 +269,18 @@ def align_package(pkg: Path, write: bool, rebuild: bool = True, prefer: str = 'a
     ctx = context(pkg, song)
     before = song.get('lyrics') or []
     raw_words = flat(words)
-    corrected = corrected_seed(pkg, raw_words, ctx)
-    seed = corrected if corrected is not None else raw_words
-    after = realign(seed, ctx)
+    correction = corrected_seed(pkg, song, raw_words, ctx)
+    applied = correction is not None and correction['passed']
+    seed = correction['seed'] if applied else raw_words
+    after = correction['lines'] if applied else realign(raw_words, ctx)
     assert [w['w'] for w in flat(after)] == [w['w'] for w in seed], 'the transcript text must survive re-alignment'
     moved = [abs(b['a'] - a['a']) for a, b in zip(seed, flat(after))]
+    correction_status = 'applied' if applied else (f"refused: {correction['reason']}" if correction is not None else None)
     out = {'package': pkg.name, 'source': src, 'moved': stat(moved), 'snapped': sum(1 for m in moved if m > 1e-9),
-           'before': metrics(before, ctx) if before else None, 'after': metrics(after, ctx),
-           'corrected_from_source': corrected is not None}
+           'before': metrics(before, ctx) if before else None, 'after': metrics(after, ctx), 'correction': correction_status}
     if write:
         save_transcript(pkg, src, words, note)
-        out_note = corrected_note_for(note, src) if corrected is not None else aligned_note(note)
+        out_note = corrected_note_for(note, src) if applied else aligned_note(note)
         write_song(pkg, song, after, out_note)
         if rebuild: out['html'] = str(build_html(pkg, pkg.parent / f'Luma_{pkg.name}.html'))
     return out

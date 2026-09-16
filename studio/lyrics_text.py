@@ -5,7 +5,7 @@
   lyrics_text.py --text lyrics.txt <package>  use lyrics supplied by the operator instead of fetching them
   lyrics_text.py --from mix|vocal <package>   correct against a specific stored transcript instead of the one the
                                                song is already published from
-  lyrics_text.py --force <package>            write even when the completeness check would otherwise refuse
+  lyrics_text.py --force <package>            write even when the gate would otherwise refuse
   lyrics_text.py --dry-run <package_dir>...   report what would change and write nothing
   lyrics_text.py --dry-run --json <pkg>...    the same report as machine-readable metrics
 
@@ -14,32 +14,32 @@ re-derives its output from the same source and two runs in a row are byte-identi
 whichever transcript the song is already published from (the 'vocal stem' marker in lyricsSource is the signal, or
 --from to say so explicitly) — a song deliberately kept on the mix transcript never silently jumps to the other one.
 
-The true lyric text is sequence-aligned against the normalized ASR words: a matched word keeps the ASR timing, a
-substituted word takes the timing of the word(s) it replaces (spread across their whole span when one heard word
-stands for several true words), a true word with no ASR counterpart gets its start interpolated inside the nearest
-sung stretch, and an ASR word with no true counterpart is dropped — unless the dropped run is itself a repeat of a
-span already used elsewhere in the true text (a chorus the source only writes out once), in which case that span is
-duplicated back in rather than losing the words. Word order never changes within the true text as given (repeats
-are the one place new text is added, and only text already present elsewhere in the same source). The seeded words
-are then handed to align_lyrics.realign(), which snaps every start to a vocal onset and groups lines by real vocal
-silence — the same onset detector and line-break rule align_lyrics itself uses, not a re-implementation of it.
+build_correction() is the one path from a lyrics source to seeded, realigned lines: align_lyrics.py and the vocal
+retranscription command call it too, so a realignment or a fresh transcription can never regress a correction back
+to the raw ASR transcript, and never applies one that would make things worse either. The true lyric text is
+sequence-aligned against the normalized ASR words: a matched word keeps the ASR timing, a substituted word takes the
+timing of the word(s) it replaces, a true word with no ASR counterpart gets its start interpolated inside the
+nearest sung stretch (never past the end of the singing, never closer than MIN_WORD_SPACING_S to its neighbour), and
+a heard word with no true counterpart is dropped — unless it is part of a run that repeats a span already used
+elsewhere in the true text (a chorus the source only writes out once), in which case that span is duplicated back in
+rather than losing the words. Word order never changes within the true text as given; repeats are the one place new
+text is added, and only text already present elsewhere in the same source. Seeded words are handed to
+align_lyrics.realign(), which snaps every start to a vocal onset and groups lines by real vocal silence.
 
-Before writing, a completeness check refuses (or, with --force, warns and proceeds) when a contiguous run of dropped
-ASR words covers substantial sung time, when the matched text ends well before the heard transcript does, or when an
-inserted word lands outside the sung voice — signs that the source text is missing a section, not just imperfectly
-matched.
+Before writing, the gate compares align_lyrics.metrics() for the corrected lines against the lines already
+published: it refuses (or, with --force, warns and proceeds) when the correction would leave meaningfully more of
+the singing uncovered, or open a silent hole that wasn't there before — a sign the source text doesn't actually
+match what's sung, not just imperfectly. Low agreement with the ASR transcript refuses outright, same as before.
 
 Fetching is a single free lookup (api.lyrics.ovh, no key) keyed by the title/artist in <package>/manifest.json. The
 raw text — fetched or operator-supplied — is cached in <package>/lyrics/source.txt (with the title/artist it was
 fetched for, in lyrics/source.meta.json) once a run actually writes it, so a second run needs no network and a
-changed manifest title/artist is not silently served the old text.
+changed manifest title/artist is not silently served the old text. A source that fails the gate is never cached.
 
 Safety guard: target.json fields other than `lyrics`/`lyricsSource`, and every audio file in the package, must stay
 byte-for-byte identical to before the run; a change trips a loud failure instead of a silent write. The "before"
 snapshot is re-read from disk immediately ahead of the write, never kept from the object this script itself loaded
-and may have handed off elsewhere, so an in-place mutation to a nested field can't hide from the comparison. A song
-whose lyrics source does not confidently match the recording (low agreement with the ASR transcript) is left
-untouched.
+and may have handed off elsewhere, so an in-place mutation to a nested field can't hide from the comparison.
 """
 from __future__ import annotations
 import argparse, difflib, json, re, sys, time, urllib.error, urllib.parse, urllib.request
@@ -53,12 +53,16 @@ from prepare_song import sha256
 
 AUDIO_EXTENSIONS = {'.flac', '.mp3', '.m4a', '.wav'}   # every audio file the safety guard must fingerprint
 LYRICS_FIELDS = ('lyrics', 'lyricsSource')              # the only target.json fields this script is allowed to change
-GUESS_SPAN = .15   # placeholder duration for an inserted word before realign() fits it to the voice
-MIN_REPEAT_WORDS = 4      # a dropped run shorter than this is more likely noise than a missed repeat
+GUESS_SPAN = .15          # placeholder duration for an inserted word before realign() fits it to the voice
+MIN_REPEAT_WORDS = 4      # a leftover run shorter than this is more likely noise than a missed repeat
 MIN_REPEAT_SECONDS = 2.0  # ...and one covering less sung time than this isn't worth searching for
-REPEAT_MATCH_RATIO = .7   # how much of a candidate span must match the dropped run to count as the same text
-DROP_RUN_SECONDS = 3.0    # a contiguous dropped run spanning at least this much sung time blocks the write
-TAIL_GAP_SECONDS = 10.0   # the matched text must reach within this much of the end of the heard transcript
+REPEAT_MATCH_RATIO = .7   # how similar a candidate span must be to the leftover run to count as the same text
+MAX_REPEAT_ROUNDS = 5     # a song can repeat a chorus more than once; keep restoring until nothing new is found
+SILENCE_MARGIN_S = .05    # an onset this much before a voice region still counts as landing on the voice — the
+                           # same early-onset margin align_lyrics.onsets() accepts when snapping
+MIN_WORD_SPACING_S = .18  # inserted words closer together than this aren't real, distinguishable placements
+UNCOVERED_TOLERANCE_S = 6.0   # a correction may leave up to this many more seconds of singing uncovered than the
+                               # lyrics already published before the gate refuses it
 
 class LyricsSourceError(RuntimeError):
     """The true lyric text could not be obtained: no manifest, no network, or the fetch came back empty."""
@@ -76,22 +80,36 @@ def fetch_lyrics(title: str, artist: str) -> str:
     if not text: raise LyricsSourceError(f'no lyrics found for "{title}" by "{artist}"')
     return text
 
-def resolve_source_text(pkg: Path, text_file: str | None) -> tuple[str, str, dict | None]:
-    """The raw lyric text to use, a short note of where it came from, and — only when the source was freshly
-    fetched and should be cached once the run is confirmed to write — the manifest title/artist it was fetched for.
-    None means nothing new needs caching: an operator-supplied file, or a cache hit whose stored title/artist still
-    matches the manifest. Never touches the network before checking the cache, and never writes anything itself."""
-    if text_file:
-        text = Path(text_file).expanduser().read_text(encoding='utf-8')
-        return text, f'operator-supplied lyrics ({Path(text_file).name})', None
-    cache, meta_path = pkg / 'lyrics' / 'source.txt', pkg / 'lyrics' / 'source.meta.json'
+def _manifest_title_artist(pkg: Path) -> tuple[str, str]:
     manifest_path = pkg / 'manifest.json'
     manifest = json.loads(manifest_path.read_text(encoding='utf-8')) if manifest_path.exists() else {}
-    title, artist = manifest.get('title') or '', manifest.get('artist') or ''
-    if cache.exists() and meta_path.exists():
-        meta = json.loads(meta_path.read_text(encoding='utf-8'))
-        if meta.get('title') == title and meta.get('artist') == artist:
-            return cache.read_text(encoding='utf-8'), 'cached lyrics (lyrics/source.txt)', None
+    return manifest.get('title') or '', manifest.get('artist') or ''
+
+def cached_source_text(pkg: Path) -> str | None:
+    """The cached lyrics source for this package if the manifest still matches what it was fetched for — otherwise
+    None. Never fetches, never touches the network: the safe, read-only source align_lyrics.py and the vocal
+    retranscription command use to replay a correction."""
+    cache, meta_path = pkg / 'lyrics' / 'source.txt', pkg / 'lyrics' / 'source.meta.json'
+    if not (cache.exists() and meta_path.exists()): return None
+    meta = json.loads(meta_path.read_text(encoding='utf-8'))
+    title, artist = _manifest_title_artist(pkg)
+    if meta.get('title') != title or meta.get('artist') != artist: return None
+    return cache.read_text(encoding='utf-8')
+
+def resolve_source_text(pkg: Path, text_file: str | None) -> tuple[str, str, dict | None]:
+    """The raw lyric text to use, a short note of where it came from, and — only when the source should be cached
+    once the run is confirmed to write — the manifest title/artist it was fetched or supplied for. None means
+    nothing new needs caching: a cache hit whose stored title/artist still matches the manifest, or an
+    operator-supplied file with no manifest to validate a cache against. Never touches the network before checking
+    the cache, and never writes anything itself."""
+    title, artist = _manifest_title_artist(pkg)
+    if text_file:
+        text = Path(text_file).expanduser().read_text(encoding='utf-8')
+        meta = {'title': title, 'artist': artist} if title else None
+        return text, f'operator-supplied lyrics ({Path(text_file).name})', meta
+    cached = cached_source_text(pkg)
+    if cached is not None: return cached, 'cached lyrics (lyrics/source.txt)', None
+    manifest_path = pkg / 'manifest.json'
     if not manifest_path.exists(): raise LyricsSourceError(f'{pkg.name}: no manifest.json to look up title/artist')
     if not title: raise LyricsSourceError(f'{pkg.name}: manifest.json has no title')
     text = fetch_lyrics(title, artist)
@@ -118,8 +136,9 @@ def tokenize(text: str) -> list[str]:
 def match_words(asr_words: list[dict], true_tokens: list[str]) -> list[dict]:
     """One entry per true token, in order: {'w', 'a' (seed time or None), 'kind', 'src' (matching ASR index or
     None)}. Built from the edit script between the normalized word sequences, so word order is inherited from the
-    true lyrics and never changes. When one heard word stands for several true words, all of them get a seed time
-    spread across that heard word's whole span rather than only the first one."""
+    true lyrics and never changes. When one heard word stands for several true words, each of the extra ones is left
+    with no seed time (kind 'inserted'), so fill_gaps places it inside the actual sung voice around it instead of a
+    blind interpolation across the whole replaced span."""
     a_norm = [al.norm(w['w']) for w in asr_words]; t_norm = [al.norm(t) for t in true_tokens]
     sm = difflib.SequenceMatcher(a=a_norm, b=t_norm, autojunk=False)
     out: list[dict | None] = [None] * len(true_tokens)
@@ -128,49 +147,64 @@ def match_words(asr_words: list[dict], true_tokens: list[str]) -> list[dict]:
             for k in range(i2 - i1):
                 out[j1 + k] = {'w': true_tokens[j1 + k], 'a': asr_words[i1 + k]['a'], 'kind': 'matched', 'src': i1 + k}
         elif tag == 'replace':
-            na, nt = i2 - i1, j2 - j1
-            if na == 0:
-                for x in range(nt):
-                    out[j1 + x] = {'w': true_tokens[j1 + x], 'a': None, 'kind': 'inserted', 'src': None}
-            else:
-                t0, t1 = asr_words[i1]['a'], asr_words[i2 - 1]['b']
-                for x in range(nt):
-                    src = i1 + min(x, na - 1)
-                    a_time = t0 if nt == 1 else round(t0 + (t1 - t0) * x / (nt - 1), 3)
-                    out[j1 + x] = {'w': true_tokens[j1 + x], 'a': a_time, 'kind': 'substituted' if x < na else 'inserted',
-                                    'src': src if x < na else None}
+            na, nt = i2 - i1, j2 - j1; k = min(na, nt)
+            for x in range(k):
+                out[j1 + x] = {'w': true_tokens[j1 + x], 'a': asr_words[i1 + x]['a'], 'kind': 'substituted', 'src': i1 + x}
+            for x in range(k, nt):
+                out[j1 + x] = {'w': true_tokens[j1 + x], 'a': None, 'kind': 'inserted', 'src': None}
+            # when na > nt, the na - k leftover heard words (i1+k .. i2) have no true counterpart in this pass —
+            # find_leftover_runs() below picks them up as repeat candidates, same as a pure 'delete'
         elif tag == 'insert':
             for x in range(j1, j2):
                 out[x] = {'w': true_tokens[x], 'a': None, 'kind': 'inserted', 'src': None}
-        # 'delete': the ASR words in that range simply have no true counterpart and are dropped
+        # 'delete': the ASR words in that range simply have no true counterpart in this pass
     return out   # type: ignore[return-value]
 
-def find_repeated_span(dropped_norm: list[str], t_norm: list[str]) -> tuple[int, int] | None:
-    """A span in the true text whose words are (almost) the same as this dropped ASR run — the run is a repeat of
-    that span (e.g. a chorus written out once but sung twice), not padding that should be dropped."""
-    n = len(dropped_norm)
-    if n > len(t_norm): return None
-    best = None
-    for start in range(len(t_norm) - n + 1):
-        window = t_norm[start:start + n]
-        ratio = sum(1 for a, b in zip(window, dropped_norm) if a == b) / n
-        if ratio >= REPEAT_MATCH_RATIO and (best is None or ratio > best[1]):
-            best = (start, ratio)
-    return (best[0], best[0] + n) if best else None
-
-def repeated_insertions(asr_words: list[dict], true_tokens: list[str]) -> list[tuple[int, list[str]]]:
-    """Dropped ASR runs that are (almost) the same text as a span already used elsewhere in the true lyrics.
-    Returns (position in true_tokens, tokens to duplicate there), so the caller can splice the repeat back into the
-    true text instead of silently losing the words."""
+def find_leftover_runs(asr_words: list[dict], true_tokens: list[str]) -> list[tuple[int, int, int]]:
+    """Every contiguous stretch of heard words this pass of matching has no place for, as (asr_start, asr_end,
+    true_position) triples: a full 'delete' opcode, or the extra heard words at the tail of a 'replace' block once
+    its first few have taken the true words there — the two shapes a chorus written out once but sung again can
+    take, depending on whether the join between the sections happens to share a word."""
     a_norm = [al.norm(w['w']) for w in asr_words]; t_norm = [al.norm(t) for t in true_tokens]
     sm = difflib.SequenceMatcher(a=a_norm, b=t_norm, autojunk=False)
     out = []
     for tag, i1, i2, j1, j2 in sm.get_opcodes():
-        if tag != 'delete': continue
+        if tag == 'delete':
+            out.append((i1, i2, j1))
+        elif tag == 'replace':
+            na, nt = i2 - i1, j2 - j1
+            if na > nt: out.append((i1 + nt, i2, j2))
+    return out
+
+def find_repeated_span(leftover_norm: list[str], t_norm: list[str]) -> tuple[int, int] | None:
+    """A span in the true text whose words are (almost) the same as a *prefix* of this leftover heard run — the
+    prefix is a repeat of that span (e.g. a chorus written out once but sung twice), not padding that should be
+    dropped. Matching a prefix rather than the whole run handles both a single repeat with one missing or extra
+    word at the seam, and several repeats concatenated into one leftover run (restore_repeats() recovers the rest
+    on its next pass, once the first one is spliced back in and the run shrinks)."""
+    max_len = min(len(t_norm), len(leftover_norm))
+    for span_len in range(max_len, 1, -1):   # longest prefix first, so one big repeat isn't split into fragments
+        prefix = leftover_norm[:span_len]
+        best = None
+        for start in range(len(t_norm) - span_len + 1):
+            window = t_norm[start:start + span_len]
+            ratio = difflib.SequenceMatcher(a=window, b=prefix, autojunk=False).ratio()
+            if ratio >= REPEAT_MATCH_RATIO and (best is None or ratio > best[1]):
+                best = (start, ratio)
+        if best is not None: return (best[0], best[0] + span_len)
+    return None
+
+def repeated_insertions(asr_words: list[dict], true_tokens: list[str]) -> list[tuple[int, list[str]]]:
+    """Leftover heard runs that are (almost) the same text as a span already used elsewhere in the true lyrics.
+    Returns (position in true_tokens, tokens to duplicate there), so the caller can splice the repeat back into the
+    true text instead of silently losing the words."""
+    a_norm = [al.norm(w['w']) for w in asr_words]; t_norm = [al.norm(t) for t in true_tokens]
+    out = []
+    for i1, i2, pos in find_leftover_runs(asr_words, true_tokens):
         if i2 - i1 < MIN_REPEAT_WORDS: continue
         if asr_words[i2 - 1]['b'] - asr_words[i1]['a'] < MIN_REPEAT_SECONDS: continue
         found = find_repeated_span(a_norm[i1:i2], t_norm)
-        if found: out.append((j1, true_tokens[found[0]:found[1]]))
+        if found: out.append((pos, true_tokens[found[0]:found[1]]))
     return out
 
 def apply_repeats(true_tokens: list[str], insertions: list[tuple[int, list[str]]]) -> list[str]:
@@ -178,11 +212,28 @@ def apply_repeats(true_tokens: list[str], insertions: list[tuple[int, list[str]]
         true_tokens = true_tokens[:pos] + list(tokens) + true_tokens[pos:]
     return true_tokens
 
+def restore_repeats(asr_words: list[dict], true_tokens: list[str]) -> tuple[list[str], list[dict], int]:
+    """Matches, then repeatedly looks for a leftover run that repeats an earlier span and splices it back in,
+    re-matching each time — a song can repeat a chorus more than once — until nothing new is found or the round cap
+    is hit. Returns the (possibly extended) true tokens, the final match entries, and how many spans were restored."""
+    entries = match_words(asr_words, true_tokens)
+    restored = 0
+    for _ in range(MAX_REPEAT_ROUNDS):
+        insertions = repeated_insertions(asr_words, true_tokens)
+        if not insertions: break
+        true_tokens = apply_repeats(true_tokens, insertions)
+        entries = match_words(asr_words, true_tokens)
+        restored += len(insertions)
+    return true_tokens, entries, restored
+
 def fill_gaps(entries: list[dict], ctx: dict) -> list[dict]:
     """Every 'inserted' entry without a seed time gets one, placed only inside sung stretches between its
     neighbours' times and never past the end of the last sung stretch; realign() snaps it to the nearest vocal onset
     afterwards. A group of entries is spread proportionally to the sung time available, not linearly across the raw
-    gap (which can run through long silences). Never touches an entry that already has a time."""
+    gap (which can run through long silences), and never closer together than MIN_WORD_SPACING_S. When there is no
+    sung time at all between the neighbours, the group is clustered right after the previous one instead of spread
+    blindly across the silence — still off the voice, but not scattered to an arbitrary point in the gap. Never
+    touches an entry that already has a time."""
     regions, duration = ctx['regions'], ctx['duration']
     last_voice_end = regions[-1][1] if regions else duration
     n = len(entries); i = 0
@@ -193,20 +244,26 @@ def fill_gaps(entries: list[dict], ctx: dict) -> list[dict]:
         prev_t = entries[i - 1]['a'] if i > 0 else 0.0
         next_t = entries[j]['a'] if j < n else last_voice_end
         if next_t > last_voice_end: next_t = last_voice_end
-        if next_t <= prev_t: next_t = min(prev_t + .05 * (j - i + 1), last_voice_end)
-        if next_t <= prev_t: next_t = prev_t + .01   # every sung stretch already behind us: keep entries ordered
-        span_regions = [(max(a, prev_t), min(b, next_t)) for a, b in regions if b > prev_t and a < next_t]
-        if not span_regions: span_regions = [(prev_t, next_t)]
-        total = sum(b - a for a, b in span_regions) or 1e-6
         count = j - i
-        for k, idx in enumerate(range(i, j)):
+        span_regions = [(max(a, prev_t), min(b, next_t)) for a, b in regions if b > prev_t and a < next_t] if next_t > prev_t else []
+        if not span_regions:
+            for k, idx in enumerate(range(i, j)):
+                entries[idx]['a'] = round(min(prev_t + MIN_WORD_SPACING_S * (k + 1), max(next_t, prev_t)), 3)
+            i = j; continue
+        total = sum(b - a for a, b in span_regions)
+        placed = []
+        for k in range(count):
             target = total * (k + 1) / (count + 1)
             t, run = prev_t, 0.0
             for a, b in span_regions:
                 seg = b - a
                 if run + seg >= target: t = a + (target - run); break
                 run += seg; t = b
-            entries[idx]['a'] = round(t, 3)
+            placed.append(t)
+        if total >= count * MIN_WORD_SPACING_S:   # only worth enforcing when the window can actually fit it —
+            for k in range(1, len(placed)):       # otherwise forcing it would push later words past the window
+                if placed[k] - placed[k - 1] < MIN_WORD_SPACING_S: placed[k] = placed[k - 1] + MIN_WORD_SPACING_S
+        for k, idx in enumerate(range(i, j)): entries[idx]['a'] = round(min(placed[k], next_t), 3)
         i = j
     return entries
 
@@ -222,35 +279,71 @@ def seed_words(entries: list[dict], asr_words: list[dict]) -> list[dict]:
         ws.append({'a': round(e['a'], 3), 'b': round(e['a'] + span, 3), 'w': e['w'], 'c': conf})
     return ws
 
-# ---------------------------------------------------------------- completeness and placement checks
-def completeness_issues(asr_words: list[dict], entries: list[dict]) -> list[str]:
-    """Signs that the source text is missing a section, not just imperfectly matched: a long contiguous run of
-    dropped ASR words, or matched text that stops well before the heard transcript does."""
-    kept = sorted(e['src'] for e in entries if e['src'] is not None)
-    issues, prev = [], -1
-    for idx in kept + [len(asr_words)]:
-        if idx - prev > 1:
-            i1, i2 = prev + 1, idx
-            span = asr_words[i2 - 1]['b'] - asr_words[i1]['a']
-            if span >= DROP_RUN_SECONDS:
-                issues.append(f'{i2 - i1} words dropped in a row, spanning {span:.1f}s of sung time')
-        prev = idx
-    if kept:
-        tail = asr_words[-1]['b'] - asr_words[kept[-1]]['b']
-        if tail >= TAIL_GAP_SECONDS:
-            issues.append(f'the matched text ends {tail:.1f}s before the heard transcript does')
-    return issues
+# ---------------------------------------------------------------- placement and harm checks
+def in_voice(t: float, ctx: dict, margin: float = SILENCE_MARGIN_S) -> bool:
+    """Whether a word starting at `t` lands on the sung voice, allowing the same early-onset margin the onset
+    detector itself accepts when snapping a word to an onset just before a voice region begins — checked across the
+    whole margin window, not a single frame, so a word landing a couple of milliseconds past the edge of that
+    window still counts."""
+    v = ctx['voiced']
+    lo, hi = int(round(t / al.HOP)), int(round((t + margin) / al.HOP))
+    lo, hi = max(0, lo), min(len(v) - 1, hi)
+    return lo <= hi and bool(v[lo:hi + 1].any())
 
-def placement_issues(entries: list[dict], flat_words: list[dict], ctx: dict) -> tuple[int, int]:
-    """How many inserted words ended up off a vocal onset, and how many landed outside the sung voice entirely."""
-    v, onsets = ctx['voiced'], ctx['onsets']
-    off_onset = in_silence = 0
-    for e, w in zip(entries, flat_words):
-        if e['kind'] != 'inserted': continue
-        if not len(onsets) or min(abs(w['a'] - o) for o in onsets) > .05: off_onset += 1
-        idx = int(w['a'] / al.HOP)
-        if idx < 0 or idx >= len(v) or not v[idx]: in_silence += 1
-    return off_onset, in_silence
+def placement_problems(entries: list[dict], flat_words: list[dict], ctx: dict) -> tuple[list[str], list[str]]:
+    """Inserted words that ended up off the sung voice — a real placement fault, always worth refusing over — and
+    inserted words packed closer together than MIN_WORD_SPACING_S, which is only ever a fault when the sung time
+    available could have fit them with room to spare; when a large block of words has to share a short sung
+    stretch, no placement can keep them that far apart, so it is reported but does not by itself block the write.
+    Returns (blocking, informational)."""
+    blocking, info = [], []
+    off_voice = sum(1 for e, w in zip(entries, flat_words) if e['kind'] == 'inserted' and not in_voice(w['a'], ctx))
+    if off_voice: blocking.append(f'{off_voice} inserted word(s) placed off the sung voice')
+    # only two words the placer itself just chose a time for are checked — real fast singing can legitimately
+    # place ASR-anchored (matched/substituted) words closer together than this
+    close = sum(1 for ea, eb, a, b in zip(entries, entries[1:], flat_words, flat_words[1:])
+                if ea['kind'] == 'inserted' and eb['kind'] == 'inserted' and b['a'] - a['a'] < MIN_WORD_SPACING_S)
+    if close: info.append(f'{close} inserted word(s) placed less than {MIN_WORD_SPACING_S}s apart')
+    return blocking, info
+
+def gate_verdict(conf: str, before_metrics: dict | None, after_metrics: dict) -> tuple[bool, str | None]:
+    """Whether writing the correction would make the song worse than what's already published, judged the way the
+    numbers are actually measured (align_lyrics.metrics()) rather than a re-derived estimate."""
+    if conf == 'low':
+        return False, 'low confidence that the lyrics source matches this recording'
+    if before_metrics is None: return True, None
+    grown = round(after_metrics['uncovered_seconds'] - before_metrics['uncovered_seconds'], 1)
+    new_holes = after_metrics['silent_holes'] > before_metrics['silent_holes']
+    if grown > UNCOVERED_TOLERANCE_S or new_holes:
+        msg = f'would leave {grown:.1f}s more of the singing uncovered than the lyrics published now'
+        if new_holes: msg += ' and opens a silent hole that is not there now'
+        return False, msg
+    return True, None
+
+# ---------------------------------------------------------------- the shared correction pipeline
+def build_correction(pkg: Path, song: dict, asr_words: list[dict], ctx: dict, raw_text: str, asr_src: str) -> dict:
+    """The one path from a lyrics source to seeded, realigned lines, used by lyrics_text.py, align_lyrics.py and the
+    vocal retranscription command alike, so a realignment or a fresh transcription always runs the same checks a
+    direct correction would and never regresses or over-applies one."""
+    true_tokens = tokenize(raw_text)
+    if not true_tokens: raise LyricsSourceError(f'{pkg.name}: no words found in the lyrics source')
+    true_tokens, entries, repeats_restored = restore_repeats(asr_words, true_tokens)
+    entries = fill_gaps(entries, ctx)
+    seed = seed_words(entries, asr_words)
+    lines = al.realign(seed, ctx)
+    assert [w['w'] for w in al.flat(lines)] == true_tokens, 'the true lyric text must survive re-alignment untouched'
+    agreement = al.agreement(asr_words, [{'w': t} for t in true_tokens])
+    conf = confidence(agreement['agreement_pct'], len(asr_words), len(true_tokens))
+    before_lines = song.get('lyrics') or []
+    before_m = al.metrics(before_lines, ctx) if before_lines else None
+    after_m = al.metrics(lines, ctx)
+    passed, reason = gate_verdict(conf, before_m, after_m)
+    blocking, info = placement_problems(entries, al.flat(lines), ctx)
+    if passed and blocking: passed, reason = False, 'placement: ' + '; '.join(blocking)
+    return {'true_tokens': true_tokens, 'entries': entries, 'seed': seed, 'lines': lines, 'confidence': conf,
+            'agreement_pct': agreement['agreement_pct'], 'repeats_restored': repeats_restored,
+            'before_metrics': before_m, 'after_metrics': after_m, 'passed': passed, 'reason': reason,
+            'placement_problems': blocking + info, 'asr_source': asr_src}
 
 # ---------------------------------------------------------------- report
 def word_error_rate(a_norm: list[str], t_norm: list[str]) -> float:
@@ -309,42 +402,29 @@ def process_package(pkg: Path, text_file: str | None, write: bool, rebuild: bool
     asr_lines, asr_src = resolve_transcript(pkg, song, prefer)
     asr_words = al.flat(asr_lines)
     raw_text, text_note, cache_meta = resolve_source_text(pkg, text_file)
-    true_tokens = tokenize(raw_text)
-    if not true_tokens: raise LyricsSourceError(f'{pkg.name}: no words found in the lyrics source')
     ctx = al.context(pkg, song)
-    entries = match_words(asr_words, true_tokens)
-    insertions = repeated_insertions(asr_words, true_tokens)
-    if insertions:
-        true_tokens = apply_repeats(true_tokens, insertions)
-        entries = match_words(asr_words, true_tokens)
-    entries = fill_gaps(entries, ctx)
-    lines = al.realign(seed_words(entries, asr_words), ctx)
-    assert [w['w'] for w in al.flat(lines)] == true_tokens, 'the true lyric text must survive re-alignment untouched'
-    agreement = al.agreement(asr_words, [{'w': t} for t in true_tokens])
-    conf = confidence(agreement['agreement_pct'], len(asr_words), len(true_tokens))
-    off_onset, in_silence = placement_issues(entries, al.flat(lines), ctx)
-    issues = completeness_issues(asr_words, entries)
-    if in_silence: issues.append(f'{in_silence} inserted word(s) fall in silence outside the sung voice')
-    out = {'package': pkg.name, 'asr_source': asr_src, 'lyrics_source': text_note, 'confidence': conf,
-           'agreement_pct': agreement['agreement_pct'], 'words_inserted_off_onset': off_onset,
-           'words_inserted_in_silence': in_silence, 'repeated_sections_recovered': len(insertions),
-           **report_metrics(asr_words, true_tokens, entries, lines)}
-    if write:
-        if conf == 'low':
-            out['skipped'] = 'low confidence that the lyrics source matches this recording; left untouched'
-            return out
-        if issues and not force:
-            out['skipped'] = 'incomplete source: ' + '; '.join(issues) + ' (use --force to override)'
-            return out
+    c = build_correction(pkg, song, asr_words, ctx, raw_text, asr_src)
+    out = {'package': pkg.name, 'asr_source': c['asr_source'], 'lyrics_source': text_note, 'confidence': c['confidence'],
+           'agreement_pct': c['agreement_pct'], 'repeated_sections_recovered': c['repeats_restored'],
+           'placement_problems': c['placement_problems'],
+           **report_metrics(asr_words, c['true_tokens'], c['entries'], c['lines'])}
+    if not c['passed']:
+        out['skipped'] = c['reason'] + ' (use --force to override)'
+    if write and (c['passed'] or force):
         before_audio = audio_fingerprint(pkg)
         before_snapshot = strip_lyrics(json.loads((pkg / 'target.json').read_text(encoding='utf-8')))
-        note = corrected_note(song.get('lyricsSource') or '', asr_src)
-        song['lyrics'] = lines; song['lyricsSource'] = note
+        note = corrected_note(song.get('lyricsSource') or '', c['asr_source'])
+        song['lyrics'] = c['lines']; song['lyricsSource'] = note
         tmp = pkg / 'target.json.tmp'
-        tmp.write_text(json.dumps(song, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
-        after_snapshot = strip_lyrics(json.loads(tmp.read_text(encoding='utf-8')))
-        verify_guard(pkg, before_snapshot, after_snapshot, before_audio, audio_fingerprint(pkg))
+        try:
+            tmp.write_text(json.dumps(song, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+            after_snapshot = strip_lyrics(json.loads(tmp.read_text(encoding='utf-8')))
+            verify_guard(pkg, before_snapshot, after_snapshot, before_audio, audio_fingerprint(pkg))
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
         tmp.replace(pkg / 'target.json')
+        out.pop('skipped', None)
         if cache_meta is not None:
             cache_dir = pkg / 'lyrics'; cache_dir.mkdir(exist_ok=True)
             (cache_dir / 'source.txt').write_text(raw_text, encoding='utf-8')
@@ -359,7 +439,7 @@ def human(r: dict) -> str:
             f"{r['words_dropped']} dropped from the ASR transcript), WER against the true text {r['wer_before']}, "
             f"median timing shift of changed words {r['median_shift_changed_s']:.2f} s, "
             f"confidence {r['confidence']} (agreement {r['agreement_pct']}%), lyrics source: {r['lyrics_source']}, "
-            f"inserted words off onset {r['words_inserted_off_onset']}, in silence {r['words_inserted_in_silence']}, "
+            f"placement problems: {'; '.join(r['placement_problems']) or 'none'}, "
             f"repeated sections recovered {r['repeated_sections_recovered']}")
 
 def main():
@@ -368,7 +448,7 @@ def main():
     ap.add_argument('--text', help='lyrics file to use instead of fetching (only with a single package)')
     ap.add_argument('--from', dest='prefer', default='auto', choices=['auto', 'vocal', 'mix'],
                      help='which stored transcript to correct against (default: the one the song is already published from)')
-    ap.add_argument('--force', action='store_true', help='write even when the completeness check would otherwise refuse')
+    ap.add_argument('--force', action='store_true', help='write even when the gate would otherwise refuse')
     ap.add_argument('-n', '--dry-run', action='store_true', help='report only, write nothing')
     ap.add_argument('--json', action='store_true', help='print the report as JSON')
     ap.add_argument('--no-html', action='store_true', help='update target.json but do not rebuild the trainer')

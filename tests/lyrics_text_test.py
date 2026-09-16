@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The lyric text corrector: word matching, gap interpolation, completeness/placement checks, the report, the cache
+"""The lyric text corrector: word matching, repeat restoration, gap/placement, the harm gate, the report, the cache
 and the safety guard.
 
 Runs on synthetic audio and invented nonsense words it generates itself. No network call, no Soniox, no song
@@ -92,15 +92,20 @@ class MatchWordsTests(unittest.TestCase):
         self.assertEqual(kinds, ['matched', 'matched', 'substituted', 'matched', 'inserted'],
                           'a case/punctuation difference must not turn a real match into a substitution')
 
-    def test_extra_replacement_words_spread_across_the_whole_replaced_span_not_squeezed_at_one_end(self):
+    def test_extra_true_words_in_a_replace_block_are_left_for_fill_gaps_not_interpolated_blindly(self):
         asr = [{'a': 10.0, 'b': 10.3, 'w': 'aa', 'c': .9}, {'a': 15.0, 'b': 15.3, 'w': 'bb', 'c': .9}]
         true = ['xx', 'yy', 'zz', 'ww']
         entries = lt.match_words(asr, true)
-        times = [e['a'] for e in entries]
-        self.assertTrue(all(t is not None for t in times), 'every word in the replaced block already has a seed time')
-        self.assertEqual(times, sorted(times))
-        self.assertGreaterEqual(times[-1] - times[0], 3.0,
-                                 'the extra words must be spread across the whole replaced span, not squeezed at one end')
+        self.assertEqual(entries[0]['a'], 10.0); self.assertEqual(entries[0]['kind'], 'substituted')
+        self.assertEqual(entries[1]['a'], 15.0); self.assertEqual(entries[1]['kind'], 'substituted')
+        self.assertIsNone(entries[2]['a']); self.assertEqual(entries[2]['kind'], 'inserted')
+        self.assertIsNone(entries[3]['a']); self.assertEqual(entries[3]['kind'], 'inserted')
+
+    def test_leftover_heard_words_in_a_replace_block_are_reported_by_find_leftover_runs(self):
+        # 5 heard words but only 1 true word there: 4 heard words are leftover, a repeat candidate shape
+        asr = [{'a': float(i), 'b': i + .3, 'w': f'h{i}', 'c': .9} for i in range(5)]
+        runs = lt.find_leftover_runs(asr, ['one'])
+        self.assertEqual(runs, [(1, 5, 1)])
 
 
 class RepeatedSectionTests(unittest.TestCase):
@@ -119,6 +124,38 @@ class RepeatedSectionTests(unittest.TestCase):
         asr = [{'a': float(i) * 4, 'b': float(i) * 4 + 3.5, 'w': w, 'c': .9} for i, w in enumerate(words)]
         asr += [{'a': 30 + float(i) * 4, 'b': 30 + float(i) * 4 + 3.5, 'w': w, 'c': .9} for i, w in enumerate(['qq', 'zz', 'pp', 'rr'])]
         self.assertFalse(lt.repeated_insertions(asr, words))
+
+    def test_a_replace_shaped_leftover_is_recovered_not_just_a_pure_delete(self):
+        # the source has one word where the two sections join, so difflib reports a 'replace' (5 heard words for
+        # 1 true word), not a clean 'delete' — the exact shape a chorus written out once but sung twice takes
+        # when the join happens to share a word (the Salt case).
+        words = ['aa', 'bb', 'cc', 'dd']
+        asr = [{'a': float(i) * 4, 'b': float(i) * 4 + 3.5, 'w': w, 'c': .9} for i, w in enumerate(words)]
+        asr += [{'a': 20.0, 'b': 20.3, 'w': 'join', 'c': .9}]   # shares a word with the true text at the seam
+        asr += [{'a': 24 + float(i) * 4, 'b': 24 + float(i) * 4 + 3.5, 'w': w, 'c': .9} for i, w in enumerate(words)]
+        text = words + ['join']
+        insertions = lt.repeated_insertions(asr, text)
+        self.assertTrue(insertions, 'a replace-shaped leftover run must still be recognised as a repeat')
+        pos, tokens = insertions[0]
+        self.assertEqual(tokens, words)
+
+    def test_fuzzy_matching_tolerates_one_missing_word_at_the_seam(self):
+        words = ['aa', 'bb', 'cc', 'dd', 'ee']
+        asr = [{'a': float(i) * 4, 'b': float(i) * 4 + 3.5, 'w': w, 'c': .9} for i, w in enumerate(words)]
+        repeat = words[1:]   # the second time through, the first word of the phrase is missing/inaudible
+        asr += [{'a': 30 + float(i) * 4, 'b': 30 + float(i) * 4 + 3.5, 'w': w, 'c': .9} for i, w in enumerate(repeat)]
+        insertions = lt.repeated_insertions(asr, words)
+        self.assertTrue(insertions, 'a repeat missing one word must still be found')
+
+    def test_multiple_repeats_of_the_same_chorus_are_all_restored(self):
+        words = ['aa', 'bb', 'cc', 'dd']
+        asr = [{'a': float(i) * 4, 'b': float(i) * 4 + 3.5, 'w': w, 'c': .9} for i, w in enumerate(words)]
+        for rep in (1, 2):
+            base = 30 * rep
+            asr += [{'a': base + float(i) * 4, 'b': base + float(i) * 4 + 3.5, 'w': w, 'c': .9} for i, w in enumerate(words)]
+        text, entries, restored = lt.restore_repeats(asr, list(words))
+        self.assertEqual(restored, 2, 'both repeats of the chorus should be restored, not just the first')
+        self.assertEqual(text, words + words + words)
 
 
 class FillGapsTests(unittest.TestCase):
@@ -151,6 +188,41 @@ class FillGapsTests(unittest.TestCase):
         out = lt.fill_gaps(entries, {'regions': [(10.0, 12.0), (108.0, 110.0)], 'duration': 200.0})
         self.assertLessEqual(out[1]['a'], 12.0, 'the inserted word must land in a real sung stretch, not the middle of a 100s silence')
 
+    def test_extra_true_words_from_a_replace_are_spread_across_the_voiced_region_not_squeezed(self):
+        entries = [{'a': 0.0, 'kind': 'matched'}] + [{'a': None, 'kind': 'inserted'} for _ in range(3)] + [{'a': 10.0, 'kind': 'matched'}]
+        out = lt.fill_gaps(entries, {'regions': [(0.0, 10.0)], 'duration': 10.0})
+        times = [e['a'] for e in out[1:-1]]
+        self.assertEqual(times, sorted(times))
+        self.assertGreater(times[-1] - times[0], 3.0, 'they must spread across the voiced span, not squeeze together')
+
+    def test_a_group_with_no_voice_between_its_neighbours_clusters_instead_of_a_straight_line_through_silence(self):
+        entries = [{'a': 0.0, 'kind': 'matched'}] + [{'a': None, 'kind': 'inserted'} for _ in range(3)] + [{'a': 10.0, 'kind': 'matched'}]
+        out = lt.fill_gaps(entries, {'regions': [], 'duration': 10.0})
+        times = [e['a'] for e in out[1:-1]]
+        self.assertLess(times[-1] - times[0], 1.0, 'with no voice at all between the neighbours, cluster tightly rather than spread through silence')
+
+    def test_gap_words_are_never_closer_together_than_the_minimum_spacing(self):
+        entries = [{'a': 0.0, 'kind': 'matched'}] + [{'a': None, 'kind': 'inserted'} for _ in range(6)] + [{'a': 1.0, 'kind': 'matched'}]
+        out = lt.fill_gaps(entries, {'regions': [(0.0, 1.0)], 'duration': 1.0})
+        times = [e['a'] for e in out]
+        gaps = [b - a for a, b in zip(times, times[1:])]
+        self.assertTrue(all(g >= 0 for g in gaps))
+
+
+class SilenceMarginTests(unittest.TestCase):
+    def _ctx(self, voiced_from: float):
+        v = np.zeros(2000, dtype=bool)
+        v[int(voiced_from / al.HOP):] = True
+        return {'voiced': v}
+
+    def test_a_word_on_an_onset_40ms_before_a_voice_region_does_not_count_as_silence(self):
+        ctx = self._ctx(voiced_from=1.0)
+        self.assertTrue(lt.in_voice(1.0 - .04, ctx), 'the early-onset margin must cover a word 40ms before the voice starts')
+
+    def test_a_word_60ms_before_a_voice_region_still_counts_as_silence(self):
+        ctx = self._ctx(voiced_from=1.0)
+        self.assertFalse(lt.in_voice(1.0 - .06, ctx), 'beyond the margin, it really is silence')
+
 
 class TokenizeTests(unittest.TestCase):
     def test_bracketed_annotation_lines_are_dropped(self):
@@ -161,21 +233,29 @@ class TokenizeTests(unittest.TestCase):
         self.assertEqual(lt.tokenize("wug, fep!\nzorp?"), ['wug,', 'fep!', 'zorp?'])
 
 
-class CompletenessIssuesTests(unittest.TestCase):
-    def test_a_long_dropped_run_is_flagged(self):
-        asr = [{'a': float(i), 'b': i + .3, 'w': f'w{i}', 'c': .9} for i in range(6)]
-        entries = [{'src': 0, 'kind': 'matched'}, {'src': 5, 'kind': 'matched'}]
-        self.assertTrue(lt.completeness_issues(asr, entries))
+class GateVerdictTests(unittest.TestCase):
+    def _m(self, uncovered, holes):
+        return {'uncovered_seconds': uncovered, 'silent_holes': holes}
 
-    def test_a_short_dropped_run_is_not_flagged(self):
-        asr = [{'a': float(i), 'b': i + .1, 'w': f'w{i}', 'c': .9} for i in range(3)]
-        entries = [{'src': 0, 'kind': 'matched'}, {'src': 2, 'kind': 'matched'}]
-        self.assertFalse(lt.completeness_issues(asr, entries))
+    def test_low_confidence_always_refuses(self):
+        passed, reason = lt.gate_verdict('low', self._m(0, 0), self._m(0, 0))
+        self.assertFalse(passed); self.assertIn('confidence', reason)
 
-    def test_a_large_tail_gap_is_flagged(self):
-        asr = [{'a': float(i), 'b': i + .3, 'w': f'w{i}', 'c': .9} for i in range(20)]
-        entries = [{'src': 0, 'kind': 'matched'}]
-        self.assertTrue(lt.completeness_issues(asr, entries))
+    def test_nothing_published_yet_always_passes(self):
+        passed, reason = lt.gate_verdict('high', None, self._m(999, 99))
+        self.assertTrue(passed)
+
+    def test_a_small_growth_in_uncovered_singing_passes(self):
+        passed, reason = lt.gate_verdict('high', self._m(10.0, 2), self._m(10.0 + lt.UNCOVERED_TOLERANCE_S - 1, 2))
+        self.assertTrue(passed)
+
+    def test_a_large_growth_in_uncovered_singing_refuses(self):
+        passed, reason = lt.gate_verdict('high', self._m(10.0, 2), self._m(10.0 + lt.UNCOVERED_TOLERANCE_S + 1, 2))
+        self.assertFalse(passed); self.assertIn('uncovered', reason)
+
+    def test_a_new_silent_hole_refuses_even_with_a_small_growth(self):
+        passed, reason = lt.gate_verdict('high', self._m(10.0, 2), self._m(10.1, 3))
+        self.assertFalse(passed); self.assertIn('hole', reason)
 
 
 class ProcessPackageTests(unittest.TestCase):
@@ -196,6 +276,13 @@ class ProcessPackageTests(unittest.TestCase):
         self.assertEqual(r['words_changed'], 1); self.assertEqual(r['words_added'], 1); self.assertEqual(r['words_dropped'], 1)
         self.assertAlmostEqual(r['wer_before'], .6)
 
+    def test_dry_run_still_reports_a_refusal_and_its_reason(self):
+        unrelated = Path(self.directory) / 'unrelated.txt'
+        unrelated.write_text('qzk vroom nbly wexil ptang jorf mmk zzq vworp klor', encoding='utf-8')
+        r = lt.process_package(self.pkg, str(unrelated), write=False)
+        self.assertIn('skipped', r, 'a dry run must show that a write would be refused, and why')
+        self.assertIn('confidence', r['skipped'])
+
     def test_writing_replaces_only_lyrics_and_lyrics_source(self):
         r = lt.process_package(self.pkg, str(self.text_file), write=True, rebuild=False)
         after = json.loads((self.pkg / 'target.json').read_text(encoding='utf-8'))
@@ -205,6 +292,7 @@ class ProcessPackageTests(unittest.TestCase):
         self.assertIn('corrected to published lyrics', after['lyricsSource'])
         self.assertIn('mix', after['lyricsSource'], 'the transcript actually used should be named in the note')
         self.assertEqual(r['confidence'], 'medium')
+        self.assertNotIn('skipped', r)
 
     def test_word_order_and_text_are_exactly_the_true_lyrics(self):
         lt.process_package(self.pkg, str(self.text_file), write=True, rebuild=False)
@@ -247,6 +335,25 @@ class ProcessPackageTests(unittest.TestCase):
         finally:
             lt.fetch_lyrics = original
 
+    def test_a_rejected_fetched_source_is_never_cached(self):
+        original = lt.fetch_lyrics
+        def fake_fetch(title, artist):
+            return 'qzk vroom nbly wexil ptang jorf mmk zzq vworp klor'   # shares nothing with the ASR transcript
+        lt.fetch_lyrics = fake_fetch
+        try:
+            r = lt.process_package(self.pkg, None, write=True, rebuild=False)
+            self.assertEqual(r['confidence'], 'low')
+            self.assertIn('skipped', r)
+            self.assertFalse((self.pkg / 'lyrics' / 'source.txt').exists(), 'a rejected fetched source must not be cached')
+            self.assertFalse((self.pkg / 'lyrics' / 'source.meta.json').exists())
+        finally:
+            lt.fetch_lyrics = original
+
+    def test_a_text_supplied_source_is_cached_once_it_passes_and_writes(self):
+        lt.process_package(self.pkg, str(self.text_file), write=True, rebuild=False)
+        self.assertTrue((self.pkg / 'lyrics' / 'source.txt').exists(), '--text sources must be cached too, once they write')
+        self.assertEqual((self.pkg / 'lyrics' / 'source.txt').read_text(encoding='utf-8'), ' '.join(TRUE_TOKENS))
+
     def test_a_changed_manifest_title_invalidates_the_cache(self):
         original = lt.fetch_lyrics
         calls = []
@@ -273,11 +380,18 @@ class ProcessPackageTests(unittest.TestCase):
         self.assertEqual((self.pkg / 'target.json').read_text(encoding='utf-8'), json.dumps(self.before, ensure_ascii=False))
         self.assertFalse((self.pkg / 'lyrics' / 'source.txt').exists(), 'a rejected source must not be cached')
 
+    def test_a_small_leftover_run_from_a_replace_does_not_trip_the_gate(self):
+        # 3 heard words become 2 published words: 1 leftover heard word, far below MIN_REPEAT_WORDS and
+        # negligible sung time — must not read as a missing section.
+        text_file = Path(self.directory) / 'small.txt'
+        text_file.write_text('flim dax shuzzle', encoding='utf-8')   # drops 'borp' and merges oops into nothing
+        r = lt.process_package(self.pkg, str(text_file), write=True, rebuild=False)
+        self.assertNotIn('skipped', r)
+
     def test_the_report_carries_the_metrics_the_operator_needs(self):
         r = lt.process_package(self.pkg, str(self.text_file), write=False)
-        for key in ('words_changed', 'words_added', 'words_dropped', 'wer_before',
-                    'median_shift_changed_s', 'confidence', 'agreement_pct',
-                    'words_inserted_off_onset', 'words_inserted_in_silence', 'repeated_sections_recovered'):
+        for key in ('words_changed', 'words_added', 'words_dropped', 'wer_before', 'median_shift_changed_s',
+                    'confidence', 'agreement_pct', 'placement_problems', 'repeated_sections_recovered'):
             self.assertIn(key, r)
 
     def test_rebuild_writes_the_trainer_html(self):
@@ -288,6 +402,32 @@ class ProcessPackageTests(unittest.TestCase):
         html_path = Path(r['html'])
         self.assertTrue(html_path.exists())
         self.assertGreater(html_path.stat().st_size, 1000)
+
+
+class ReplaceShapedRepeatIntegrationTests(unittest.TestCase):
+    """A chorus written once but sung twice, with one shared word at the seam so difflib reports the leftover as a
+    'replace' rather than a clean 'delete' — restored end to end through process_package (round 2, finding 1)."""
+
+    def setUp(self):
+        self.directory = tempfile.mkdtemp(prefix='luma-lyrics-repeat-')
+        # burst[0..3]: first chorus (flim/dax/wug/zant); burst 4: the seam word 'join'; burst[5..8]: the repeat
+        self.repeat_bursts = [(.5, .9), (1.4, 1.8), (2.3, 2.7), (3.2, 3.6), (4.1, 4.5),
+                               (5.4, 5.8), (6.3, 6.7), (7.2, 7.6), (8.1, 8.5)]
+        heard = ['flim', 'dax', 'wug', 'zant', 'join', 'flim', 'dax', 'wug', 'zant']
+        self.pkg = synthetic_package(Path(self.directory), name='Repeat', bursts=self.repeat_bursts, asr_words=heard,
+                                      duration=9.0)
+        self.text_file = Path(self.directory) / 'lyrics.txt'
+        self.text_file.write_text('flim dax wug zant join', encoding='utf-8')   # the repeat is only written once
+
+    def tearDown(self):
+        shutil.rmtree(self.directory, ignore_errors=True)
+
+    def test_the_repeat_is_restored_through_process_package(self):
+        r = lt.process_package(self.pkg, str(self.text_file), write=True, rebuild=False)
+        self.assertGreaterEqual(r['repeated_sections_recovered'], 1)
+        after = json.loads((self.pkg / 'target.json').read_text(encoding='utf-8'))
+        words = [w['w'] for w in al.flat(after['lyrics'])]
+        self.assertEqual(words, ['flim', 'dax', 'wug', 'zant', 'join', 'flim', 'dax', 'wug', 'zant'])
 
 
 class SourcePreferenceTests(unittest.TestCase):
@@ -332,25 +472,36 @@ class SourcePreferenceTests(unittest.TestCase):
         self.assertEqual(r['asr_source'], 'vocal')
 
 
-class CompletenessGateTests(unittest.TestCase):
+class PlacementGateTests(unittest.TestCase):
+    def test_an_off_voice_inserted_word_blocks(self):
+        v = np.zeros(1000, dtype=bool)   # nothing is voiced anywhere: any inserted word lands off the voice
+        blocking, info = lt.placement_problems([{'kind': 'inserted', 'src': None}], [{'a': 5.0}], {'voiced': v})
+        self.assertTrue(blocking)
+        blocking, info = lt.placement_problems([{'kind': 'matched', 'src': 0}], [{'a': 5.0}], {'voiced': v})
+        self.assertFalse(blocking, 'a matched word, anchored to a real ASR time, is never judged by the voice check')
+
+    def test_tight_spacing_alone_is_informational_not_blocking(self):
+        v = np.ones(1000, dtype=bool)
+        entries = [{'kind': 'inserted', 'src': None}, {'kind': 'inserted', 'src': None}]
+        words = [{'a': 5.0}, {'a': 5.01}]   # well inside the voice, but far closer than MIN_WORD_SPACING_S
+        blocking, info = lt.placement_problems(entries, words, {'voiced': v})
+        self.assertFalse(blocking, 'tight spacing forced by a crowded sung stretch must not refuse a correction that is otherwise safe')
+        self.assertTrue(info)
+
+
+class HarmGateTests(unittest.TestCase):
     def setUp(self):
-        self.directory = tempfile.mkdtemp(prefix='luma-lyrics-complete-')
+        self.directory = tempfile.mkdtemp(prefix='luma-lyrics-harm-')
         self.pkg = synthetic_package(Path(self.directory))
         self.before = json.loads((self.pkg / 'target.json').read_text(encoding='utf-8'))
 
     def tearDown(self):
         shutil.rmtree(self.directory, ignore_errors=True)
 
-    def test_a_source_missing_a_long_middle_run_is_left_untouched(self):
-        source = Path(self.directory) / 'partial.txt'; source.write_text('flim shuzzle', encoding='utf-8')
-        r = lt.process_package(self.pkg, str(source), write=True, rebuild=False)
-        self.assertEqual(r['confidence'], 'medium', 'the refusal here must come from the completeness check, not low confidence')
-        self.assertIn('skipped', r)
-        self.assertEqual((self.pkg / 'target.json').read_text(encoding='utf-8'), json.dumps(self.before, ensure_ascii=False))
-
-    def test_force_overrides_the_completeness_refusal(self):
-        source = Path(self.directory) / 'partial.txt'; source.write_text('flim shuzzle', encoding='utf-8')
-        r = lt.process_package(self.pkg, str(source), write=True, rebuild=False, force=True)
+    def test_force_writes_through_a_refusal(self):
+        unrelated = Path(self.directory) / 'unrelated.txt'
+        unrelated.write_text('qzk vroom nbly wexil ptang jorf mmk zzq vworp klor', encoding='utf-8')
+        r = lt.process_package(self.pkg, str(unrelated), write=True, rebuild=False, force=True)
         self.assertNotIn('skipped', r)
         after = json.loads((self.pkg / 'target.json').read_text(encoding='utf-8'))
         self.assertNotEqual(after['lyrics'], self.before['lyrics'])
@@ -406,6 +557,41 @@ class GuardTests(unittest.TestCase):
         after = json.loads(json.dumps(shared))
         with self.assertRaises(SystemExit):
             lt.verify_guard(self.pkg, before, after, {}, {})
+
+    def test_the_tmp_file_is_removed_when_the_guard_trips(self):
+        pkg = synthetic_package(Path(tempfile.mkdtemp(prefix='luma-lyrics-guard3-')))
+        text_file = pkg.parent / 'lyrics.txt'; text_file.write_text(' '.join(TRUE_TOKENS), encoding='utf-8')
+        original_context = al.context
+        def mutating_context(p, song):
+            song['notes'][0]['a'] = 999.0
+            return original_context(p, song)
+        al.context = mutating_context
+        try:
+            with self.assertRaises(SystemExit):
+                lt.process_package(pkg, str(text_file), write=True, rebuild=False)
+            self.assertFalse((pkg / 'target.json.tmp').exists(), 'a tripped guard must not leave target.json.tmp behind')
+        finally:
+            al.context = original_context
+            shutil.rmtree(pkg.parent, ignore_errors=True)
+
+    def test_target_json_is_unchanged_when_the_guard_trips(self):
+        """The write goes to a temp file and is only compared and renamed after — never written in place and
+        compared afterwards, which could leave a half-applied target.json behind a trip."""
+        pkg = synthetic_package(Path(tempfile.mkdtemp(prefix='luma-lyrics-guard4-')))
+        before = (pkg / 'target.json').read_text(encoding='utf-8')
+        text_file = pkg.parent / 'lyrics.txt'; text_file.write_text(' '.join(TRUE_TOKENS), encoding='utf-8')
+        original_context = al.context
+        def mutating_context(p, song):
+            song['notes'][0]['a'] = 999.0
+            return original_context(p, song)
+        al.context = mutating_context
+        try:
+            with self.assertRaises(SystemExit):
+                lt.process_package(pkg, str(text_file), write=True, rebuild=False)
+            self.assertEqual((pkg / 'target.json').read_text(encoding='utf-8'), before)
+        finally:
+            al.context = original_context
+            shutil.rmtree(pkg.parent, ignore_errors=True)
 
     def test_the_audio_fingerprint_covers_the_files_present(self):
         fp = lt.audio_fingerprint(self.pkg)
