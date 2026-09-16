@@ -205,8 +205,9 @@ class RepeatedSectionTests(unittest.TestCase):
 class FillGapsTests(unittest.TestCase):
     def test_fits_spacing_boundary_is_inclusive(self):
         # exactly (count+1)*spacing of voice must count as fitting — the same boundary the evenly-spread
-        # proportional list itself reaches exactly (see _spread_targets); an off-by-one here (> instead of >=)
-        # would call this window infeasible and trigger widening it never needs.
+        # proportional list itself reaches exactly (see _spread_targets). This catches a missing or flipped
+        # tolerance, or the wrong count in the comparison; it does not catch >= becoming > on its own, since the
+        # tolerance already subtracted from the right side makes that swap a no-op for any input that matters.
         self.assertTrue(lt._fits_spacing(0.7, 6, lt.CROWD_RUN_GAP_S))
         self.assertFalse(lt._fits_spacing(0.7 - 1e-6, 6, lt.CROWD_RUN_GAP_S))
 
@@ -293,13 +294,17 @@ class FillGapsTests(unittest.TestCase):
         # the near matched word here sits at 5.0, away from the window's own start (unlike a neighbour pinned at
         # t=0, which has no room to move and so can't tell absorption apart from correct behaviour): if widening's
         # boundary search ever included it in the movable span by one entry too many, the forward-spacing cascade
-        # that legitimately nudges 'sub' would visibly carry 'near' away from 5.0 too.
+        # that legitimately nudges 'sub' would visibly carry 'near' away from 5.0 too. The far neighbour is close
+        # enough (5.45, not 5.5) that an absorbed window has too little voice for either spacing tier to leave
+        # 'near' unmoved: with 5.5 both tiers had enough room to leave it exactly where it was heard, and the
+        # unmoved-anchor override (round 7) then wrote the absorbed word straight back to its own time, making
+        # the absorption invisible here (round 8, finding 2).
         entries = ([{'a': 5.0, 'kind': 'matched', 'w': 'near'}] +
                    [{'a': None, 'kind': 'inserted', 'w': f'i{k}'} for k in range(3)] +
-                   [{'a': 5.05, 'kind': 'substituted', 'w': 'sub'}, {'a': 5.5, 'kind': 'matched', 'w': 'far'}])
+                   [{'a': 5.05, 'kind': 'substituted', 'w': 'sub'}, {'a': 5.45, 'kind': 'matched', 'w': 'far'}])
         out = lt.fill_gaps([dict(e) for e in entries], {'regions': [(0.0, 100.0)], 'duration': 101.0})
         self.assertEqual(out[0]['a'], 5.0, "widening must never move the matched word on the near side")
-        self.assertEqual(out[-1]['a'], 5.5, "widening must never move the matched word on the far side")
+        self.assertEqual(out[-1]['a'], 5.45, "widening must never move the matched word on the far side")
         self.assertEqual([e['w'] for e in out], [e['w'] for e in entries], 'word order must survive widening')
 
     def test_widening_never_moves_a_matched_word_even_under_crowding_pressure(self):
