@@ -2,7 +2,7 @@
 """Turn one audio file into a standalone Luma trainer, entirely on this machine:
 
   FFmpeg decode -> official HTDemucs (fine-tuned) vocal separation -> pYIN + CREPE pitch on the vocal stem
-  -> note map (draft, unverified) -> 1.0x / 0.8x stems -> optional word timings (Soniox API on the vocal stem, then
+  -> note map (draft, unverified) -> 44.1 kHz 1.0x / 0.8x stems -> optional word timings (Soniox API on the vocal stem, then
   snapped to the voice offline) -> single HTML file.
 
 Usage:
@@ -12,13 +12,14 @@ The only network traffic is the one-time Demucs weight download and, if enabled,
 (set SONIOX_API_KEY or put the key in ~/.config/luma/soniox-api-key; otherwise lyrics are skipped).
 """
 from __future__ import annotations
-import argparse, hashlib, json, os, platform, subprocess, sys, time, uuid, urllib.request, urllib.error
+import argparse, hashlib, json, os, platform, shutil, subprocess, sys, time, uuid, urllib.request, urllib.error
 from pathlib import Path
 import numpy as np, soundfile as sf, librosa, scipy.ndimage as ndi
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'studio'))
 from build_html import build as build_html
+import stems
 from align_lyrics import context as align_context, realign, save_transcript, aligned_note
 
 def sha256(p: Path) -> str:
@@ -144,6 +145,23 @@ def build_map(ct, f0, pd, P, mix22, duration, title, artist, method):
     song['id'] = hashlib.sha256((title + artist + str(duration) + method).encode()).hexdigest()[:20]
     return song
 
+# ---------------------------------------------------------------- separation
+def separate(x: np.ndarray, model_name: str = 'htdemucs_ft', device: str = 'auto') -> tuple[np.ndarray, dict]:
+    """Official Demucs on a 44.1 kHz stereo float mix: the vocal stem at the same rate and length, and a record of the run."""
+    t1 = time.time()
+    import torch
+    from demucs.pretrained import get_model
+    from demucs.apply import apply_model
+    device = ('cuda' if torch.cuda.is_available() else 'cpu') if device == 'auto' else device
+    os.environ['TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD'] = '1'  # official Demucs zoo archives only; never point this at untrusted checkpoints
+    try: model = get_model(model_name).eval()
+    finally: os.environ.pop('TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD', None)
+    wav = torch.from_numpy(x.T.copy()); ref = wav.mean(0); mu = ref.mean(); std = ref.std()
+    if float(std) < 1e-8: raise SystemExit('input audio is silent')
+    with torch.inference_mode(): pred = apply_model(model, ((wav - mu) / std)[None], device=device, shifts=1, split=True, overlap=.25, progress=False, num_workers=0)[0]
+    vocal = (pred[model.sources.index('vocals')].cpu() * std + mu).T.numpy()
+    return vocal, {'model': model_name, 'device': device, 'gpu': torch.cuda.get_device_name(0) if device == 'cuda' else None, 'max_vram_mib': round(torch.cuda.max_memory_allocated() / 2**20) if device == 'cuda' else None, 'seconds': round(time.time() - t1, 1), 'torch': torch.__version__}
+
 # ---------------------------------------------------------------- main
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -161,25 +179,20 @@ def main():
     log('[1/8] decode'); ffmpeg('-i', src, '-vn', '-ar', '44100', '-ac', '2', '-c:a', 'pcm_f32le', work / 'mix.wav')
     x, sr = sf.read(work / 'mix.wav', dtype='float32', always_2d=True); duration = len(x) / sr; manifest['duration'] = duration
     if not 1 <= duration <= 600: raise SystemExit('songs must be between 1 and 600 seconds')
+    original = pkg / ('original' + (src.suffix.lower() or '.audio'))  # the upload itself, for later audio upgrades
+    for old in pkg.glob('original.*'):
+        if old not in (original, src): old.unlink()
+    if src != original: shutil.copyfile(src, original)
+    manifest['original'] = original.name
 
-    log('[2/8] separation', a.model); t1 = time.time()
-    import torch
-    from demucs.pretrained import get_model
-    from demucs.apply import apply_model
-    device = ('cuda' if torch.cuda.is_available() else 'cpu') if a.device == 'auto' else a.device
-    os.environ['TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD'] = '1'  # official Demucs zoo archives only; never point this at untrusted checkpoints
-    try: model = get_model(a.model).eval()
-    finally: os.environ.pop('TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD', None)
-    wav = torch.from_numpy(x.T.copy()); ref = wav.mean(0); mu = ref.mean(); std = ref.std()
-    if float(std) < 1e-8: raise SystemExit('input audio is silent')
-    with torch.inference_mode(): pred = apply_model(model, ((wav - mu) / std)[None], device=device, shifts=1, split=True, overlap=.25, progress=False, num_workers=0)[0]
-    pred = pred.cpu() * std + mu; vocal = pred[model.sources.index('vocals')].T.numpy(); back = x - vocal
-    manifest['steps']['separation'] = {'model': a.model, 'device': device, 'gpu': torch.cuda.get_device_name(0) if device == 'cuda' else None, 'max_vram_mib': round(torch.cuda.max_memory_allocated() / 2**20) if device == 'cuda' else None, 'seconds': round(time.time() - t1, 1), 'torch': torch.__version__}
-    del model, pred, wav
+    log('[2/8] separation', a.model)
+    vocal, manifest['steps']['separation'] = separate(x, a.model, a.device); device = manifest['steps']['separation']['device']; back = x - vocal
     sf.write(work / 'vocals44.wav', vocal, sr, subtype='FLOAT')
-    peak = max(float(np.max(abs(vocal))), float(np.max(abs(back))), 1); gain = min(1, .97 / peak)  # joint scaling keeps the stem balance
+    gain = stems.joint_gain(vocal, back)  # joint scaling keeps the stem balance
+    # pitch analysis and transcription read this 22 kHz copy; playback is built from the full-rate stems next to it
     sf.write(work / 'vocal22.wav', librosa.resample(vocal.T, orig_sr=sr, target_sr=22050).T * gain, 22050, subtype='FLOAT')
-    sf.write(work / 'back22.wav', librosa.resample(back.T, orig_sr=sr, target_sr=22050).T * gain, 22050, subtype='FLOAT')
+    sf.write(work / 'foreground.wav', vocal * gain, sr, subtype='FLOAT'); sf.write(work / 'backing.wav', back * gain, sr, subtype='FLOAT')
+    del back
     ffmpeg('-i', work / 'mix.wav', '-ar', '22050', '-c:a', 'pcm_f32le', work / 'mix22.wav')
 
     log('[3/8] pYIN'); t2 = time.time()
@@ -193,7 +206,7 @@ def main():
     P = np.array(rows); manifest['steps']['pyin_s'] = round(time.time() - t2, 1)
 
     log('[4/8] CREPE'); t3 = time.time()
-    import torchcrepe
+    import torch, torchcrepe
     y16 = librosa.resample(vocal.mean(1), orig_sr=sr, target_sr=16000)
     f0, pd = torchcrepe.predict(torch.from_numpy(y16)[None], 16000, hop_length=160, fmin=50, fmax=1500, model='full', batch_size=1024, device=device, return_periodicity=True, decoder=torchcrepe.decode.viterbi)
     pd = torchcrepe.filter.median(pd, 3); f0 = torchcrepe.filter.mean(f0, 3); f0 = f0[0].cpu().numpy(); pd = pd[0].cpu().numpy(); ct = np.arange(len(f0)) * 160 / 16000
@@ -205,9 +218,7 @@ def main():
     manifest['map'] = {'id': song['id'], 'metrics': song['metrics'], 'notes': len(song['notes']), 'ok_notes': sum(n['ok'] for n in song['notes'])}
 
     log('[6/8] stems'); t4 = time.time()
-    for role, source in [('foreground', work / 'vocal22.wav'), ('backing', work / 'back22.wav')]:
-        for speed, suffix in [(1, ''), (.8, '_80')]:
-            ffmpeg('-i', source, '-af', f'atempo={speed},apad,atrim=duration={duration/speed:.9f}', '-c:a', 'libmp3lame', '-b:a', '128k', '-write_xing', '1', pkg / (role + suffix + '.mp3'))
+    manifest['audio'] = {**stems.encode({'foreground': work / 'foreground.wav', 'backing': work / 'backing.wav'}, duration, pkg), 'source': 'demucs', 'gain': round(gain, 6)}
     ffmpeg('-i', work / 'vocals44.wav', '-c:a', 'flac', pkg / 'vocals_44k.flac')
     manifest['steps']['encode_s'] = round(time.time() - t4, 1)
 
@@ -234,7 +245,7 @@ def main():
     manifest['html'] = {'path': str(out_html), 'bytes': out_html.stat().st_size, 'sha256': sha256(out_html)}
     manifest['finished'] = time.strftime('%Y-%m-%dT%H:%M:%S%z'); manifest['total_s'] = round(time.time() - T0, 1)
     (pkg / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=1), encoding='utf-8')
-    for f in ['mix.wav', 'vocals44.wav', 'vocal22.wav', 'back22.wav', 'mix22.wav', 'lyrics_mono.mp3']:
+    for f in ['mix.wav', 'vocals44.wav', 'vocal22.wav', 'foreground.wav', 'backing.wav', 'mix22.wav', 'lyrics_mono.mp3']:
         (work / f).unlink(missing_ok=True)
     log('DONE', json.dumps({'html': str(out_html), 'map': manifest['map'], 'lyrics': manifest['steps']['lyrics'], 'total_s': manifest['total_s']}, ensure_ascii=False))
 

@@ -3,11 +3,12 @@
 The "vocal" is a sung-like tone (harmonics + vibrato) following an original 16-bar melody; the backing is a soft pad.
 Word timings are syllables, so the lyric lane and the scoring can be exercised in tests and screenshots."""
 from __future__ import annotations
-import json, hashlib, subprocess, sys
+import json, hashlib, sys
 from pathlib import Path
 import numpy as np, soundfile as sf
 ROOT = Path(__file__).resolve().parent.parent; sys.path.insert(0, str(ROOT / 'studio'))
 from build_html import build
+import stems
 OUT = ROOT / 'examples' / 'demo'; PKG = OUT / 'Demo'; PKG.mkdir(parents=True, exist_ok=True)
 SR = 22050; BPM = 96; beat = 60 / BPM
 # (midi, beats) — an original melody in A minor; None = rest
@@ -39,10 +40,7 @@ for bar in range(int(np.ceil((duration - lead) / (4 * beat)))):
         j = int((a0 + k * beat) * SR)
         if j + 400 <= n: back[j:j + 400] += np.exp(-np.arange(400) / 80) * .12 * (1.0 if k == 0 else .6)
 sf.write(PKG / 'vocal22.wav', np.stack([voc, voc], 1).astype('float32'), SR); sf.write(PKG / 'back22.wav', np.stack([back, back], 1).astype('float32'), SR)
-def ffmpeg(*a): subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', *map(str, a)], check=True)
-for role, src in [('foreground', 'vocal22.wav'), ('backing', 'back22.wav')]:
-    for speed, suffix in [(1, ''), (.8, '_80')]:
-        ffmpeg('-i', PKG / src, '-af', f'atempo={speed},apad,atrim=duration={duration/speed:.9f}', '-c:a', 'libmp3lame', '-b:a', '96k', '-write_xing', '1', PKG / f'{role}{suffix}.mp3')
+stems.encode({'foreground': PKG / 'vocal22.wav', 'backing': PKG / 'back22.wav'}, duration, PKG)  # the pipeline's own 44.1 kHz stems
 hop = .02; ts = np.arange(0, duration, hop); points = []
 for tt in ts:
     nt = next((x for x in notes if x['a'] <= tt < x['b']), None); points.append([round(float(tt), 3), nt['m'] if nt else None, .95 if nt else 0, 1 if nt else 0])
