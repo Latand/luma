@@ -294,11 +294,12 @@ class FillGapsTests(unittest.TestCase):
         # the near matched word here sits at 5.0, away from the window's own start (unlike a neighbour pinned at
         # t=0, which has no room to move and so can't tell absorption apart from correct behaviour): if widening's
         # boundary search ever included it in the movable span by one entry too many, the forward-spacing cascade
-        # that legitimately nudges 'sub' would visibly carry 'near' away from 5.0 too. The far neighbour is close
-        # enough (5.45, not 5.5) that an absorbed window has too little voice for either spacing tier to leave
-        # 'near' unmoved: with 5.5 both tiers had enough room to leave it exactly where it was heard, and the
-        # unmoved-anchor override (round 7) then wrote the absorbed word straight back to its own time, making
-        # the absorption invisible here (round 8, finding 2).
+        # that legitimately nudges 'sub' would visibly carry 'near' away from 5.0 too. With the far neighbour at
+        # 5.5 (as this fixture used to read), an absorbed window still passed: at 0.18s 'near' moves to 4.60, a
+        # 0.40s anchor shift, but at 0.1s 'near' stays exactly at 5.0 while 'sub' moves 0.35s — the smaller shift,
+        # so 0.1s wins and the absorption goes unnoticed. Moving the far neighbour to 5.45 removes that escape:
+        # now 0.1s moves 'near' to 4.95 and 0.18s moves it to 4.55, so whichever spacing the widened window
+        # picks, 'near' visibly moves.
         entries = ([{'a': 5.0, 'kind': 'matched', 'w': 'near'}] +
                    [{'a': None, 'kind': 'inserted', 'w': f'i{k}'} for k in range(3)] +
                    [{'a': 5.05, 'kind': 'substituted', 'w': 'sub'}, {'a': 5.45, 'kind': 'matched', 'w': 'far'}])

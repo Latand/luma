@@ -365,11 +365,11 @@ def _anchored_spread(entries: list[dict], lo: int, hi: int, prev_t: float, next_
     """entries[lo:hi] mapped to real time, spaced at least MIN_WORD_SPACING_S apart in the voice-time budget where
     that moves 'substituted' anchors no further than CROWD_RUN_GAP_S would, falling back to CROWD_RUN_GAP_S
     otherwise (holding both edges occupied at either spacing can force a widened window's anchors to move even
-    though 0.1s of room would have moved them less — this compares the two and keeps whichever moves them least,
-    checking MIN_WORD_SPACING_S first so an exact tie keeps it. No widened window checked so far ties on anchor
-    movement without the two also giving identical inserted-word placements — the same forward/backward
-    legalizing that pins an anchor the same way at either spacing tends to pin everything around it the same way
-    too — so this tie-break has not been seen to change a real result, only to pick a deterministic order) —
+    though 0.1s of room would have moved them less — this compares the two and keeps whichever moves them least;
+    an exact float tie keeps MIN_WORD_SPACING_S, since it is checked first, but movement equal only at the
+    millisecond precision 'a' is actually stored at is common, and which of the two wins that case is decided by
+    float noise far below that precision — the two do not, in general, place the rest of the entries the same
+    way) —
     starting from each 'substituted' entry's own voice-time position (see _to_virtual) as a fixed anchor, with
     'inserted' entries interpolated between anchors (see _interpolate_anchors), rather than a blind proportional
     spread that throws every heard time away and can carry a substituted entry far from where it was actually
