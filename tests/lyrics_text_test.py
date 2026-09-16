@@ -262,6 +262,39 @@ class FillGapsTests(unittest.TestCase):
         gaps = [b - a for a, b in zip(times, times[1:])]
         self.assertTrue(all(g >= 0 for g in gaps))
 
+    def test_widening_keeps_substituted_words_anchored_near_their_heard_time_not_respread_from_scratch(self):
+        # the reviewer's round-4-followup failure case (finding 1): continuous voice 0.5-31s; 3 substituted words
+        # heard close together at 1.0/1.5/2.0s, 3 inserted words with no heard time at all, a 4th substituted word
+        # heard at 2.1s, and the first matched word all the way out at 30s. The old, purely-proportional widened
+        # respread scattered the heard words across the full 30s window (up to ~24s from where they were heard);
+        # anchored spread must leave the close-together ones alone and move the crowd-adjacent one only a little.
+        entries = [
+            {'a': 1.0, 'kind': 'substituted', 'w': 'sub1'}, {'a': 1.5, 'kind': 'substituted', 'w': 'sub2'},
+            {'a': 2.0, 'kind': 'substituted', 'w': 'sub3'}, {'a': None, 'kind': 'inserted', 'w': 'i1'},
+            {'a': None, 'kind': 'inserted', 'w': 'i2'}, {'a': None, 'kind': 'inserted', 'w': 'i3'},
+            {'a': 2.1, 'kind': 'substituted', 'w': 'sub4'}, {'a': 30.0, 'kind': 'matched', 'w': 'm1'},
+        ]
+        heard = {e['w']: e['a'] for e in entries if e['kind'] == 'substituted'}
+        out = lt.fill_gaps([dict(e) for e in entries], {'regions': [(0.5, 31.0)], 'duration': 32.0})
+        shifts = {e['w']: abs(e['a'] - heard[e['w']]) for e in out if e['kind'] == 'substituted'}
+        self.assertTrue(all(s <= lt.MAX_SUBSTITUTED_SHIFT_S for s in shifts.values()), shifts)
+        times = [e['a'] for e in out]
+        self.assertEqual(times, sorted(times), 'word order must survive the widened spread')
+        self.assertEqual(out[-1]['a'], 30.0, "widening must never move the matched word it widened up to")
+
+    def test_widening_never_moves_a_matched_word_even_under_crowding_pressure(self):
+        # the immediate window ('sub' to 'far') can't fit 3 inserted words, so fill_gaps widens on the right past
+        # 'sub' (substituted) — but must stop there. A boundary bug that widens one entry too far, absorbing
+        # 'far' (matched) into the movable span too, lets the forward spacing cascade push it off its heard time,
+        # the way it pushes 'sub'.
+        entries = ([{'a': 0.0, 'kind': 'matched', 'w': 'dax'}] +
+                   [{'a': None, 'kind': 'inserted', 'w': f'i{k}'} for k in range(3)] +
+                   [{'a': 0.05, 'kind': 'substituted', 'w': 'sub'}, {'a': 0.5, 'kind': 'matched', 'w': 'far'}])
+        out = lt.fill_gaps([dict(e) for e in entries], {'regions': [(0.0, 100.0)], 'duration': 101.0})
+        self.assertEqual(out[0]['a'], 0.0, "widening must never move the matched word on the near side")
+        self.assertEqual(out[-1]['a'], 0.5, "widening must never move the matched word on the far side")
+        self.assertEqual([e['w'] for e in out], [e['w'] for e in entries], 'word order must survive widening')
+
 
 class SilenceMarginTests(unittest.TestCase):
     def _ctx(self, voiced_from: float):
@@ -680,12 +713,13 @@ class HarmGateTests(unittest.TestCase):
         finally:
             shutil.rmtree(directory, ignore_errors=True)
 
-    def test_a_run_that_cannot_fit_its_immediate_window_is_spread_by_widening_past_a_substituted_neighbour(self):
+    def test_widening_reaches_a_far_matched_word_but_never_moves_it_and_keeps_word_order(self):
         # 4 inserted words plus one substituted word ('subw', misheard as 'heardS') have almost no sung time in
         # their immediate window (between the substituted word and the next matched word, 'trask') — that alone
-        # cannot fit even CROWD_RUN_GAP_S. But 'dax', the matched word just before the substituted one, holds a
-        # full second of continuous singing that the substituted word can move into, since only a matched word's
-        # time is off limits: widened all the way back to 'dax', the run fits without a single blocking reason.
+        # cannot fit even CROWD_RUN_GAP_S, so fill_gaps widens all the way back to 'dax'. The only sung voice in
+        # that wider span sits in two small slivers with real silence between, so the anchored spread correctly
+        # refuses rather than scatter the 4 inserted words into that silence — but 'dax' and 'trask', the matched
+        # words the widening reached for, must come out exactly as heard, in the same order (finding 2).
         directory = Path(tempfile.mkdtemp(prefix='luma-lyrics-widen-'))
         bursts = [(.5, .9), (2.0, 2.4), (3.50, 4.50), (4.6, 4.7), (6.0, 6.4)]
         asr_words = ['flim', 'borp', 'dax', 'heardS', 'trask']
@@ -693,10 +727,68 @@ class HarmGateTests(unittest.TestCase):
         text_file = directory / 'widen.txt'
         text_file.write_text('flim dax subw nix vop tez rull trask', encoding='utf-8')
         try:
+            song = json.loads((pkg / 'target.json').read_text(encoding='utf-8'))
+            ctx = al.context(pkg, song)
+            asr_lines, asr_src = lt.resolve_transcript(pkg, song, 'auto')
+            asr_words_flat = al.flat(asr_lines)
+            raw_text = text_file.read_text(encoding='utf-8')
+            c = lt.build_correction(pkg, song, asr_words_flat, ctx, raw_text, asr_src)
+            for e in c['entries']:
+                if e['kind'] == 'matched':
+                    self.assertEqual(e['a'], asr_words_flat[e['src']]['a'],
+                                      "widening must never move a matched entry's seed off its heard start")
+            self.assertEqual([e['w'] for e in c['entries']], lt.tokenize(raw_text), 'word order must survive widening')
+            self.assertTrue(c['reason'] and c['reason'].startswith('placement:'),
+                             'with only two small, disconnected slivers of voice in the widened window, this must refuse on placement, not write words into silence')
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
+
+    def test_a_substituted_word_well_away_from_the_crowd_keeps_its_heard_seed_through_process_package(self):
+        # 'sfar', 'sfiller' and 'snear' are heard close together right after 'dax'; between 'snear' and the far
+        # matched word 'trask' there is almost no sung time at all for the 2 inserted words that follow, so
+        # fill_gaps widens all the way back past all three substituted words to 'dax'. 'sfar' sits 3 words from
+        # the crowd (sfiller, snear, then the 2 inserted words) — a purely proportional respread over the whole
+        # widened window (round 4's bug) would have carried it seconds from where it was actually heard, since
+        # most of that window's sung time is one long early stretch, not where 'sfar' actually sits.
+        directory = Path(tempfile.mkdtemp(prefix='luma-lyrics-farsub-'))
+        bursts = [(.5, .9), (2.0, 2.4), (3.50, 3.54), (3.60, 6.60), (6.70, 6.75), (6.85, 6.90), (7.00, 7.65),
+                  (8.0, 8.4)]
+        asr_words = ['flim', 'borp', 'dax', 'bigp', 'h1', 'h2', 'h3', 'trask']
+        pkg = synthetic_package(directory, bursts=bursts, asr_words=asr_words, duration=10.0)
+        for path, key in ((pkg / 'target.json', 'lyrics'), (pkg / 'lyrics' / 'mix.json', 'lines')):
+            data = json.loads(path.read_text(encoding='utf-8'))
+            for line in data[key]: line['words'] = [w for w in line['words'] if w['w'] != 'bigp']
+            path.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+        text_file = directory / 'farsub.txt'
+        text_file.write_text('flim dax sfar sfiller snear i1 i2 trask', encoding='utf-8')
+        try:
+            r = lt.process_package(pkg, str(text_file), write=False, rebuild=False)
+            self.assertLessEqual(r['max_shift_changed_s'], lt.MAX_SUBSTITUTED_SHIFT_S,
+                                  "'sfar' must keep close to its heard time, not be carried off by the crowd's squeeze")
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
+
+    def test_a_run_that_fits_100ms_spacing_but_not_180ms_is_written_with_no_crowd_run(self):
+        # 6 words with no ASR counterpart share one continuous ~0.65s sung stretch between two matched words —
+        # too little for MIN_WORD_SPACING_S (0.18s: 6 * .18 == 1.08s) or even a bare proportional spread (0.65 / 7
+        # ~= 0.093s, under CROWD_RUN_GAP_S), but CROWD_RUN_GAP_S (0.1s) itself fits, with nothing to widen into
+        # (both neighbours are already matched). Finding 2: this is the one thing that flipped one library song
+        # from refused into written, and nothing guarded it.
+        directory = Path(tempfile.mkdtemp(prefix='luma-lyrics-tier01-'))
+        bursts = [(.5, .9), (2.0, 2.4), (3.50, 3.54), (3.85, 4.47), (4.75, 5.15)]
+        asr_words = ['flim', 'borp', 'dax', 'filler', 'trask']
+        pkg = synthetic_package(directory, bursts=bursts, asr_words=asr_words, duration=6.0)
+        for path, key in ((pkg / 'target.json', 'lyrics'), (pkg / 'lyrics' / 'mix.json', 'lines')):
+            data = json.loads(path.read_text(encoding='utf-8'))
+            for line in data[key]: line['words'] = [w for w in line['words'] if w['w'] != 'filler']
+            path.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+        text_file = directory / 'tier01.txt'
+        text_file.write_text('flim dax i0 i1 i2 i3 i4 i5 trask', encoding='utf-8')
+        try:
             r = lt.process_package(pkg, str(text_file), write=True, rebuild=False)
-            self.assertNotIn('skipped', r, 'the wider window, once reached, has enough room for this run')
+            self.assertNotIn('skipped', r, 'a run that fits the 100ms tier must be written, not refused')
             after_words = al.flat(json.loads((pkg / 'target.json').read_text(encoding='utf-8'))['lyrics'])
-            self.assertFalse(lt.crowd_runs(after_words), 'a run this widening fixed must not still show up as a crowd')
+            self.assertFalse(lt.crowd_runs(after_words), 'a run the 100ms tier legalized must not still show up as a crowd')
         finally:
             shutil.rmtree(directory, ignore_errors=True)
 

@@ -90,6 +90,11 @@ CROWD_RUN_GAP_S = .1       # a run of CROWD_RUN_MIN_WORDS or more consecutive wo
                             # crowding regardless of song-wide density — this is measured locally instead of by a
                             # song-wide flashing-word count, which refuses an ordinarily dense song on its everyday
                             # density and lets a real crowd through when the rest of the song is sparse
+MAX_SUBSTITUTED_SHIFT_S = 1.25  # fill_gaps' widening (see _anchored_spread) can nudge a 'substituted' entry off
+                                 # its heard time to make room for a crowded run beside it; past this many seconds
+                                 # it is no longer a nudge, and the correction refuses naming placement rather than
+                                 # publish a word further from where it was actually heard than this — the
+                                 # orchestrator's default pending the operator's own choice of value
 
 class LyricsSourceError(RuntimeError):
     """The true lyric text could not be obtained: no manifest, no network, or the fetch came back empty."""
@@ -267,14 +272,18 @@ def restore_repeats(asr_words: list[dict], true_tokens: list[str]) -> tuple[list
 def _legalize_targets(total: float, count: int, spacing: float) -> list[float] | None:
     """`count` virtual positions strictly inside (0, total), spread proportionally and then legalized so every
     consecutive pair — including the implicit edges at 0 and total — is at least `spacing` apart: a forward pass
-    (each point pushed at least `spacing` past the one before) followed by a backward pass (each point pulled at
-    least `spacing` before the one after, so a marginal window can't crunch the last few points against its far
-    edge the way a forward-only push would). None when the window can't fit `count` points this far apart at all."""
+    (each point pushed at least `spacing` past the one before), clamped to `total` so an overshoot doesn't feed
+    straight into the backward pass unclamped, then a backward pass (each point pulled at least `spacing` before
+    the one after, so a marginal window can't crunch the last few points against its far edge the way a
+    forward-only push would, and a squeeze concentrated near one end gets a chance to redistribute across the
+    whole window instead). None when the window can't fit `count` points this far apart at all, checked only after
+    both passes — checking right after the forward pass alone would call a window infeasible that the backward
+    pass could still have rescued by redistributing the squeeze back through it."""
     if count <= 0: return []
     if total <= 0: return None
     targets = [total * (k + 1) / (count + 1) for k in range(count)]
     for k in range(1, count): targets[k] = max(targets[k], targets[k - 1] + spacing)
-    if targets[-1] > total: return None
+    targets[-1] = min(targets[-1], total)
     for k in range(count - 2, -1, -1): targets[k] = min(targets[k], targets[k + 1] - spacing)
     if targets[0] < 0: return None
     return targets
@@ -289,6 +298,77 @@ def _spread_targets(total: float, count: int) -> list[float]:
         if legal is not None: return legal
     return [total * (k + 1) / (count + 1) for k in range(count)]
 
+def _to_virtual(t: float, span_regions: list[tuple[float, float]]) -> float:
+    """How much voiced time in `span_regions` falls at or before real time `t`: the inverse of the walk _map_virtual
+    does, so a real heard time round-trips through the virtual axis to itself when it already sits on the voice."""
+    run = 0.0
+    for a, b in span_regions:
+        if t <= a: return run
+        if t <= b: return run + (t - a)
+        run += b - a
+    return run
+
+def _map_virtual(targets: list[float], span_regions: list[tuple[float, float]], prev_t: float) -> list[float]:
+    """Virtual (voice-time-budget) positions mapped to real time by walking `span_regions` in order — the same
+    walk _to_virtual inverts — so every result lands inside an actual voiced stretch, never blindly across a gap
+    the window's total voice already excludes."""
+    placed = []
+    for target in targets:
+        t, run = prev_t, 0.0
+        for a, b in span_regions:
+            seg = b - a
+            if run + seg >= target: t = a + (target - run); break
+            run += seg; t = b
+        placed.append(t)
+    return placed
+
+def _interpolate_anchors(positions: list[float | None], lo_bound: float, hi_bound: float) -> list[float]:
+    """`positions` (some None) with every None linearly interpolated by index between its nearest non-None
+    neighbours, or `lo_bound`/`hi_bound` when there is none on that side. Never touches a non-None entry — in the
+    virtual axis this is what keeps a 'substituted' entry's own voice-time position as a fixed anchor, only an
+    'inserted' entry (always None here) gets a fresh position."""
+    positions = list(positions)
+    count = len(positions); idx = 0
+    while idx < count:
+        if positions[idx] is not None: idx += 1; continue
+        j = idx
+        while j < count and positions[j] is None: j += 1
+        left = positions[idx - 1] if idx > 0 else lo_bound
+        right = positions[j] if j < count else hi_bound
+        span = j - idx + 1
+        for k in range(idx, j): positions[k] = left + (right - left) * (k - idx + 1) / span
+        idx = j
+    return positions
+
+def _legalize_positions(positions: list[float], lo_bound: float, hi_bound: float, spacing: float) -> list[float] | None:
+    """`positions`, forward/backward-legalized (see _legalize_targets, including the clamp-before-backward-pass and
+    checking only after both passes) so every consecutive pair, including the bounds, is at least `spacing` apart.
+    None when they can't fit this far apart within [lo_bound, hi_bound]."""
+    if not positions: return []
+    legal = list(positions)
+    for k in range(1, len(legal)): legal[k] = max(legal[k], legal[k - 1] + spacing)
+    legal[-1] = min(legal[-1], hi_bound)
+    for k in range(len(legal) - 2, -1, -1): legal[k] = min(legal[k], legal[k + 1] - spacing)
+    if legal[0] < lo_bound: return None
+    return legal
+
+def _anchored_spread(entries: list[dict], lo: int, hi: int, prev_t: float, next_t: float,
+                      span_regions: list[tuple[float, float]], total: float) -> list[float]:
+    """entries[lo:hi] mapped to real time, spaced at least MIN_WORD_SPACING_S apart in the voice-time budget,
+    falling back to CROWD_RUN_GAP_S — starting from each 'substituted' entry's own voice-time position (see
+    _to_virtual) as a fixed anchor, with 'inserted' entries interpolated between anchors (see _interpolate_anchors),
+    rather than a blind proportional spread that throws every heard time away and can carry a substituted entry
+    far from where it was actually heard (round 4's bug — see MAX_SUBSTITUTED_SHIFT_S in build_correction, which
+    catches what this can't avoid). Legalizing before mapping to real time (see _map_virtual), not after, is what
+    keeps every result on the sung voice: the raw window can run through real silence a straight real-time
+    interpolation would cross, exactly like the proportional spread this replaces for a widened window."""
+    virtual = [None if entries[k]['a'] is None else _to_virtual(entries[k]['a'], span_regions) for k in range(lo, hi)]
+    virtual = _interpolate_anchors(virtual, 0.0, total)
+    for spacing in (MIN_WORD_SPACING_S, CROWD_RUN_GAP_S):
+        legal = _legalize_positions(virtual, 0.0, total, spacing)
+        if legal is not None: virtual = legal; break
+    return _map_virtual(virtual, span_regions, prev_t)
+
 def fill_gaps(entries: list[dict], ctx: dict) -> list[dict]:
     """Every 'inserted' entry without a seed time gets one, placed only inside sung stretches between its
     neighbours' times and never past the end of the last sung stretch; realign() snaps it to the nearest vocal onset
@@ -297,17 +377,23 @@ def fill_gaps(entries: list[dict], ctx: dict) -> list[dict]:
     the window has room for it — when the window between the neighbours can fit that (see _spread_targets).
 
     When the immediate window can't fit even CROWD_RUN_GAP_S, it is widened past any 'substituted' neighbour (a
-    real heard word's time, but not a published word's — moving it costs nothing a matched word wouldn't) all the
-    way to the nearest 'matched' neighbour on that side, whose time is never touched, and every entry in the wider
-    span — substituted ones included — is respread there. This can turn a run of packed inserted words plus one
-    pinned substituted word into a run that is actually spaced apart, when the matched words bounding it are far
-    enough apart to hold them all; when even that wider window can't fit CROWD_RUN_GAP_S, the widened attempt is
-    dropped and the immediate window's best-effort spread (see _spread_targets) is kept, for placement_problems to
-    judge — genuinely packed singing, not a placement this function could have done better.
+    real heard word's time, but not a published word's) all the way to the nearest 'matched' neighbour on that
+    side, whose time is never touched. The wider span is then filled by _anchored_spread, which keeps every
+    'substituted' entry at its own voice-time position unless the spacing genuinely needs to nudge it, rather than
+    throwing that position away for a fresh proportional spread over the whole window (round 4's bug: it could
+    carry a substituted word seconds from where it was actually heard, with nothing to catch it — see
+    MAX_SUBSTITUTED_SHIFT_S in build_correction, which does). Legalizing happens in the same voice-time budget as
+    the un-widened spread below, not in raw real time, so a widened result still lands on the sung voice rather
+    than crossing whatever real silence the wider window's total already excludes. This can turn a run of packed
+    inserted words plus one pinned substituted word into a run that is actually spaced apart, when the matched
+    words bounding it are far enough apart to hold them all; when even that wider window can't fit CROWD_RUN_GAP_S,
+    the widened attempt is dropped and the immediate window's best-effort spread (see _spread_targets) is kept, for
+    placement_problems to judge — genuinely packed singing, not a placement this function could have done better.
 
-    When there is no sung time at all in the window used, the group is clustered right after the previous entry
-    instead of spread blindly across the silence — still off the voice, but not scattered to an arbitrary point in
-    the gap. Never touches a 'matched' entry, and never touches any entry outside the window actually used."""
+    When there is no sung time at all in the (un-widened) window used, the group is clustered right after the
+    previous entry instead of spread blindly across the silence — still off the voice, but not scattered to an
+    arbitrary point in the gap. Never touches a 'matched' entry, and never touches any entry outside the window
+    actually used."""
     regions, duration = ctx['regions'], ctx['duration']
     last_voice_end = regions[-1][1] if regions else duration
     def window_regions(pt: float, nt: float) -> list[tuple[float, float]]:
@@ -322,32 +408,27 @@ def fill_gaps(entries: list[dict], ctx: dict) -> list[dict]:
         span_regions = window_regions(prev_t, next_t)
         count = hi - lo
         total = sum(b - a for a, b in span_regions)
+        widened = False
         if _legalize_targets(total, count, CROWD_RUN_GAP_S) is None:
             wlo, whi = lo, hi
             while wlo > 0 and entries[wlo - 1]['kind'] != 'matched': wlo -= 1
             while whi < n and entries[whi]['kind'] != 'matched': whi += 1
             if (wlo, whi) != (lo, hi):
-                w_prev_t = entries[wlo - 1]['a'] if wlo > 0 else 0.0
-                w_next_t = min(entries[whi]['a'], last_voice_end) if whi < n else last_voice_end
-                w_regions = window_regions(w_prev_t, w_next_t)
-                w_count = whi - wlo
-                w_total = sum(b - a for a, b in w_regions)
-                if _legalize_targets(w_total, w_count, CROWD_RUN_GAP_S) is not None:
-                    lo, hi, prev_t, next_t, span_regions, count, total = wlo, whi, w_prev_t, w_next_t, w_regions, w_count, w_total
+                lo, hi = wlo, whi
+                prev_t = entries[lo - 1]['a'] if lo > 0 else 0.0
+                next_t = min(entries[hi]['a'], last_voice_end) if hi < n else last_voice_end
+                span_regions = window_regions(prev_t, next_t)
+                total = sum(b - a for a, b in span_regions)
+                widened = True
         if not span_regions:
             for k, idx in enumerate(range(lo, hi)):
                 entries[idx]['a'] = round(min(prev_t + MIN_WORD_SPACING_S * (k + 1), max(next_t, prev_t)), 3)
             i = hi; continue
-        targets = _spread_targets(total, count)
-        placed = []
-        for target in targets:
-            t, run = prev_t, 0.0
-            for a, b in span_regions:
-                seg = b - a
-                if run + seg >= target: t = a + (target - run); break
-                run += seg; t = b
-            placed.append(t)
-        for k, idx in enumerate(range(lo, hi)): entries[idx]['a'] = round(min(placed[k], next_t), 3)
+        if widened:
+            placed = _anchored_spread(entries, lo, hi, prev_t, next_t, span_regions, total)
+        else:
+            placed = _map_virtual(_spread_targets(total, hi - lo), span_regions, prev_t)
+        for k, idx in enumerate(range(lo, hi)): entries[idx]['a'] = round(min(max(placed[k], prev_t), next_t), 3)
         i = hi
     return entries
 
@@ -381,7 +462,9 @@ def crowd_runs(words: list[dict]) -> list[tuple[int, int]]:
     runs, n, i = [], len(words), 0
     while i < n:
         j = i
-        while j + 1 < n and words[j + 1]['a'] - words[j]['a'] < CROWD_RUN_GAP_S: j += 1
+        # rounded to the same 3 decimals every 'a' is stored at: an exact CROWD_RUN_GAP_S gap between two such
+        # values can otherwise land a hair under it in binary float (e.g. 0.2 - 0.1 == 0.09999999999999998)
+        while j + 1 < n and round(words[j + 1]['a'] - words[j]['a'], 3) < CROWD_RUN_GAP_S: j += 1
         if j - i + 1 >= CROWD_RUN_MIN_WORDS: runs.append((i, j))
         i = j + 1
     return runs
@@ -401,8 +484,16 @@ def new_crowd_runs(entries: list[dict], flat_words: list[dict],
         out.append((lo, i1 - i0 + 1))
     return out
 
+def substituted_shifts(asr_words: list[dict], entries: list[dict], flat_words: list[dict]) -> list[float]:
+    """How far each 'substituted' entry's final realigned start sits from the heard time of the ASR word it
+    replaced. fill_gaps only ever moves a substituted entry away from that time to widen a packed window
+    (_anchored_spread); every other path leaves it exactly where it was heard."""
+    return [abs(flat_words[i]['a'] - asr_words[e['src']]['a']) for i, e in enumerate(entries)
+            if e['kind'] == 'substituted' and e['src'] is not None]
+
 def placement_problems(entries: list[dict], flat_words: list[dict], ctx: dict, before_lines: list[dict] | None = None,
-                        before_metrics: dict | None = None, after_metrics: dict | None = None) -> tuple[list[str], list[str]]:
+                        before_metrics: dict | None = None, after_metrics: dict | None = None,
+                        max_substituted_shift: float = 0.0) -> tuple[list[str], list[str]]:
     """Placement faults, all measured on the realigned words (flat_words), never a pre-snap estimate:
 
     - an inserted word off the sung voice — always worth refusing over;
@@ -412,7 +503,10 @@ def placement_problems(entries: list[dict], flat_words: list[dict], ctx: dict, b
       legitimate crowded phrase, and blocks the write;
     - a crowd run (see new_crowd_runs) — the same squeeze measured locally instead of by a song-wide count, so an
       ordinarily dense song isn't refused on its everyday density and a real crowd in an otherwise sparse song
-      isn't let through by the song-wide average.
+      isn't let through by the song-wide average;
+    - a 'substituted' entry moved more than MAX_SUBSTITUTED_SHIFT_S from its heard time by fill_gaps' widening
+      (see substituted_shifts) — past that point it is no longer a nudge to make room for a crowded neighbour, and
+      publishing it this far from where it was actually heard is worse than refusing the correction.
 
     Separately, inserted words packed closer together than MIN_WORD_SPACING_S but not within the 50ms line above,
     and the song-wide growth in metrics()['flashing_words'], are only ever informational: when a large block of
@@ -421,6 +515,9 @@ def placement_problems(entries: list[dict], flat_words: list[dict], ctx: dict, b
 
     Returns (blocking, informational)."""
     blocking, info = [], []
+    if max_substituted_shift > MAX_SUBSTITUTED_SHIFT_S:
+        blocking.append(f'a substituted word moved {max_substituted_shift:.2f}s from its heard time '
+                         f'(more than {MAX_SUBSTITUTED_SHIFT_S}s)')
     off_voice = sum(1 for e, w in zip(entries, flat_words) if e['kind'] == 'inserted' and not in_voice(w['a'], ctx))
     if off_voice: blocking.append(f'{off_voice} inserted word(s) placed off the sung voice')
     crowded = 0
@@ -474,7 +571,9 @@ def build_correction(pkg: Path, song: dict, asr_words: list[dict], ctx: dict, ra
     before_m = al.metrics(before_lines, ctx) if before_lines else None
     after_m = al.metrics(lines, ctx)
     passed, reason = gate_verdict(conf, before_m, after_m)
-    blocking, info = placement_problems(entries, al.flat(lines), ctx, before_lines, before_m, after_m)
+    flat_words = al.flat(lines)
+    max_shift = max(substituted_shifts(asr_words, entries, flat_words), default=0.0)
+    blocking, info = placement_problems(entries, flat_words, ctx, before_lines, before_m, after_m, max_shift)
     # every blocking reason is named, not just the first one found: a harm-gate refusal and a placement refusal can
     # both apply to the same correction, and an operator deciding whether --force is safe needs to see both
     reasons = ([reason] if reason else []) + (['placement: ' + '; '.join(blocking)] if blocking else [])
@@ -482,6 +581,7 @@ def build_correction(pkg: Path, song: dict, asr_words: list[dict], ctx: dict, ra
     return {'true_tokens': true_tokens, 'entries': entries, 'seed': seed, 'lines': lines, 'confidence': conf,
             'agreement_pct': agreement['agreement_pct'], 'repeats_restored': repeats_restored,
             'before_metrics': before_m, 'after_metrics': after_m, 'passed': passed, 'reason': reason,
+            'max_substituted_shift_s': round(max_shift, 3),
             'placement_problems': blocking + info, 'asr_source': asr_src}
 
 # ---------------------------------------------------------------- report
@@ -507,11 +607,11 @@ def report_metrics(asr_words: list[dict], true_tokens: list[str], entries: list[
     kept = {e['src'] for e in entries if e['src'] is not None}
     dropped = len(asr_words) - len(kept)
     a_norm = [al.norm(w['w']) for w in asr_words]; t_norm = [al.norm(t) for t in true_tokens]
-    shifts = [abs(flat_words[i]['a'] - asr_words[e['src']]['a']) for i, e in enumerate(entries)
-              if e['kind'] == 'substituted' and e['src'] is not None]
+    shifts = substituted_shifts(asr_words, entries, flat_words)
     return {'words_true': len(true_tokens), 'words_asr': len(asr_words), 'words_changed': changed, 'words_added': added,
             'words_dropped': dropped, 'wer_before': word_error_rate(a_norm, t_norm),
-            'median_shift_changed_s': round(float(np.median(shifts)), 3) if shifts else 0.0, 'lines': len(lines)}
+            'median_shift_changed_s': round(float(np.median(shifts)), 3) if shifts else 0.0,
+            'max_shift_changed_s': round(max(shifts), 3) if shifts else 0.0, 'lines': len(lines)}
 
 # ---------------------------------------------------------------- safety guard
 def audio_fingerprint(pkg: Path) -> dict:
@@ -576,7 +676,7 @@ def human(r: dict) -> str:
     if r.get('skipped'): return f"{r['package']}: {r['skipped']} (confidence {r['confidence']}, agreement {r['agreement_pct']}%)"
     return (f"{r['package']}: {r['words_true']} true words ({r['words_changed']} changed, {r['words_added']} added, "
             f"{r['words_dropped']} dropped from the ASR transcript), WER against the true text {r['wer_before']}, "
-            f"median timing shift of changed words {r['median_shift_changed_s']:.2f} s, "
+            f"timing shift of changed words median {r['median_shift_changed_s']:.2f} s, largest {r['max_shift_changed_s']:.2f} s, "
             f"confidence {r['confidence']} (agreement {r['agreement_pct']}%), lyrics source: {r['lyrics_source']}, "
             f"placement problems: {'; '.join(r['placement_problems']) or 'none'}, "
             f"repeated sections recovered {r['repeated_sections_recovered']}")
