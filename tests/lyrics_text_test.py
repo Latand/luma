@@ -203,6 +203,13 @@ class RepeatedSectionTests(unittest.TestCase):
 
 
 class FillGapsTests(unittest.TestCase):
+    def test_fits_spacing_boundary_is_inclusive(self):
+        # exactly (count+1)*spacing of voice must count as fitting — the same boundary the evenly-spread
+        # proportional list itself reaches exactly (see _spread_targets); an off-by-one here (> instead of >=)
+        # would call this window infeasible and trigger widening it never needs.
+        self.assertTrue(lt._fits_spacing(0.7, 6, lt.CROWD_RUN_GAP_S))
+        self.assertFalse(lt._fits_spacing(0.7 - 1e-6, 6, lt.CROWD_RUN_GAP_S))
+
     def test_an_inserted_run_is_spaced_strictly_increasing_between_its_neighbours(self):
         entries = [{'a': 1.0, 'kind': 'matched'}, {'a': None, 'kind': 'inserted'}, {'a': None, 'kind': 'inserted'}, {'a': 2.0, 'kind': 'matched'}]
         out = lt.fill_gaps(entries, {'regions': [(0.0, 10.0)], 'duration': 10.0})
@@ -308,6 +315,41 @@ class FillGapsTests(unittest.TestCase):
         self.assertEqual(out[-1]['a'], 0.5, "widening must never move the matched word on the far side")
         self.assertEqual([e['w'] for e in out], [e['w'] for e in entries], 'word order must survive widening')
 
+    def test_anchored_spread_holds_the_near_edge_too_not_only_the_far_one(self):
+        # mirror of the far-matched-word widening test: 'subw' is heard just 0.02s after the near edge (prev_t,
+        # the widened-past matched neighbour's own time) — legalizing must push it out to CROWD_RUN_GAP_S from
+        # that edge like any other neighbour, not just hold the far edge. A break that reverts only the lower-edge
+        # clamp in _legalize_positions leaves 'subw' at 0.02s, within MIN_INSERTED_SPACING_S of the near neighbour.
+        entries = ([{'a': 0.02, 'kind': 'substituted', 'w': 'subw'}]
+                   + [{'a': None, 'kind': 'inserted', 'w': f'i{k}'} for k in range(4)])
+        placed = lt._anchored_spread(entries, 0, len(entries), 0.0, 1.22, [(0.0, 1.22)], 1.22)
+        self.assertGreaterEqual(placed[0], lt.CROWD_RUN_GAP_S,
+                                 "the near edge must be held occupied too, not just the far one")
+
+    def test_a_substituted_word_heard_in_a_gap_nearer_the_next_region_lands_on_that_region(self):
+        # 'subw' is heard at 1.9s, in the silent VAD gap between two voiced regions ([0,1] and [2,3]) — nearer the
+        # next region's start (2.0, 0.1s away) than the previous region's end (1.0, 0.9s away). Finding 3, round 7:
+        # _to_virtual gives both of those edges the same virtual position, so _map_virtual's own walk resolves any
+        # unmoved anchor back to the previous region's end regardless of _clamp_to_voice's choice, unless the
+        # clamped real time is used directly for anchors legalizing leaves unmoved. The word must land on voice,
+        # at the edge it is actually nearer to, not off voice at the far edge.
+        entries = [{'a': 1.9, 'kind': 'substituted', 'w': 'subw'}]
+        span_regions = [(0.0, 1.0), (2.0, 3.0)]
+        placed = lt._anchored_spread(entries, 0, 1, 0.0, 3.0, span_regions, 2.0)
+        self.assertEqual(placed[0], 2.0, "an off-voice anchor nearer the next region must land there, not off voice")
+
+    def test_anchored_spread_picks_whichever_spacing_moves_substituted_words_least(self):
+        # 6 substituted words bunched 0.02s apart, plus 2 inserted words, in a 2.0s voiced window: legalizing at
+        # MIN_WORD_SPACING_S (0.18s) is feasible but forces a 1.44s max shift on the bunch, while CROWD_RUN_GAP_S
+        # (0.1s) is also feasible and only needs 0.80s (finding 2, round 7: holding both edges occupied can make
+        # the wider 0.18s tier move a correctly-timed substituted word much further than the narrower 0.1s tier
+        # would, so the lighter nudge must win whenever it moves the anchors no further than the heavier one).
+        entries = ([{'a': 2.0 + 0.02 * k, 'kind': 'substituted', 'w': f's{k}'} for k in range(6)]
+                   + [{'a': None, 'kind': 'inserted', 'w': f'i{k}'} for k in range(2)])
+        heard = {e['w']: e['a'] for e in entries if e['kind'] == 'substituted'}
+        placed = lt._anchored_spread(entries, 0, len(entries), 0.0, 2.0, [(0.0, 2.0)], 2.0)
+        shift = max(abs(placed[i] - heard[entries[i]['w']]) for i in range(6))
+        self.assertLess(shift, 1.0, 'the lighter 0.1s nudge must be chosen, not the heavier 0.18s one')
 
 class SilenceMarginTests(unittest.TestCase):
     def _ctx(self, voiced_from: float):
@@ -775,20 +817,22 @@ class HarmGateTests(unittest.TestCase):
             shutil.rmtree(directory, ignore_errors=True)
 
     def test_widening_that_would_move_a_substituted_word_past_the_bound_refuses_naming_it(self):
-        # 8 substituted words ('s0'..'s7') are all heard bunched within ~0.45s right after 'dax', followed by 2
+        # 14 substituted words ('s0'..'s13') are all heard bunched within ~0.3s right after 'dax', followed by 4
         # inserted words with no ASR counterpart and almost no sung time before the far matched word 'trask' — so
-        # fill_gaps widens all the way back to 'dax' and has to spread all 10 moved entries at MIN_WORD_SPACING_S
-        # across a window whose voice is concentrated at the far end. The forward/backward legalizing pass this
-        # requires carries the earliest substituted word ('s0') well past MAX_SUBSTITUTED_SHIFT_S from where it was
-        # actually heard: this must refuse, and the refusal must name the bound, not a placement collision.
+        # fill_gaps widens all the way back to 'dax'. _anchored_spread tries both MIN_WORD_SPACING_S and
+        # CROWD_RUN_GAP_S and takes whichever moves the substituted words least (finding 2, round 7) — this
+        # fixture packs enough moved words that even the lesser of the two nudges still carries the earliest
+        # substituted word ('s0') well past MAX_SUBSTITUTED_SHIFT_S from where it was actually heard: this must
+        # refuse, and the refusal must name the bound, not a placement collision.
         directory = Path(tempfile.mkdtemp(prefix='luma-lyrics-boundshift-'))
         pad_bursts = [(0.5 + 0.3 * i, 0.5 + 0.3 * i + 0.1) for i in range(8)]
         pad_words = [f'p{i}' for i in range(8)]
         t0 = 0.5 + 0.3 * 8 + 1.0
+        n_sub = 14
         bursts = (pad_bursts + [(t0, t0 + 0.04), (t0 + 0.1, t0 + 3.1)]
-                  + [(t0 + 3.2 + 0.05 * i, t0 + 3.2 + 0.05 * i + 0.025) for i in range(8)]
+                  + [(t0 + 3.2 + 0.02 * i, t0 + 3.2 + 0.02 * i + 0.01) for i in range(n_sub)]
                   + [(t0 + 4.5, t0 + 4.9)])
-        asr_words = pad_words + ['dax', 'bigp'] + [f'h{i}' for i in range(8)] + ['trask']
+        asr_words = pad_words + ['dax', 'bigp'] + [f'h{i}' for i in range(n_sub)] + ['trask']
         duration = t0 + 6.0
         pkg = synthetic_package(directory, bursts=bursts, asr_words=asr_words, duration=duration)
         for path, key in ((pkg / 'target.json', 'lyrics'), (pkg / 'lyrics' / 'mix.json', 'lines')):
@@ -796,7 +840,7 @@ class HarmGateTests(unittest.TestCase):
             for line in data[key]: line['words'] = [w for w in line['words'] if w['w'] != 'bigp']
             path.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
         text_file = directory / 'boundshift.txt'
-        words = pad_words + ['dax'] + [f's{i}' for i in range(8)] + ['i0', 'i1', 'trask']
+        words = pad_words + ['dax'] + [f's{i}' for i in range(n_sub)] + ['i0', 'i1', 'i2', 'i3', 'trask']
         text_file.write_text(' '.join(words), encoding='utf-8')
         try:
             r = lt.process_package(pkg, str(text_file), write=False, rebuild=False)
@@ -835,13 +879,12 @@ class HarmGateTests(unittest.TestCase):
         finally:
             shutil.rmtree(directory, ignore_errors=True)
 
-    def test_a_run_that_fits_100ms_spacing_but_not_180ms_is_written_with_no_crowd_run(self):
+    def test_a_run_whose_proportional_spread_meets_crowd_run_gap_is_written_with_no_crowd_run(self):
         # 6 words with no ASR counterpart share one continuous ~0.73s sung stretch between two matched words —
-        # too little for MIN_WORD_SPACING_S (0.18s: 6 * .18 == 1.08s) or even a bare proportional spread (0.73 / 7
-        # ~= 0.104s, under MIN_WORD_SPACING_S), but CROWD_RUN_GAP_S (0.1s), held against both matched neighbours
-        # too (7 gaps of 0.1s == 0.7s, just inside the window), fits, with nothing to widen into (both neighbours
-        # are already matched). Finding 2: this is the one thing that flipped one library song from refused into
-        # written, and nothing guarded it.
+        # too little for the evenly-spread proportional spacing (see _spread_targets) to reach MIN_WORD_SPACING_S
+        # (0.18s: 6 * .18 == 1.08s), but the proportional gap it does give (7 gaps of ~0.104s each, over the
+        # window with both matched neighbours held occupied) still clears CROWD_RUN_GAP_S (0.1s), with nothing to
+        # widen into (both neighbours are already matched). This is the boundary _fits_spacing decides at.
         directory = Path(tempfile.mkdtemp(prefix='luma-lyrics-tier01-'))
         bursts = [(.5, .9), (2.0, 2.4), (3.50, 3.54), (3.85, 4.55), (4.75, 5.15)]
         asr_words = ['flim', 'borp', 'dax', 'filler', 'trask']

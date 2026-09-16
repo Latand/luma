@@ -269,24 +269,22 @@ def restore_repeats(asr_words: list[dict], true_tokens: list[str]) -> tuple[list
         restored += len(insertions)
     return true_tokens, entries, restored
 
-def _legalize_targets(total: float, count: int, spacing: float) -> list[float] | None:
-    """`count` virtual positions strictly inside (0, total), spread proportionally and then legalized by
-    _legalize_positions with both implicit edges — 0 and total — held occupied, exactly as if a neighbour word
-    already sat at each. None when the window can't fit `count` points this far apart at all."""
-    if count <= 0: return []
-    if total <= 0: return None
-    targets = [total * (k + 1) / (count + 1) for k in range(count)]
-    return _legalize_positions(targets, 0.0, total, spacing)
-
 def _spread_targets(total: float, count: int) -> list[float]:
-    """The best spacing this window's voiced time can give `count` points: MIN_WORD_SPACING_S throughout when the
-    window can fit it, else CROWD_RUN_GAP_S — the floor the placement gate itself refuses under — when it can fit
-    that instead, else the plain proportional spread (already the largest achievable minimum gap for that many
-    points in that much voice, so left as is rather than forced closer to one edge)."""
-    for spacing in (MIN_WORD_SPACING_S, CROWD_RUN_GAP_S):
-        legal = _legalize_targets(total, count, spacing)
-        if legal is not None: return legal
+    """`count` points spread proportionally across (0, total): with both window edges held occupied (see
+    _legalize_positions), this is already the widest achievable minimum gap for that many points in that much
+    voice — legalizing an already-evenly-spread list either changes nothing (when the gap it gives meets some
+    spacing) or fails outright (when it doesn't, since every gap here is identical), so there is no legalizing
+    left to do once _fits_spacing has picked a spacing that holds."""
     return [total * (k + 1) / (count + 1) for k in range(count)]
+
+def _fits_spacing(total: float, count: int, spacing: float) -> bool:
+    """Whether `count` points can sit inside (0, total) at least `spacing` apart, including from both implicit
+    edges — the same feasibility _legalize_positions checks, but for the evenly-spread proportional list this
+    reduces to one comparison: it fits exactly when the even gap total/(count+1) is at least `spacing`. The
+    tiny tolerance absorbs binary float error in (count + 1) * spacing (e.g. 7 * 0.1 == 0.7000000000000001), so
+    a window whose total is exactly that boundary in real, rounded seconds isn't called infeasible by a fraction
+    of a nanosecond of float noise."""
+    return total >= (count + 1) * spacing - 1e-9
 
 def _clamp_to_voice(t: float, span_regions: list[tuple[float, float]]) -> float:
     """`t` unchanged when it already falls inside one of `span_regions`; otherwise the nearer region edge in real
@@ -364,40 +362,56 @@ def _legalize_positions(positions: list[float], lo_bound: float, hi_bound: float
 
 def _anchored_spread(entries: list[dict], lo: int, hi: int, prev_t: float, next_t: float,
                       span_regions: list[tuple[float, float]], total: float) -> list[float]:
-    """entries[lo:hi] mapped to real time, spaced at least MIN_WORD_SPACING_S apart in the voice-time budget,
-    falling back to CROWD_RUN_GAP_S — starting from each 'substituted' entry's own voice-time position (see
-    _to_virtual) as a fixed anchor, with 'inserted' entries interpolated between anchors (see _interpolate_anchors),
-    rather than a blind proportional spread that throws every heard time away and can carry a substituted entry
-    far from where it was actually heard (round 4's bug — see MAX_SUBSTITUTED_SHIFT_S in build_correction, which
-    catches what this can't avoid). A substituted entry heard in a VAD gap is anchored at the nearer region edge
-    (see _clamp_to_voice) rather than always the previous region's end, so the anchor stays closest to where the
-    word was actually heard regardless of which side of the gap it fell on. Legalizing before mapping to real time
-    (see _map_virtual), not after, is what keeps every result on the sung voice: the raw window can run through
-    real silence a straight real-time interpolation would cross, exactly like the proportional spread this
+    """entries[lo:hi] mapped to real time, spaced at least MIN_WORD_SPACING_S apart in the voice-time budget where
+    that moves 'substituted' anchors no further than CROWD_RUN_GAP_S would, falling back to CROWD_RUN_GAP_S
+    otherwise (holding both edges occupied at either spacing can force a widened window's anchors to move even
+    though 0.1s of room would have moved them less — this compares the two rather than always preferring 0.18s) —
+    starting from each 'substituted' entry's own voice-time position (see _to_virtual) as a fixed anchor, with
+    'inserted' entries interpolated between anchors (see _interpolate_anchors), rather than a blind proportional
+    spread that throws every heard time away and can carry a substituted entry far from where it was actually
+    heard (round 4's bug — see MAX_SUBSTITUTED_SHIFT_S in build_correction, which catches what this can't avoid).
+    A substituted entry heard in a VAD gap is anchored at the nearer region edge (see _clamp_to_voice) rather than
+    always the previous region's end — but _to_virtual gives that edge and the region on its other side the same
+    virtual position, so _map_virtual's own walk would silently discard the choice for any anchor legalizing
+    leaves unmoved; those are placed at their clamped real time directly instead. Legalizing before mapping to
+    real time (see _map_virtual), not after, is what keeps every result on the sung voice: the raw window can run
+    through real silence a straight real-time interpolation would cross, exactly like the proportional spread this
     replaces for a widened window."""
-    virtual = [None if entries[k]['a'] is None else _to_virtual(_clamp_to_voice(entries[k]['a'], span_regions), span_regions)
-               for k in range(lo, hi)]
+    anchored = [entries[k]['a'] is not None for k in range(lo, hi)]
+    clamped_real = [None if not a else _clamp_to_voice(entries[lo + i]['a'], span_regions) for i, a in enumerate(anchored)]
+    virtual = [None if t is None else _to_virtual(t, span_regions) for t in clamped_real]
     virtual = _interpolate_anchors(virtual, 0.0, total)
-    for spacing in (MIN_WORD_SPACING_S, CROWD_RUN_GAP_S):
-        legal = _legalize_positions(virtual, 0.0, total, spacing)
-        if legal is not None: virtual = legal; break
-    return _map_virtual(virtual, span_regions, prev_t)
+    heard = list(virtual)
+    def anchor_shift(legal: list[float]) -> float:
+        return max((abs(legal[i] - heard[i]) for i in range(len(legal)) if anchored[i]), default=0.0)
+    candidates = [(spacing, legal) for spacing in (MIN_WORD_SPACING_S, CROWD_RUN_GAP_S)
+                  for legal in [_legalize_positions(virtual, 0.0, total, spacing)] if legal is not None]
+    if candidates:
+        candidates.sort(key=lambda sl: (anchor_shift(sl[1]), sl[0] != MIN_WORD_SPACING_S))
+        virtual = candidates[0][1]
+    placed = _map_virtual(virtual, span_regions, prev_t)
+    for i, was_anchored in enumerate(anchored):
+        if was_anchored and virtual[i] == heard[i]: placed[i] = clamped_real[i]
+    return placed
 
 def fill_gaps(entries: list[dict], ctx: dict) -> list[dict]:
     """Every 'inserted' entry without a seed time gets one, placed only inside sung stretches between its
     neighbours' times and never past the end of the last sung stretch; realign() snaps it to the nearest vocal onset
     afterwards. A group of entries is spread proportionally to the sung time available, not linearly across the raw
-    gap (which can run through long silences), and spaced at least CROWD_RUN_GAP_S apart — MIN_WORD_SPACING_S where
-    the window has room for it — when the window between the neighbours can fit that (see _spread_targets).
+    gap (which can run through long silences) — see _spread_targets, which with both window edges implicitly
+    occupied already gives every point at least CROWD_RUN_GAP_S apart whenever _fits_spacing says the window can
+    fit that; MIN_WORD_SPACING_S is not tried separately here, since it would either leave that same even spread
+    unchanged (when the window can fit it too) or fail outright (when it can't) — never a different result.
 
     When the immediate window can't fit even CROWD_RUN_GAP_S, it is widened past any 'substituted' neighbour (a
     real heard word's time, but not a published word's) all the way to the nearest 'matched' neighbour on that
     side, whose time is never touched. The wider span is then filled by _anchored_spread, which keeps every
-    'substituted' entry at its own voice-time position unless the spacing genuinely needs to nudge it, rather than
-    throwing that position away for a fresh proportional spread over the whole window (round 4's bug: it could
-    carry a substituted word seconds from where it was actually heard, with nothing to catch it — see
-    MAX_SUBSTITUTED_SHIFT_S in build_correction, which does). Legalizing happens in the same voice-time budget as
-    the un-widened spread below, not in raw real time, so a widened result still lands on the sung voice rather
+    'substituted' entry at its own voice-time position, nudging it only as far as whichever of MIN_WORD_SPACING_S
+    or CROWD_RUN_GAP_S moves it least (never further than that lesser nudge would have — see MAX_SUBSTITUTED_SHIFT_S
+    in build_correction, which catches what this still can't avoid) rather than throwing that position away for a
+    fresh proportional spread over the whole window (round 4's bug: it could carry a substituted word seconds from
+    where it was actually heard). Legalizing happens in the same voice-time budget as the un-widened spread below,
+    not in raw real time, so a widened result still lands on the sung voice rather
     than crossing whatever real silence the wider window's total already excludes. This can turn a run of packed
     inserted words plus one pinned substituted word into a run that is actually spaced apart, when the matched
     words bounding it are far enough apart to hold them all; when even the widened window can't fit CROWD_RUN_GAP_S
@@ -425,7 +439,7 @@ def fill_gaps(entries: list[dict], ctx: dict) -> list[dict]:
         count = hi - lo
         total = sum(b - a for a, b in span_regions)
         widened = False
-        if _legalize_targets(total, count, CROWD_RUN_GAP_S) is None:
+        if not _fits_spacing(total, count, CROWD_RUN_GAP_S):
             wlo, whi = lo, hi
             while wlo > 0 and entries[wlo - 1]['kind'] != 'matched': wlo -= 1
             while whi < n and entries[whi]['kind'] != 'matched': whi += 1
