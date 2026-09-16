@@ -15,9 +15,12 @@ whichever transcript the song is already published from (the 'vocal stem' marker
 --from to say so explicitly) — a song deliberately kept on the mix transcript never silently jumps to the other one.
 
 build_correction() is the one path from a lyrics source to seeded, realigned lines: align_lyrics.py and the vocal
-retranscription command call it too (replaying from the transcript the song is already published from, not
-whichever one a plain re-align would otherwise default to), so a realignment or a fresh transcription can never
-regress a correction back to the raw ASR transcript, and never applies one that would make things worse either. The
+retranscription command call it too. A plain realignment always stays on the transcript the song is already
+published from, so it can never regress a correction back to the raw ASR transcript. A fresh transcription is
+different: it moves the song to the vocal transcript and replays the same correction there, keeping it only if it
+still passes the gate on that new transcript — if it doesn't, the command writes the raw vocal words instead, with
+no correction at all, and the previously-corrected text is gone from the published song until it's corrected again.
+The
 true lyric text is sequence-aligned against the normalized ASR words: a matched word keeps the ASR timing, a
 substituted word takes the timing of the word(s) it replaces, a true word with no ASR counterpart gets its start
 interpolated inside the nearest sung stretch when there is one (off the voice entirely, clustered right after the
@@ -34,9 +37,12 @@ UNCOVERED_TOLERANCE_S seconds more of the singing uncovered, or open a silent ho
 the source text doesn't actually match what's sung, not just imperfectly. Low agreement with the ASR transcript
 refuses outright, same as before. Placement is checked separately, on the realigned words: an inserted word landing
 off the sung voice, one landing within MIN_INSERTED_SPACING_S of a neighbour (the onset detector's own dedup
-window — not a real, distinguishable placement), or a correction that grows metrics()['flashing_words'] by more
-than FLASHING_WORDS_TOLERANCE also refuses; spacing tighter than MIN_WORD_SPACING_S but past that 50ms line is only
-reported, since a crowded sung stretch can genuinely leave no better placement. Every reason that applies is named
+window — not a real, distinguishable placement), or a run of CROWD_RUN_MIN_WORDS or more consecutive starts each
+closer together than CROWD_RUN_GAP_S that contains an inserted word and isn't already there in the lyrics already
+published, also refuses; spacing tighter than MIN_WORD_SPACING_S but past that 50ms line, and song-wide growth in
+metrics()['flashing_words'], are only ever reported, since a crowded sung stretch can genuinely leave no better
+placement and a song-wide count refuses an ordinarily dense song on its everyday density just as easily as it
+catches a real crowd. Every reason that applies is named
 in the refusal, not just the first one found.
 
 Fetching is a single free lookup (api.lyrics.ovh, no key) keyed by the title/artist in <package>/manifest.json. The
@@ -75,9 +81,13 @@ UNCOVERED_TOLERANCE_S = 6.0   # a correction may leave up to this many more seco
 MIN_INSERTED_SPACING_S = .05  # onset candidates closer than this are one attack (align_lyrics.onsets' own dedup
                                # window): an inserted word landing this close to a neighbour, after realignment, is
                                # not a placement at all, just the harm gate's squeeze packing words onto the voice
-FLASHING_WORDS_TOLERANCE = 5  # a correction may add up to this many more flashing words (align_lyrics.metrics) than
-                               # the lyrics already published before the gate refuses it as a placement fault, even
-                               # when no single gap trips the 50ms check above
+CROWD_RUN_MIN_WORDS = 4    # a run shorter than this is normal fast singing, not a crowd
+CROWD_RUN_GAP_S = .1       # a run of CROWD_RUN_MIN_WORDS or more consecutive word starts each closer together than
+                            # this, introduced by the correction (at least one word in the run is 'inserted') and
+                            # not already present at the same place in the lyrics already published, is unreadable
+                            # crowding regardless of song-wide density — this is measured locally instead of by a
+                            # song-wide flashing-word count, which refuses an ordinarily dense song on its everyday
+                            # density and lets a real crowd through when the rest of the song is sparse
 
 class LyricsSourceError(RuntimeError):
     """The true lyric text could not be obtained: no manifest, no network, or the fetch came back empty."""
@@ -256,10 +266,16 @@ def fill_gaps(entries: list[dict], ctx: dict) -> list[dict]:
     """Every 'inserted' entry without a seed time gets one, placed only inside sung stretches between its
     neighbours' times and never past the end of the last sung stretch; realign() snaps it to the nearest vocal onset
     afterwards. A group of entries is spread proportionally to the sung time available, not linearly across the raw
-    gap (which can run through long silences), and never closer together than MIN_WORD_SPACING_S. When there is no
-    sung time at all between the neighbours, the group is clustered right after the previous one instead of spread
-    blindly across the silence — still off the voice, but not scattered to an arbitrary point in the gap. Never
-    touches an entry that already has a time."""
+    gap (which can run through long silences), and never closer together than MIN_WORD_SPACING_S when the window
+    between the neighbours can fit that spacing throughout, including at each edge — checked both forward (each
+    point pushed at least MIN_WORD_SPACING_S past the one before) and backward (each point pulled at least
+    MIN_WORD_SPACING_S before the one after, so a marginal window can't crunch the last few points against its far
+    edge the way a forward-only push would). When the window genuinely cannot fit that spacing throughout, the raw
+    proportional spread already places every point as far from its neighbours as the available sung time allows
+    (the largest achievable minimum gap for that many points in that much voice), so it is left as is rather than
+    forced closer to one edge. When there is no sung time at all between the neighbours, the group is clustered
+    right after the previous one instead of spread blindly across the silence — still off the voice, but not
+    scattered to an arbitrary point in the gap. Never touches an entry that already has a time."""
     regions, duration = ctx['regions'], ctx['duration']
     last_voice_end = regions[-1][1] if regions else duration
     n = len(entries); i = 0
@@ -277,18 +293,20 @@ def fill_gaps(entries: list[dict], ctx: dict) -> list[dict]:
                 entries[idx]['a'] = round(min(prev_t + MIN_WORD_SPACING_S * (k + 1), max(next_t, prev_t)), 3)
             i = j; continue
         total = sum(b - a for a, b in span_regions)
+        targets = [total * (k + 1) / (count + 1) for k in range(count)]
+        legal = list(targets)
+        for k in range(1, count): legal[k] = max(legal[k], legal[k - 1] + MIN_WORD_SPACING_S)
+        if legal[-1] <= total:   # the window can fit the spacing without pushing the last point past its edge —
+            for k in range(count - 2, -1, -1): legal[k] = min(legal[k], legal[k + 1] - MIN_WORD_SPACING_S)
+            if legal[0] >= 0: targets = legal   # ...and pulling back still leaves the first point past its own edge
         placed = []
-        for k in range(count):
-            target = total * (k + 1) / (count + 1)
+        for target in targets:
             t, run = prev_t, 0.0
             for a, b in span_regions:
                 seg = b - a
                 if run + seg >= target: t = a + (target - run); break
                 run += seg; t = b
             placed.append(t)
-        if total >= count * MIN_WORD_SPACING_S:   # only worth enforcing when the window can actually fit it —
-            for k in range(1, len(placed)):       # otherwise forcing it would push later words past the window
-                if placed[k] - placed[k - 1] < MIN_WORD_SPACING_S: placed[k] = placed[k - 1] + MIN_WORD_SPACING_S
         for k, idx in enumerate(range(i, j)): entries[idx]['a'] = round(min(placed[k], next_t), 3)
         i = j
     return entries
@@ -316,22 +334,50 @@ def in_voice(t: float, ctx: dict, margin: float = SILENCE_MARGIN_S) -> bool:
     lo, hi = max(0, lo), min(len(v) - 1, hi)
     return lo <= hi and bool(v[lo:hi + 1].any())
 
-def placement_problems(entries: list[dict], flat_words: list[dict], ctx: dict,
+def crowd_runs(words: list[dict]) -> list[tuple[int, int]]:
+    """Every maximal run of at least CROWD_RUN_MIN_WORDS consecutive words (by list order) whose starts are each
+    less than CROWD_RUN_GAP_S after the previous one's start. Returns (first_index, last_index) pairs into `words`,
+    inclusive on both ends."""
+    runs, n, i = [], len(words), 0
+    while i < n:
+        j = i
+        while j + 1 < n and words[j + 1]['a'] - words[j]['a'] < CROWD_RUN_GAP_S: j += 1
+        if j - i + 1 >= CROWD_RUN_MIN_WORDS: runs.append((i, j))
+        i = j + 1
+    return runs
+
+def new_crowd_runs(entries: list[dict], flat_words: list[dict],
+                    before_lines: list[dict] | None) -> list[tuple[float, int]]:
+    """Crowd runs (see crowd_runs) in the corrected words that contain at least one inserted word and aren't
+    already there, at roughly the same time, in the lyrics already published — i.e. crowding this correction
+    introduces, not one the song already had before it. Returns (start_time, word_count) for each."""
+    before_words = al.flat(before_lines) if before_lines else []
+    before_spans = [(before_words[i0]['a'], before_words[i1]['a']) for i0, i1 in crowd_runs(before_words)]
+    out = []
+    for i0, i1 in crowd_runs(flat_words):
+        if not any(entries[k]['kind'] == 'inserted' for k in range(i0, i1 + 1)): continue
+        lo, hi = flat_words[i0]['a'], flat_words[i1]['a']
+        if any(max(lo, b0) <= min(hi, b1) for b0, b1 in before_spans): continue
+        out.append((lo, i1 - i0 + 1))
+    return out
+
+def placement_problems(entries: list[dict], flat_words: list[dict], ctx: dict, before_lines: list[dict] | None = None,
                         before_metrics: dict | None = None, after_metrics: dict | None = None) -> tuple[list[str], list[str]]:
-    """Three placement faults, all measured on the realigned words (flat_words), never a pre-snap estimate:
+    """Placement faults, all measured on the realigned words (flat_words), never a pre-snap estimate:
 
     - an inserted word off the sung voice — always worth refusing over;
     - an inserted word starting within MIN_INSERTED_SPACING_S of a neighbour (either side, any kind) — the onset
       detector's own dedup window (align_lyrics.onsets), so no two distinguishable placements can really be this
       close; this is the harm gate's squeeze packing words onto the voice to shrink uncovered_seconds, not a
       legitimate crowded phrase, and blocks the write;
-    - a correction that grows metrics()['flashing_words'] by more than FLASHING_WORDS_TOLERANCE — the same squeeze
-      tallied by word visibility instead of gap size, catching a crowd that stays just past the 50ms line but is
-      still unreadable end to end.
+    - a crowd run (see new_crowd_runs) — the same squeeze measured locally instead of by a song-wide count, so an
+      ordinarily dense song isn't refused on its everyday density and a real crowd in an otherwise sparse song
+      isn't let through by the song-wide average.
 
-    Separately, inserted words packed closer together than MIN_WORD_SPACING_S but not within the 50ms line above
-    are only ever informational: when a large block of words has to share a short sung stretch, no placement can
-    keep them that far apart, so it is reported but does not by itself block the write.
+    Separately, inserted words packed closer together than MIN_WORD_SPACING_S but not within the 50ms line above,
+    and the song-wide growth in metrics()['flashing_words'], are only ever informational: when a large block of
+    words has to share a short sung stretch, no placement can keep them that far apart, so both are reported but
+    do not by themselves block the write.
 
     Returns (blocking, informational)."""
     blocking, info = [], []
@@ -344,15 +390,16 @@ def placement_problems(entries: list[dict], flat_words: list[dict], ctx: dict,
         near_next = i + 1 < len(flat_words) and flat_words[i + 1]['a'] - flat_words[i]['a'] < MIN_INSERTED_SPACING_S
         if near_prev or near_next: crowded += 1
     if crowded: blocking.append(f'{crowded} inserted word(s) placed within {MIN_INSERTED_SPACING_S}s of a neighbour')
-    if before_metrics is not None and after_metrics is not None:
-        grown = after_metrics['flashing_words'] - before_metrics['flashing_words']
-        if grown > FLASHING_WORDS_TOLERANCE:
-            blocking.append(f'flashing words grew by {grown} (tolerance {FLASHING_WORDS_TOLERANCE})')
+    for start, length in new_crowd_runs(entries, flat_words, before_lines):
+        blocking.append(f'a run of {length} words starting less than {CROWD_RUN_GAP_S}s apart at {start:.1f}s')
     # only two words the placer itself just chose a time for are checked — real fast singing can legitimately
     # place ASR-anchored (matched/substituted) words closer together than this
     close = sum(1 for ea, eb, a, b in zip(entries, entries[1:], flat_words, flat_words[1:])
                 if ea['kind'] == 'inserted' and eb['kind'] == 'inserted' and MIN_INSERTED_SPACING_S <= b['a'] - a['a'] < MIN_WORD_SPACING_S)
     if close: info.append(f'{close} inserted word(s) placed less than {MIN_WORD_SPACING_S}s apart')
+    if before_metrics is not None and after_metrics is not None:
+        grown = after_metrics['flashing_words'] - before_metrics['flashing_words']
+        if grown > 0: info.append(f'flashing words grew by {grown} (informational only, no tolerance)')
     return blocking, info
 
 def gate_verdict(conf: str, before_metrics: dict | None, after_metrics: dict) -> tuple[bool, str | None]:
@@ -387,7 +434,7 @@ def build_correction(pkg: Path, song: dict, asr_words: list[dict], ctx: dict, ra
     before_m = al.metrics(before_lines, ctx) if before_lines else None
     after_m = al.metrics(lines, ctx)
     passed, reason = gate_verdict(conf, before_m, after_m)
-    blocking, info = placement_problems(entries, al.flat(lines), ctx, before_m, after_m)
+    blocking, info = placement_problems(entries, al.flat(lines), ctx, before_lines, before_m, after_m)
     # every blocking reason is named, not just the first one found: a harm-gate refusal and a placement refusal can
     # both apply to the same correction, and an operator deciding whether --force is safe needs to see both
     reasons = ([reason] if reason else []) + (['placement: ' + '; '.join(blocking)] if blocking else [])

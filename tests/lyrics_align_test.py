@@ -251,6 +251,7 @@ class CorrectionReplayTests(unittest.TestCase):
         self.assertTrue(report['correction'] and report['correction'].startswith('refused'))
         after = json.loads((self.pkg / 'target.json').read_text(encoding='utf-8'))
         self.assertEqual([w['w'] for w in al.flat(after['lyrics'])], TEXT, 'a refused correction must not touch the published words')
+        self.assertIn('correction refused:', al.human(report), 'the text-mode report must say the correction was refused, not just the data')
 
     def test_no_cached_source_leaves_correction_unset(self):
         report = al.align_package(self.pkg, write=True, rebuild=False)

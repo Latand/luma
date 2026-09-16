@@ -46,19 +46,22 @@ class RetranscribeCorrectionReplayTests(unittest.TestCase):
         words = [w['w'] for w in al.flat(after['lyrics'])]
         self.assertIn('THREE-CORRECTED', words)
         self.assertIn('corrected to published lyrics', after['lyricsSource'])
+        self.assertEqual(out['correction'], 'applied', "the result must say so, not just leave it to be inferred from the words")
 
     def test_retranscribe_ignores_a_correction_that_fails_the_gate(self):
         self._cache_source('completely unrelated nonsense words sharing nothing with this transcript at all here')
-        rt.retranscribe(self.pkg, 'en', cache_only=True, rebuild=False)
+        out = rt.retranscribe(self.pkg, 'en', cache_only=True, rebuild=False)
         after = json.loads((self.pkg / 'target.json').read_text(encoding='utf-8'))
         words = [w['w'] for w in al.flat(after['lyrics'])]
         self.assertEqual(words, ['one', 'two', 'THREE', 'four', 'five', 'six.'], 'a refused correction must not reach the fresh transcript')
+        self.assertTrue(out['correction'] and out['correction'].startswith('refused'), "the result must say why, not just leave the words to speak for it")
 
     def test_retranscribe_without_a_correction_uses_the_fresh_transcript(self):
         out = rt.retranscribe(self.pkg, 'en', cache_only=True, rebuild=False)
         after = json.loads((self.pkg / 'target.json').read_text(encoding='utf-8'))
         words = [w['w'] for w in al.flat(after['lyrics'])]
         self.assertEqual(words, ['one', 'two', 'THREE', 'four', 'five', 'six.'])
+        self.assertIsNone(out['correction'], "with no cached source, the result must say there was no correction, not omit the key")
 
 
 if __name__ == '__main__':

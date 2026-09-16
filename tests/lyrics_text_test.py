@@ -6,6 +6,7 @@ Runs on synthetic audio and invented nonsense words it generates itself. No netw
 package from the operator's library.
 """
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -48,6 +49,15 @@ def burst_song(pkg: Path, bursts: list[tuple[float, float]], asr_words: list[str
             'hop': hop, 'a4': 440, 'points': points, 'notes': notes, 'phrases': [], 'waveform': [],
             'id': 'synthetic', 'sourceId': 'synthetic', 'lyricsSource': lyrics_source,
             'lyrics': [{'a': asr[0]['a'], 'b': asr[-1]['b'], 'words': asr}]}, asr
+
+
+def _flashing_growth(report: dict) -> int:
+    """The song-wide flashing_words growth reported in a process_package() report's placement_problems, or 0 if
+    none is listed (growth of 0 is never listed, see placement_problems)."""
+    for line in report.get('placement_problems', []):
+        m = re.match(r'flashing words grew by (\d+)', line)
+        if m: return int(m.group(1))
+    return 0
 
 
 def synthetic_package(directory: Path, name: str = 'Synthetic', bursts=BURSTS, asr_words=ASR_WORDS,
@@ -125,6 +135,18 @@ class RepeatedSectionTests(unittest.TestCase):
         asr = [{'a': float(i) * 4, 'b': float(i) * 4 + 3.5, 'w': w, 'c': .9} for i, w in enumerate(words)]
         asr += [{'a': 30 + float(i) * 4, 'b': 30 + float(i) * 4 + 3.5, 'w': w, 'c': .9} for i, w in enumerate(['qq', 'zz', 'pp', 'rr'])]
         self.assertFalse(lt.repeated_insertions(asr, words))
+
+    def test_a_leftover_shorter_than_the_minimum_is_not_restored_even_if_a_short_prefix_of_it_would_match(self):
+        # the leftover run is exactly MIN_REPEAT_WORDS long, and its first 2 words happen to exactly repeat the
+        # start of the true text, but the other 2 are unrelated garbage, so the whole run's agreement with any
+        # true-text window falls well short of REPEAT_MATCH_RATIO: find_repeated_span must never fall back to
+        # trying a shorter, 2-word-only prefix just because that alone would match well.
+        words = ['aa', 'bb', 'cc', 'dd', 'ee']
+        t_norm = [al.norm(w) for w in words]
+        leftover = ['aa', 'bb', 'xx', 'yy']
+        self.assertIsNone(lt.find_repeated_span(leftover, t_norm), 'a leftover this short, with this little real agreement, must not be restored')
+        leftover_full = ['aa', 'bb', 'cc', 'dd']
+        self.assertIsNotNone(lt.find_repeated_span(leftover_full, t_norm), 'a full MIN_REPEAT_WORDS-long, well-matching prefix must still be found')
 
     def test_a_replace_shaped_leftover_is_recovered_not_just_a_pure_delete(self):
         # the word at the join was MISHEARD (asr text 'zjoin' vs published 'join'), so difflib cannot match it and
@@ -538,18 +560,45 @@ class PlacementGateTests(unittest.TestCase):
         blocking, info = lt.placement_problems(entries, words, {'voiced': v})
         self.assertTrue(blocking, 'the 50ms check looks at any neighbour, not only another inserted word')
 
-    def test_flashing_word_growth_past_the_tolerance_blocks(self):
+    def test_flashing_word_growth_never_blocks_on_its_own(self):
+        # a large, song-wide growth in flashing_words alone must never refuse: it refuses an ordinarily dense song
+        # on its everyday density (see new_crowd_runs, which catches the real, local crowd instead)
         before = {'flashing_words': 10}
-        after = {'flashing_words': 10 + lt.FLASHING_WORDS_TOLERANCE + 1}
-        blocking, info = lt.placement_problems([], [], {'voiced': np.ones(10, dtype=bool)}, before, after)
-        self.assertTrue(blocking)
-        self.assertIn('flashing', blocking[0])
-
-    def test_flashing_word_growth_within_the_tolerance_does_not_block(self):
-        before = {'flashing_words': 10}
-        after = {'flashing_words': 10 + lt.FLASHING_WORDS_TOLERANCE}
-        blocking, info = lt.placement_problems([], [], {'voiced': np.ones(10, dtype=bool)}, before, after)
+        after = {'flashing_words': 10 + 1000}
+        blocking, info = lt.placement_problems([], [], {'voiced': np.ones(10, dtype=bool)},
+                                                before_metrics=before, after_metrics=after)
         self.assertFalse(blocking)
+        self.assertIn('flashing', info[0])
+
+    def test_flashing_word_growth_is_omitted_when_there_is_none(self):
+        before = {'flashing_words': 10}
+        after = {'flashing_words': 10}
+        blocking, info = lt.placement_problems([], [], {'voiced': np.ones(10, dtype=bool)},
+                                                before_metrics=before, after_metrics=after)
+        self.assertFalse(blocking); self.assertFalse(info)
+
+    def test_a_new_crowd_run_containing_an_inserted_word_blocks(self):
+        v = np.ones(1000, dtype=bool)
+        entries = [{'kind': 'matched', 'src': 0}] + [{'kind': 'inserted', 'src': None} for _ in range(3)]
+        words = [{'a': 5.00}, {'a': 5.06}, {'a': 5.12}, {'a': 5.18}]   # 4 starts, each < CROWD_RUN_GAP_S apart
+        blocking, info = lt.placement_problems(entries, words, {'voiced': v})
+        self.assertTrue(blocking)
+        self.assertIn('4 words', blocking[-1]); self.assertIn('5.0s', blocking[-1])
+
+    def test_a_crowd_run_already_in_the_published_lyrics_does_not_block(self):
+        v = np.ones(1000, dtype=bool)
+        entries = [{'kind': 'matched', 'src': 0}] + [{'kind': 'inserted', 'src': None} for _ in range(3)]
+        words = [{'a': 5.00}, {'a': 5.06}, {'a': 5.12}, {'a': 5.18}]
+        before_lines = [{'words': [{'w': f'x{i}', 'a': w['a'], 'b': w['a'] + .05} for i, w in enumerate(words)]}]
+        blocking, info = lt.placement_problems(entries, words, {'voiced': v}, before_lines=before_lines)
+        self.assertFalse(blocking, 'a crowd already in the lyrics published now is not one this correction introduced')
+
+    def test_a_crowd_run_of_only_matched_or_substituted_words_does_not_block(self):
+        v = np.ones(1000, dtype=bool)
+        entries = [{'kind': 'matched', 'src': i} for i in range(4)]   # real fast singing, nothing inserted
+        words = [{'a': 5.00}, {'a': 5.06}, {'a': 5.12}, {'a': 5.18}]
+        blocking, info = lt.placement_problems(entries, words, {'voiced': v})
+        self.assertFalse(blocking, 'a tight run with no inserted word in it is real fast singing, not a placement fault')
 
 
 class HarmGateTests(unittest.TestCase):
@@ -605,7 +654,60 @@ class HarmGateTests(unittest.TestCase):
             r = lt.process_package(pkg, str(text_file), write=True, rebuild=False)
             self.assertIn('skipped', r)
             self.assertIn('placement', r['skipped'])
-            self.assertNotIn('uncovered', r['skipped'], 'this refusal must be about placement, not harm')
+            self.assertNotIn('uncovered', r['skipped'], 'this refusal must be about harm, not placement')
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
+
+    def test_five_inserted_words_close_together_are_gated_locally_not_by_song_wide_flashing_growth(self):
+        # 5 words with no ASR counterpart squeeze into one continuously sung pocket between two real ASR words —
+        # each lands roughly 90ms after the previous, well past the 50ms dedup window and (flashing growth of 1)
+        # within the old, now-removed FLASHING_WORDS_TOLERANCE (5), so nothing about this shape ever tripped the
+        # old gate; only the local crowd-run check (new in this round) catches it.
+        directory = Path(tempfile.mkdtemp(prefix='luma-lyrics-crowd85-'))
+        bursts = [(.5, .9), (2.0, 2.4), (3.50, 4.01), (6.01, 6.41)]
+        asr_words = ['flim', 'borp', 'dax', 'shuzzle']
+        pkg = synthetic_package(directory, bursts=bursts, asr_words=asr_words, duration=8.0)
+        text_file = directory / 'crowd85.txt'
+        text_file.write_text('flim dax nix vop tez rull sump shuzzle', encoding='utf-8')
+        try:
+            r = lt.process_package(pkg, str(text_file), write=True, rebuild=False)
+            self.assertLessEqual(_flashing_growth(r), 5, 'this case must stay within the old, now-removed song-wide tolerance')
+            if 'skipped' in r:
+                self.assertIn('a run of', r['skipped'], 'this must be the new local crowd-run check, not any older reason')
+            else:
+                after_words = al.flat(json.loads((pkg / 'target.json').read_text(encoding='utf-8'))['lyrics'])
+                self.assertFalse(lt.crowd_runs(after_words), 'if written, the crowd must have been genuinely spread out')
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
+
+    def test_scattered_inserted_words_that_grow_flashing_past_the_old_tolerance_are_written(self):
+        # 10 words with no ASR counterpart, each in its own separated sung stretch roughly 0.2s from its
+        # neighbours — ordinary density, not a crowd — grows metrics()['flashing_words'] by more than the old,
+        # now-removed FLASHING_WORDS_TOLERANCE (5), which used to refuse this on song-wide density alone. An
+        # 8-word matched run at the start of the song is there only to keep confidence at 'medium' or better.
+        directory = Path(tempfile.mkdtemp(prefix='luma-lyrics-scattered-'))
+        t, pad_bursts = .5, []
+        for _ in range(8): pad_bursts.append((round(t, 2), round(t + .15, 2))); t += .2
+        t += 1.0
+        dax_burst = (t, t + .35); t += .4
+        mid = []
+        for _ in range(10): mid.append((round(t, 2), round(t + .15, 2))); t += .2
+        shuzzle_burst = (t + .3, t + .7)
+        bursts = pad_bursts + [dax_burst] + mid + [shuzzle_burst]
+        pad_words = [f'sh{i}' for i in range(8)]
+        asr_words = pad_words + ['dax'] + [f'q{i}' for i in range(10)] + ['shuzzle']
+        pkg = synthetic_package(directory, bursts=bursts, asr_words=asr_words, duration=t + 2.0)
+        for path, key in ((pkg / 'target.json', 'lyrics'), (pkg / 'lyrics' / 'mix.json', 'lines')):
+            data = json.loads(path.read_text(encoding='utf-8'))
+            for line in data[key]: line['words'] = [w for w in line['words'] if not w['w'].startswith('q')]
+            path.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+        text_file = directory / 'scattered.txt'
+        words = pad_words + ['dax'] + [f'w{i}' for i in range(10)] + ['shuzzle']
+        text_file.write_text(' '.join(words), encoding='utf-8')
+        try:
+            r = lt.process_package(pkg, str(text_file), write=True, rebuild=False)
+            self.assertGreater(_flashing_growth(r), 5, 'this case must actually exceed the old, now-removed tolerance')
+            self.assertNotIn('skipped', r, 'ordinary scattered density must not be refused')
         finally:
             shutil.rmtree(directory, ignore_errors=True)
 
