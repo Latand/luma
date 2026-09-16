@@ -21,10 +21,12 @@ different: it moves the song to the vocal transcript and replays the same correc
 still passes the gate on that new transcript — if it doesn't, the command writes the raw vocal words instead, with
 no correction at all, and the previously-corrected text is gone from the published song until it's corrected again.
 The
-true lyric text is sequence-aligned against the normalized ASR words: a matched word keeps the ASR timing, a
-substituted word takes the timing of the word(s) it replaces, a true word with no ASR counterpart gets its start
-interpolated inside the nearest sung stretch when there is one (off the voice entirely, clustered right after the
-previous word, only when there is none at all), and a heard word with no true counterpart is dropped — unless it is
+true lyric text is sequence-aligned against the normalized ASR words: a matched word keeps the ASR timing; a
+substituted word takes the timing of the word(s) it replaces, unless it sits next to a run of inserted words whose
+own window has no room, in which case it moves too (see fill_gaps) — only a matched word's time is ever off limits;
+a true word with no ASR counterpart gets its start interpolated inside the nearest sung stretch when there is one
+(off the voice entirely, clustered right after the previous word, only when there is none at all), and a heard word
+with no true counterpart is dropped — unless it is
 part of a run that repeats a span already used elsewhere in the true text (a chorus the source only writes out
 once, from either end of the run, whichever agrees better), in which case that span is duplicated back in rather
 than losing the words. Word order never changes within the true text as given; repeats are the one place new text
@@ -262,43 +264,81 @@ def restore_repeats(asr_words: list[dict], true_tokens: list[str]) -> tuple[list
         restored += len(insertions)
     return true_tokens, entries, restored
 
+def _legalize_targets(total: float, count: int, spacing: float) -> list[float] | None:
+    """`count` virtual positions strictly inside (0, total), spread proportionally and then legalized so every
+    consecutive pair — including the implicit edges at 0 and total — is at least `spacing` apart: a forward pass
+    (each point pushed at least `spacing` past the one before) followed by a backward pass (each point pulled at
+    least `spacing` before the one after, so a marginal window can't crunch the last few points against its far
+    edge the way a forward-only push would). None when the window can't fit `count` points this far apart at all."""
+    if count <= 0: return []
+    if total <= 0: return None
+    targets = [total * (k + 1) / (count + 1) for k in range(count)]
+    for k in range(1, count): targets[k] = max(targets[k], targets[k - 1] + spacing)
+    if targets[-1] > total: return None
+    for k in range(count - 2, -1, -1): targets[k] = min(targets[k], targets[k + 1] - spacing)
+    if targets[0] < 0: return None
+    return targets
+
+def _spread_targets(total: float, count: int) -> list[float]:
+    """The best spacing this window's voiced time can give `count` points: MIN_WORD_SPACING_S throughout when the
+    window can fit it, else CROWD_RUN_GAP_S — the floor the placement gate itself refuses under — when it can fit
+    that instead, else the plain proportional spread (already the largest achievable minimum gap for that many
+    points in that much voice, so left as is rather than forced closer to one edge)."""
+    for spacing in (MIN_WORD_SPACING_S, CROWD_RUN_GAP_S):
+        legal = _legalize_targets(total, count, spacing)
+        if legal is not None: return legal
+    return [total * (k + 1) / (count + 1) for k in range(count)]
+
 def fill_gaps(entries: list[dict], ctx: dict) -> list[dict]:
     """Every 'inserted' entry without a seed time gets one, placed only inside sung stretches between its
     neighbours' times and never past the end of the last sung stretch; realign() snaps it to the nearest vocal onset
     afterwards. A group of entries is spread proportionally to the sung time available, not linearly across the raw
-    gap (which can run through long silences), and never closer together than MIN_WORD_SPACING_S when the window
-    between the neighbours can fit that spacing throughout, including at each edge — checked both forward (each
-    point pushed at least MIN_WORD_SPACING_S past the one before) and backward (each point pulled at least
-    MIN_WORD_SPACING_S before the one after, so a marginal window can't crunch the last few points against its far
-    edge the way a forward-only push would). When the window genuinely cannot fit that spacing throughout, the raw
-    proportional spread already places every point as far from its neighbours as the available sung time allows
-    (the largest achievable minimum gap for that many points in that much voice), so it is left as is rather than
-    forced closer to one edge. When there is no sung time at all between the neighbours, the group is clustered
-    right after the previous one instead of spread blindly across the silence — still off the voice, but not
-    scattered to an arbitrary point in the gap. Never touches an entry that already has a time."""
+    gap (which can run through long silences), and spaced at least CROWD_RUN_GAP_S apart — MIN_WORD_SPACING_S where
+    the window has room for it — when the window between the neighbours can fit that (see _spread_targets).
+
+    When the immediate window can't fit even CROWD_RUN_GAP_S, it is widened past any 'substituted' neighbour (a
+    real heard word's time, but not a published word's — moving it costs nothing a matched word wouldn't) all the
+    way to the nearest 'matched' neighbour on that side, whose time is never touched, and every entry in the wider
+    span — substituted ones included — is respread there. This can turn a run of packed inserted words plus one
+    pinned substituted word into a run that is actually spaced apart, when the matched words bounding it are far
+    enough apart to hold them all; when even that wider window can't fit CROWD_RUN_GAP_S, the widened attempt is
+    dropped and the immediate window's best-effort spread (see _spread_targets) is kept, for placement_problems to
+    judge — genuinely packed singing, not a placement this function could have done better.
+
+    When there is no sung time at all in the window used, the group is clustered right after the previous entry
+    instead of spread blindly across the silence — still off the voice, but not scattered to an arbitrary point in
+    the gap. Never touches a 'matched' entry, and never touches any entry outside the window actually used."""
     regions, duration = ctx['regions'], ctx['duration']
     last_voice_end = regions[-1][1] if regions else duration
+    def window_regions(pt: float, nt: float) -> list[tuple[float, float]]:
+        return [(max(a, pt), min(b, nt)) for a, b in regions if b > pt and a < nt] if nt > pt else []
     n = len(entries); i = 0
     while i < n:
         if entries[i]['a'] is not None: i += 1; continue
-        j = i
-        while j < n and entries[j]['a'] is None: j += 1
-        prev_t = entries[i - 1]['a'] if i > 0 else 0.0
-        next_t = entries[j]['a'] if j < n else last_voice_end
-        if next_t > last_voice_end: next_t = last_voice_end
-        count = j - i
-        span_regions = [(max(a, prev_t), min(b, next_t)) for a, b in regions if b > prev_t and a < next_t] if next_t > prev_t else []
-        if not span_regions:
-            for k, idx in enumerate(range(i, j)):
-                entries[idx]['a'] = round(min(prev_t + MIN_WORD_SPACING_S * (k + 1), max(next_t, prev_t)), 3)
-            i = j; continue
+        lo = i; hi = i
+        while hi < n and entries[hi]['a'] is None: hi += 1
+        prev_t = entries[lo - 1]['a'] if lo > 0 else 0.0
+        next_t = min(entries[hi]['a'], last_voice_end) if hi < n else last_voice_end
+        span_regions = window_regions(prev_t, next_t)
+        count = hi - lo
         total = sum(b - a for a, b in span_regions)
-        targets = [total * (k + 1) / (count + 1) for k in range(count)]
-        legal = list(targets)
-        for k in range(1, count): legal[k] = max(legal[k], legal[k - 1] + MIN_WORD_SPACING_S)
-        if legal[-1] <= total:   # the window can fit the spacing without pushing the last point past its edge —
-            for k in range(count - 2, -1, -1): legal[k] = min(legal[k], legal[k + 1] - MIN_WORD_SPACING_S)
-            if legal[0] >= 0: targets = legal   # ...and pulling back still leaves the first point past its own edge
+        if _legalize_targets(total, count, CROWD_RUN_GAP_S) is None:
+            wlo, whi = lo, hi
+            while wlo > 0 and entries[wlo - 1]['kind'] != 'matched': wlo -= 1
+            while whi < n and entries[whi]['kind'] != 'matched': whi += 1
+            if (wlo, whi) != (lo, hi):
+                w_prev_t = entries[wlo - 1]['a'] if wlo > 0 else 0.0
+                w_next_t = min(entries[whi]['a'], last_voice_end) if whi < n else last_voice_end
+                w_regions = window_regions(w_prev_t, w_next_t)
+                w_count = whi - wlo
+                w_total = sum(b - a for a, b in w_regions)
+                if _legalize_targets(w_total, w_count, CROWD_RUN_GAP_S) is not None:
+                    lo, hi, prev_t, next_t, span_regions, count, total = wlo, whi, w_prev_t, w_next_t, w_regions, w_count, w_total
+        if not span_regions:
+            for k, idx in enumerate(range(lo, hi)):
+                entries[idx]['a'] = round(min(prev_t + MIN_WORD_SPACING_S * (k + 1), max(next_t, prev_t)), 3)
+            i = hi; continue
+        targets = _spread_targets(total, count)
         placed = []
         for target in targets:
             t, run = prev_t, 0.0
@@ -307,8 +347,8 @@ def fill_gaps(entries: list[dict], ctx: dict) -> list[dict]:
                 if run + seg >= target: t = a + (target - run); break
                 run += seg; t = b
             placed.append(t)
-        for k, idx in enumerate(range(i, j)): entries[idx]['a'] = round(min(placed[k], next_t), 3)
-        i = j
+        for k, idx in enumerate(range(lo, hi)): entries[idx]['a'] = round(min(placed[k], next_t), 3)
+        i = hi
     return entries
 
 def seed_words(entries: list[dict], asr_words: list[dict]) -> list[dict]:

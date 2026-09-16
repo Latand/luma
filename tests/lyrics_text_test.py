@@ -680,6 +680,26 @@ class HarmGateTests(unittest.TestCase):
         finally:
             shutil.rmtree(directory, ignore_errors=True)
 
+    def test_a_run_that_cannot_fit_its_immediate_window_is_spread_by_widening_past_a_substituted_neighbour(self):
+        # 4 inserted words plus one substituted word ('subw', misheard as 'heardS') have almost no sung time in
+        # their immediate window (between the substituted word and the next matched word, 'trask') — that alone
+        # cannot fit even CROWD_RUN_GAP_S. But 'dax', the matched word just before the substituted one, holds a
+        # full second of continuous singing that the substituted word can move into, since only a matched word's
+        # time is off limits: widened all the way back to 'dax', the run fits without a single blocking reason.
+        directory = Path(tempfile.mkdtemp(prefix='luma-lyrics-widen-'))
+        bursts = [(.5, .9), (2.0, 2.4), (3.50, 4.50), (4.6, 4.7), (6.0, 6.4)]
+        asr_words = ['flim', 'borp', 'dax', 'heardS', 'trask']
+        pkg = synthetic_package(directory, bursts=bursts, asr_words=asr_words, duration=8.0)
+        text_file = directory / 'widen.txt'
+        text_file.write_text('flim dax subw nix vop tez rull trask', encoding='utf-8')
+        try:
+            r = lt.process_package(pkg, str(text_file), write=True, rebuild=False)
+            self.assertNotIn('skipped', r, 'the wider window, once reached, has enough room for this run')
+            after_words = al.flat(json.loads((pkg / 'target.json').read_text(encoding='utf-8'))['lyrics'])
+            self.assertFalse(lt.crowd_runs(after_words), 'a run this widening fixed must not still show up as a crowd')
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
+
     def test_scattered_inserted_words_that_grow_flashing_past_the_old_tolerance_are_written(self):
         # 10 words with no ASR counterpart, each in its own separated sung stretch roughly 0.2s from its
         # neighbours — ordinary density, not a crowd — grows metrics()['flashing_words'] by more than the old,
