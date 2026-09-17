@@ -248,19 +248,52 @@ def aligned_note(lyrics_source: str) -> str:
     base = (lyrics_source or 'Soniox stt-async-v5').split('; aligned')[0]
     return base + '; aligned offline to vocal onsets (align_lyrics.py)'
 
+def corrected_seed(pkg: Path, song: dict, asr_words: list[dict], ctx: dict) -> dict | None:
+    """If lyrics_text.py has a cached, still-valid lyrics correction for this package, the full build_correction()
+    result for it — otherwise None. Running the correction through the same checks a direct correction would (the
+    shared pipeline, not a re-implementation) means a plain re-alignment can never regress one that passed, and
+    never silently applies one that wouldn't have. Imported lazily: lyrics_text.py imports this module at load time,
+    so importing it back here has to wait until the first call, by which point this module has already loaded."""
+    import lyrics_text as lt
+    raw_text = lt.cached_source_text(pkg)
+    if raw_text is None: return None
+    return lt.build_correction(pkg, song, asr_words, ctx, raw_text, 'cached')
+
+def corrected_note_for(existing: str, src: str) -> str:
+    import lyrics_text as lt
+    return lt.corrected_note(existing, src)
+
+def resolved_prefer(pkg: Path, song: dict, prefer: str) -> str:
+    """When a cached, still-valid lyrics correction exists, `auto` must replay it from the transcript the song is
+    already published from (lyrics_text.preferred_source) rather than transcript()'s own vocal-first default —
+    otherwise a plain re-align can silently move a song correction onto the other transcript, where corrected_seed
+    then refuses or rebuilds it against words it was never checked against. With no cached correction to protect,
+    `auto` keeps its old vocal-first behaviour. An explicit --from is never overridden."""
+    if prefer != 'auto': return prefer
+    import lyrics_text as lt
+    if lt.cached_source_text(pkg) is None: return 'auto'
+    want = lt.preferred_source(song)
+    return want if (pkg / 'lyrics' / f'{want}.json').exists() else 'auto'
+
 def align_package(pkg: Path, write: bool, rebuild: bool = True, prefer: str = 'auto') -> dict:
     song = json.loads((pkg / 'target.json').read_text(encoding='utf-8'))
-    words, src, note = transcript(pkg, song, prefer)
+    words, src, note = transcript(pkg, song, resolved_prefer(pkg, song, prefer))
     ctx = context(pkg, song)
     before = song.get('lyrics') or []
-    after = realign(flat(words), ctx)
-    assert [w['w'] for w in flat(after)] == [w['w'] for w in flat(words)], 'the transcript text must survive re-alignment'
-    moved = [abs(b['a'] - a['a']) for a, b in zip(flat(words), flat(after))]
+    raw_words = flat(words)
+    correction = corrected_seed(pkg, song, raw_words, ctx)
+    applied = correction is not None and correction['passed']
+    seed = correction['seed'] if applied else raw_words
+    after = correction['lines'] if applied else realign(raw_words, ctx)
+    assert [w['w'] for w in flat(after)] == [w['w'] for w in seed], 'the transcript text must survive re-alignment'
+    moved = [abs(b['a'] - a['a']) for a, b in zip(seed, flat(after))]
+    correction_status = 'applied' if applied else (f"refused: {correction['reason']}" if correction is not None else None)
     out = {'package': pkg.name, 'source': src, 'moved': stat(moved), 'snapped': sum(1 for m in moved if m > 1e-9),
-           'before': metrics(before, ctx) if before else None, 'after': metrics(after, ctx)}
+           'before': metrics(before, ctx) if before else None, 'after': metrics(after, ctx), 'correction': correction_status}
     if write:
         save_transcript(pkg, src, words, note)
-        write_song(pkg, song, after, aligned_note(note))
+        out_note = corrected_note_for(note, src) if applied else aligned_note(note)
+        write_song(pkg, song, after, out_note)
         if rebuild: out['html'] = str(build_html(pkg, pkg.parent / f'Luma_{pkg.name}.html'))
     return out
 
@@ -313,6 +346,7 @@ def human(r: dict) -> str:
     b, a = r['before'], r['after']
     lines = [f"{r['package']}: {a['words']} words from the {r['source']} transcript, {r['snapped']} starts snapped to a vocal onset "
              f"(median move {r['moved']['med']:.2f} s, p90 {r['moved']['p90']:.2f} s)"]
+    if r.get('correction'): lines.append(f"  correction {r['correction']}")
     if b:
         lines += [f"  onset error vs the pitch map (independent of the onsets used for snapping) median "
                   f"{b['onset_error_pitchmap']['med']:+.3f} -> {a['onset_error_pitchmap']['med']:+.3f} s, "

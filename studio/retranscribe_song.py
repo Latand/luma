@@ -22,8 +22,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'studio'))
-from align_lyrics import aligned_note, build_html, context, flat, realign, save_transcript, write_song
+from align_lyrics import aligned_note, build_html, context, corrected_seed, flat, realign, save_transcript, write_song
 from prepare_song import ffmpeg, group_lines, log, merge_tokens, sha256, soniox_key, soniox_tokens
+import lyrics_text as lt   # no cycle: lyrics_text imports align_lyrics, not this module
 
 MODEL = 'stt-async-v5'
 PAID_CALLS_ALLOWED = False      # only main() flips this, so an import can never reach the paying branch
@@ -76,10 +77,16 @@ def retranscribe(pkg: Path, lang: str, cache_only: bool = False, rebuild: bool =
     words = merge_tokens(payload['tokens'])
     note = f'Soniox {payload["model"]} on the Demucs vocal stem, {payload["created"][:10]}, automatic word timings'
     save_transcript(pkg, 'vocal', group_lines(words), note)
-    lines = realign(words, context(pkg, song))
-    assert [w['w'] for w in flat(lines)] == [w['w'] for w in words], 'the transcript text must survive re-alignment'
-    write_song(pkg, song, lines, aligned_note(note))
-    out = {'package': pkg.name, 'words': len(words), 'lines': len(lines), 'words_before': len(flat(before)), 'lines_before': len(before)}
+    ctx = context(pkg, song)
+    correction = corrected_seed(pkg, song, words, ctx)   # a passing lyrics correction must survive a fresh transcription too
+    applied = correction is not None and correction['passed']
+    seed = correction['seed'] if applied else words
+    lines = correction['lines'] if applied else realign(seed, ctx)
+    assert [w['w'] for w in flat(lines)] == [w['w'] for w in seed], 'the transcript text must survive re-alignment'
+    write_song(pkg, song, lines, lt.corrected_note(note, 'vocal') if applied else aligned_note(note))
+    correction_status = 'applied' if applied else (f"refused: {correction['reason']}" if correction is not None else None)
+    out = {'package': pkg.name, 'words': len(words), 'lines': len(lines), 'words_before': len(flat(before)),
+           'lines_before': len(before), 'correction': correction_status}
     if rebuild: out['html'] = str(build_html(pkg, pkg.parent / f'Luma_{pkg.name}.html'))
     return out
 
