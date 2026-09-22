@@ -97,11 +97,14 @@ Four bytes a frame instead of 96 000 a second:
   song. The rest drop out as attempts leave the twenty; the summary and the score stay.
 - There is no storage ceiling of its own. The retention above keeps a song's traces to about 3 MB, so a quarter of a
   gigabyte would take the history of some eighty songs, and a browser quota that does run out is caught on the write.
-- A `QuotaExceededError` never loses the attempt from the tab: it stays in the list marked «не збережено в історію» and
-  counts as unsaved, so × asks first, closing the tab warns, and the tab never drops it to make room. The footer of the
-  Прогрес tab says what to do, and «Очистити пісню» writes such attempts again once there is room.
-- `navigator.storage.persist()` is requested once, on the first write. If the browser says no, the footer says the
-  browser may clear the history and that export is the answer.
+- A `QuotaExceededError` never loses the attempt from the tab: it stays in the list marked «не записано в історію»,
+  × asks first, closing the tab warns, and the tab never drops it to make room — the one case where the trainer speaks
+  up, because that line exists nowhere else. It is written again by itself after any write the store accepts, on every
+  «Співати» that such attempts hold back, and after «Очистити пісню».
+- `navigator.storage.persist()` is requested once, on the first write. The answer is kept for the diagnostics and never
+  turned into a request to export.
+- A reopened trainer puts the newest attempts whose trace is kept — up to the 20 the tab holds — back into its list,
+  re-scored under the current map and without audio. Nothing has to be saved for the line to come back.
 
 ## Export and import
 

@@ -55,6 +55,11 @@ await p.waitForTimeout(2100 + 3000); await p.evaluate(() => document.getElementB
 const t1 = await st(); const loud = t1.takes[0];
 assert(t1.takes.length === 2 && loud.hasAudio && loud.bytes > 44 && loud.duration > 2 && !t1.err, 'microphone take recorded with audio ' + JSON.stringify(loud));
 assert((await cardButtons()).includes('WAV'), 'the card of an attempt with audio offers its WAV');
+const quietClose = await p.evaluate(() => { const e = new Event('beforeunload', {cancelable: true}); window.dispatchEvent(e);
+  const card = document.querySelector('#takesList .take');
+  return {blocked: e.defaultPrevented, hint: document.getElementById('takesHint').textContent, title: card.querySelector('.take-title').textContent, folded: card.querySelector('.take-files').hidden}; });
+assert(!quietClose.blocked && !/[Зз]береж/.test(quietClose.hint + quietClose.title) && quietClose.folded,
+  'a WAV nobody downloaded neither holds the tab open nor asks for a save, and its file waits behind ↓ ' + JSON.stringify(quietClose));
 await p.evaluate(w => window.Luma.test.seek(w.a + 1.2), win); await p.waitForTimeout(100);
 const t2 = await st(); assert(t2.punch === loud.id && /Перезаписати/.test(t2.label), 'punch-in offered inside the take');
 await p.evaluate(() => document.getElementById('singBtn').click()); await p.waitForTimeout(2100 + 2500); await p.evaluate(() => document.getElementById('stopBtn').click()); await p.waitForTimeout(1200);
