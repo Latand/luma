@@ -166,19 +166,31 @@ await p.setViewportSize({width:390,height:844});
 assert(await p.locator('#listenBtn').getAttribute('aria-label') === 'Слухати пісню', 'mobile listen has an accessible name');
 const dimensions = await p.evaluate(() => ({page:document.documentElement.scrollWidth,view:innerWidth}));
 assert(dimensions.page === dimensions.view, 'trainer fits the narrow viewport');
-// ── two budgets: the WAV limit only when the voice is being recorded; the trace limit never stops practice ──
+// ── two budgets, and neither one stops practice or asks for a save: the WAV budget frees the oldest voices by itself ──
 const setAudio=on=>p.evaluate(v=>{const c=document.getElementById('recordAudio');c.checked=v;c.dispatchEvent(new Event('change'));},on);
+const singFor=async ms=>{await p.locator('#singBtn').click();await p.waitForFunction(()=>window.Luma.test.state().mode==='singing',null,{timeout:9000});
+  const banner=await p.locator('#errorBanner').isVisible();await p.waitForTimeout(ms);await p.locator('#stopBtn').click();
+  await p.waitForFunction(()=>window.Luma.test.state().mode==='idle'&&!document.getElementById('singBtn').disabled,null,{timeout:9000});await p.waitForTimeout(400);return banner;};
 await setAudio(true);
-await p.evaluate(()=>{
+const long=await p.evaluate(()=>{
   window.Luma.test.closeTrace();window.LUMA_SONG.duration=600;
-  window.Luma.test.injectTake({a:0,b:600,points:[],audio:true});
-  window.Luma.test.setRange(1,3);window.Luma.test.seek(1);
+  const r=window.Luma.test.injectTake({a:0,b:600,points:[],audio:true});
+  window.Luma.test.setRange(1,3);window.Luma.test.seek(1);return r.id;
 });
-await p.locator('#singBtn').click();await p.waitForFunction(()=>!document.querySelector('#errorBanner').hidden);
-assert((await p.locator('#errorText').textContent()).includes('Ліміт пам’яті'), 'short punch reserves its full replacement plus the undo WAV');
+// a punch into a take this long cannot keep its old WAV for undo beside the full replacement, so it keeps no undo
+assert(!(await singFor(3200)),'a punch past the WAV budget records instead of refusing');
+const punched=await p.evaluate(id=>({take:window.Luma.test.takes().find(t=>t.id===id),undo:!document.getElementById('undoPunchBtn').hidden}),long);
+assert(punched.take.punches===1&&punched.take.hasAudio&&!punched.undo&&punched.take.bytes<100*1024*1024,
+  'the punch merged into the take and kept no undo copy it had no room for '+JSON.stringify({punches:punched.take.punches,bytes:punched.take.bytes,undo:punched.undo}));
+// a fresh full pass needs room the old voice holds: that voice leaves memory, the attempt and its line stay
 await p.evaluate(()=>{window.Luma.test.closeTrace();window.Luma.test.clearRange();window.Luma.test.seek(600);});
-await p.locator('#singBtn').click();await p.waitForFunction(()=>!document.querySelector('#errorBanner').hidden);
-assert((await p.locator('#errorText').textContent()).includes('Ліміт пам’яті'), 'starting at song end reserves the restarted full song');
+assert(!(await singFor(2600)),'starting at song end with a full WAV budget records instead of refusing');
+const freed=await p.evaluate(id=>{const T=window.Luma.test;return {old:T.takes().find(t=>t.id===id),newest:T.takes()[0],
+  unload:(()=>{const e=new Event('beforeunload',{cancelable:true});window.dispatchEvent(e);return e.defaultPrevented;})(),
+  hint:document.getElementById('takesHint').textContent,titles:[...document.querySelectorAll('#takesList .take-title')].map(e=>e.textContent).join(' | ')};},long);
+assert(freed.old&&!freed.old.hasAudio&&freed.old.bytes===0&&freed.old.points===punched.take.points&&freed.newest.hasAudio&&freed.newest.id!==long,
+  'the old voice was freed by itself and its attempt kept its line '+JSON.stringify({old:freed.old,newest:freed.newest&&freed.newest.id}));
+assert(!freed.unload&&!/[Зз]береж/.test(freed.hint+freed.titles),'a WAV nobody downloaded neither holds the tab open nor asks for a save '+JSON.stringify({unload:freed.unload,hint:freed.hint}));
 // with the switch off there is no WAV to budget, so the very same attempt is allowed
 await setAudio(false);
 await p.evaluate(()=>{window.Luma.test.closeTrace();window.Luma.test.seek(600);document.getElementById('errorBanner').hidden=true;});
@@ -198,7 +210,9 @@ await p.locator('#stopBtn').click();await p.waitForFunction(()=>window.Luma.test
       if(!document.getElementById('errorBanner').hidden)w.banner=document.getElementById('errorText').textContent;
       const toast=document.getElementById('toast').textContent;if(/Повтор зупинено/.test(toast))w.stopped=toast;},30);},win.a);
   await q.locator('#singBtn').click();
-  await q.waitForFunction(()=>window.Luma.test.history.runs().length>=30||window.__room.banner||window.__room.stopped,null,{timeout:90000});
+  // the loop goes off in the very tick the thirtieth attempt is seen, before its 60 ms restart can open a thirty-first pass
+  await q.waitForFunction(()=>{const done=window.Luma.test.history.runs().length>=30||window.__room.banner||window.__room.stopped;
+    if(done&&window.Luma.test.state().loop)document.getElementById('loopBtn').click();return done;},null,{timeout:90000,polling:10});
   await q.evaluate(()=>{if(window.Luma.test.state().loop)document.getElementById('loopBtn').click();document.getElementById('stopBtn').click();});
   await q.waitForTimeout(1500);
   const room=await q.evaluate(()=>{const w=window.__room,T=window.Luma.test;clearInterval(w.timer);
@@ -210,6 +224,22 @@ await p.locator('#stopBtn').click();await p.waitForFunction(()=>window.Luma.test
   assert(gone.length>=10&&JSON.stringify(gone)===JSON.stringify(early.slice(-gone.length))&&gone.every(id=>room.runs.includes(id)),
     'the attempts that left the tab are the oldest ones, and every one of them is in the history '+JSON.stringify({gone:gone.length}));
   assert(qlogs.length===0,'thirty attempts in a row keep the console clean: '+JSON.stringify(qlogs));
+  await q.close();
+}
+// ── the notes keep their height however many attempts pile up: the list scrolls inside a panel of fixed height ──
+for(const [width,height] of [[1440,900],[1366,768],[390,844]]){
+  const {page:q,logs:qlogs}=await open(b,{width,height});
+  const look=()=>q.evaluate(()=>{const list=document.getElementById('takesList');return {stage:Math.round(document.getElementById('chartWrap').getBoundingClientRect().height),
+    dense:document.getElementById('chartWrap').dataset.dense,panel:Math.round(document.getElementById('takesPanel').getBoundingClientRect().height),scrolls:list.scrollHeight>list.clientHeight+1,page:document.documentElement.scrollHeight};});
+  const add=n=>q.evaluate(({a,b,n})=>{const T=window.Luma.test;for(let i=0;i<n;i++)T.injectTake({a,b,points:[]});T.closeTrace();},{...win,n});
+  await add(1);await q.waitForTimeout(250);const one=await look();
+  await add(15);await q.waitForTimeout(250);const many=await look();
+  assert(many.stage===one.stage&&many.dense===one.dense&&many.scrolls,
+    'sixteen attempts leave the stage and the fold of its head exactly as one attempt did at '+width+'x'+height+' '+JSON.stringify({one,many}));
+  // a desktop panel is one height from the first attempt on; a phone scrolls the page, and the list stops growing it
+  if(width>720)assert(many.panel===one.panel&&one.page<=height+1,'the panel keeps one height and fits the window at '+width+'x'+height+' '+JSON.stringify({one,many}));
+  else assert(many.panel<=height*.75,'on a phone the list stops at a bounded height and scrolls inside '+JSON.stringify({one,many}));
+  assert(qlogs.length===0,'console clean with sixteen attempts at '+width+'x'+height+' '+JSON.stringify(qlogs));
   await q.close();
 }
 assert(logs.length === 0, 'trainer console clean: '+JSON.stringify(logs));
