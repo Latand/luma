@@ -226,6 +226,24 @@ await p.locator('#stopBtn').click();await p.waitForFunction(()=>window.Luma.test
   assert(qlogs.length===0,'thirty attempts in a row keep the console clean: '+JSON.stringify(qlogs));
   await q.close();
 }
+// ── a reopened tab full of lines, then «Очистити пісню»: the cleared attempts may still leave the tab, so «Співати» sings ──
+{
+  const {page:q,logs:qlogs}=await open(b);
+  await q.evaluate(({a})=>{const T=window.Luma.test;for(let i=0;i<21;i++)T.injectTake({a,b:a+.8,points:[{t:.1,f:440,confidence:.95,db:-20}]});T.closeTrace();},win);
+  await q.waitForFunction(()=>window.Luma.test.history.runs().length===21,null,{timeout:9000});
+  await q.reload();await q.waitForFunction(()=>window.Luma&&window.Luma.test.takes().length===20,null,{timeout:9000});
+  await q.evaluate(()=>window.Luma.test.history.clearSong());
+  const tips=await q.evaluate(()=>[...document.querySelectorAll('#takesList .take-actions>button:last-child')].map(e=>e.getAttribute('aria-label')));
+  assert(tips.length===20&&tips.every(t=>/історію пісні очищено/.test(t)),'after the clear no card promises the history still keeps it '+JSON.stringify(tips[0]));
+  await q.evaluate(a=>{const T=window.Luma.test;T.clearRange();T.seek(a);},win.a);
+  await q.locator('#singBtn').click();
+  await q.waitForFunction(()=>window.Luma.test.state().mode==='singing'||!document.getElementById('errorBanner').hidden,null,{timeout:9000});
+  const after=await q.evaluate(()=>({mode:window.Luma.test.state().mode,banner:document.getElementById('errorBanner').hidden?'':document.getElementById('errorText').textContent,takes:window.Luma.test.takes().length}));
+  assert(after.mode==='singing'&&!after.banner&&after.takes<=19,'with the history cleared, «Співати» still records and the oldest cleared attempt makes room '+JSON.stringify(after));
+  await q.locator('#stopBtn').click();await q.waitForFunction(()=>window.Luma.test.state().mode==='idle',null,{timeout:9000});
+  assert(qlogs.length===0,'console clean through reopen, clear and sing '+JSON.stringify(qlogs));
+  await q.close();
+}
 // ── the notes keep their height however many attempts pile up: the list scrolls inside a panel of fixed height ──
 for(const [width,height] of [[1440,900],[1366,768],[390,844]]){
   const {page:q,logs:qlogs}=await open(b,{width,height});

@@ -225,8 +225,9 @@ function addSource(buffer,gain,when,offset,duration,onended){const n=s.ctx.creat
 // tab by itself. WAV is 96 KB/s and lives only in the tab, so its limit stands when the user asked for audio — and a
 // recording that needs room frees the oldest voices by itself; their attempts stay, lines and scores untouched.
 const TRACE_TAKES=20,TRACE_POINTS=400000,AUDIO_TAKES=10,AUDIO_BYTES=100*1024*1024;
-// Safe to drop: its row is in the history, it holds no WAV, it is not on screen and undo does not lean on it.
-function evictable(t,stored){return !t.hasAudio&&!t.historyError&&s.trace?.take!==t&&s.undoPunch?.after!==t&&stored.has(t.runId);}
+// Safe to drop: its row is in the history (or the singer cleared that row himself), it holds no WAV, it is not on
+// screen and undo does not lean on it.
+function evictable(t,stored){return !t.hasAudio&&!t.historyError&&s.trace?.take!==t&&s.undoPunch?.after!==t&&(stored.has(t.runId)||t.cleared);}
 // The attempts, oldest first, that leave so one more fits the trace budget; null when too few of them may go.
 function traceRoom(){
  let count=s.takes.length,points=s.takes.reduce((a,t)=>a+t.points.length,0);const out=[];
@@ -240,7 +241,8 @@ function traceRoom(){
 // has its line nowhere else, so the tab will not drop it to make room.
 function capacity(fresh=false){
  const seg=nextSegment(true,fresh),punch=seg.punch;
- if(!punch&&!traceRoom())return{ok:false,kind:'trace',message:'Ліміт слідів: '+(s.takes.length>=TRACE_TAKES?TRACE_TAKES+' спроб':'400 000 точок голосу')+' у вкладці, і жодну з них вкладка не прибере сама: сховище браузера не прийняло їх в історію, тож їхні лінії є лише тут.'};
+ if(!punch&&!traceRoom())return{ok:false,kind:'trace',message:'Ліміт слідів: '+(s.takes.length>=TRACE_TAKES?TRACE_TAKES+' спроб':'400 000 точок голосу')+' у вкладці, і жодну з них вкладка не прибере сама: '
+  +(s.takes.some(t=>t.historyError)?'сховище браузера не прийняло їх в історію, тож їхні лінії є лише тут.':'їхніх ліній ще немає в історії.')};
  return{ok:true};
 }
 // What the voice budget frees so the next recording fits: the oldest WAVs of other attempts first, then the copy undo
@@ -738,6 +740,9 @@ async function clearSongHistory(){
  const ops=[['songs','delete',key]];
  for(const r of runs)ops.push(['runs','delete',r.id],['traces','delete',r.id]);
  await idbWrite(ops);
+ // The singer deleted these rows himself, so an attempt still in the tab is his to lose: the tab may drop it to make
+ // room, and × stops promising that the history keeps it.
+ const gone=new Set(runs.map(r=>r.id));for(const t of s.takes)if(gone.has(t.runId))t.cleared=true;
  s.shadow=null;s.shadowSig='';await loadHistory();// loadHistory ends in refreshCaptions(), which drops the caption of an attempt whose row is gone
  // Clearing is what the quota message asks for, so an attempt the full store refused gets its write now that there is room.
  await Promise.all(s.takes.filter(t=>t.historyError).map(saveRun));
@@ -814,7 +819,8 @@ function renderTakes(){const root=$('takesList');root.replaceChildren();for(cons
  for(const [label,fn,tip]of [...(t.hasAudio?[['WAV',()=>saveWav(t),'Завантажити голос цієї спроби у WAV']]:[]),['CSV',()=>saveCSV(t),'Завантажити CSV: лінія голосу і стан кожної точки'],['JSON',()=>saveTakeJSON(t),'Завантажити спробу файлом історії Luma: метадані, оцінка і стиснута лінія']])files.append(button(label,fn,tip));
  const exp=button('',()=>{t.filesOpen=!t.filesOpen;files.hidden=!t.filesOpen;exp.setAttribute('aria-expanded',String(!!t.filesOpen));},'Завантажити спробу '+String(t.id).padStart(2,'0')+' файлом');
  exp.className='take-export';exp.innerHTML=icon('download');exp.setAttribute('aria-expanded',String(!!t.filesOpen));exp.setAttribute('aria-controls',files.id);
- actions.append(files,exp,button('×',()=>removeTake(t),t.historyError?'Видалити спробу з вкладки · в історії її немає':'Видалити спробу з вкладки · в історії вона лишається'));
+ const cleared=t.cleared&&!s.hist.runs.some(r=>r.id===t.runId);
+ actions.append(files,exp,button('×',()=>removeTake(t),t.historyError?'Видалити спробу з вкладки · в історії її немає':cleared?'Видалити спробу з вкладки · історію пісні очищено':'Видалити спробу з вкладки · в історії вона лишається'));
  el.append(play,title,st,actions);root.append(el);
  }
  if(!s.takes.length&&s.hist.runs.length){const p=document.createElement('p');p.className='takes-empty';
@@ -1065,7 +1071,7 @@ function doExport(all){
  }).catch(e=>error(readable(e,'Не вдалося експортувати історію.')));
 }
 function doClear(){
- if(!confirm('Видалити історію цієї пісні з цього браузера? Лінії й оцінки всіх її спроб зникнуть.'))return;
+ if(!confirm('Видалити історію цієї пісні з цього браузера? Лінії й оцінки всіх її спроб зникнуть з історії.'))return;
  clearSongHistory().then(n=>toast('Видалено '+n+' '+plural(n,'спробу','спроби','спроб')+' з історії.')).catch(e=>error(readable(e,'Не вдалося очистити історію.')));
 }
 async function importHistoryFile(file){
