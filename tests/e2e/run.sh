@@ -25,5 +25,6 @@ for t in scoring audio ux studio scale lessons history progress; do echo "== $t"
 "$PY" tests/lyrics_text_test.py || status=1
 "$PY" tests/lyrics_align_test.py || status=1
 "$PY" tests/retranscribe_song_test.py || status=1
+"$PY" tests/pitch_quality_test.py || status=1
 "$PY" tests/audio_stems_test.py || status=1   # last: it rebuilds the demo, so it must not race the suites served from it
 exit $status
