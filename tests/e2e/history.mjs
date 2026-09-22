@@ -112,6 +112,15 @@ assert(full && full.match > 9000, 'a pass over the whole song earns the song rec
   assert(back.match === before.json.match && back.octave === 0, 'putting the octave back restores the original numbers');
 }
 
+// a line brought back by a reopen carries the record caption it was sung with
+{
+  const capBefore = await p.evaluate(id => window.Luma.test.takes().find(t => t.runId === id)?.record, full.id);
+  await p.reload(); await p.waitForFunction(() => window.Luma && window.Luma.test.history.runs);
+  await p.waitForFunction(id => window.Luma.test.takes().some(t => t.runId === id && t.restored), full.id, {timeout: 5000});
+  const capAfter = await p.evaluate(id => window.Luma.test.takes().find(t => t.runId === id)?.record, full.id);
+  assert(capBefore && capAfter === capBefore, 'the reopened full pass carries the same record caption ' + JSON.stringify({capBefore, capAfter}));
+}
+
 // ── 7 · export, clear, import, and importing the same file twice ────────────────────────────────────────────────
 const payload = await p.evaluate(() => window.Luma.test.history.exportPayload(false).then(d => JSON.stringify(d)));
 const parsed = JSON.parse(payload);
@@ -127,6 +136,17 @@ const back = await p.evaluate(d => window.Luma.test.history.importPayload(JSON.p
 assert(back.imported === parsed.runs.length && (await hist('H.runs().length')) === parsed.runs.length, 'import restores every attempt ' + JSON.stringify(back));
 const captionsBack = await p.evaluate(() => [...document.querySelectorAll('#takesList .rec-delta')].map(e => e.textContent));
 assert(captionsBack.length === captionsBefore.length, 'an import puts the captions back, recounted against what it brought ' + JSON.stringify(captionsBack));
+// a tab that had no line of this song gets the file's lines into its list, the way a reopen would
+{
+  const {page: other} = await open(b);
+  await other.evaluate(d => window.Luma.test.history.importPayload(JSON.parse(d)), payload);
+  const want = Math.min(20, parsed.traces.length);
+  await other.waitForFunction(n => window.Luma.test.takes().length === n, want, {timeout: 5000}).catch(() => {});
+  const got = await other.evaluate(() => window.Luma.test.takes().map(t => ({runId: t.runId, restored: t.restored})));
+  assert(got.length === want && got.every(t => t.restored && parsed.traces.some(tr => tr.runId === t.runId)),
+    'an imported history file fills the list of a tab that had none ' + JSON.stringify({want, got: got.length}));
+  await other.close();
+}
 const twice = await p.evaluate(d => window.Luma.test.history.importPayload(JSON.parse(d)), payload);
 assert(twice.imported === 0 && twice.skipped === parsed.runs.length, 'importing the same file again changes nothing ' + JSON.stringify(twice));
 const restored = await hist('H.rescore(H.runs().find(r => r.hasTrace).id)');

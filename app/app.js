@@ -528,9 +528,10 @@ function resetHistory(){s.hist={runs:[],days:[],loaded:false,note:'',persisted:s
 // an attempt whose row is no longer stored loses it altogether.
 function refreshCaptions(){
  for(const t of s.takes){
-  const stored=!!t.runId&&s.hist.runs.some(r=>r.id===t.runId);
-  if(!stored||!t.summary||!historyAvailable()){t.record=null;continue;}
-  try{t.record=recordCaption(runRecord(t,t.summary));}catch(_){t.record=null;}
+  const row=t.runId?s.hist.runs.find(r=>r.id===t.runId):null;
+  if(!row||!historyAvailable()){t.record=null;continue;}
+  // an attempt brought back from the history has no summary of its own: its stored row is the pass it was sung as
+  try{t.record=recordCaption(t.summary?runRecord(t,t.summary):row);}catch(_){t.record=null;}
  }
  renderTakes();
 }
@@ -549,23 +550,27 @@ async function loadHistory(){
 }
 // A reopened trainer opens on the lines already sung: the newest attempts whose trace the history keeps come back into
 // the list, up to the same budget the tab keeps while singing. They come back as the tab would score them now, and
-// without audio, which never was in the history. Once per song; nothing is shown on the stage until one is picked.
+// without audio, which never was in the history. Once per song, and again after a history file comes in; nothing is
+// shown on the stage until one is picked. One attempt per task, so a page of long passes still paints meanwhile.
+let wipes=0;// «Очистити пісню» so far: a restore that outlives a clear would bring back lines whose rows are gone
 async function restoreTakes(){
- s.hist.restored=true;const key=songHash(),have=new Set(s.takes.map(t=>t.runId));
+ s.hist.restored=true;const key=songHash(),wipe=wipes,have=new Set(s.takes.map(t=>t.runId)),stale=()=>songHash()!==key||wipes!==wipe;
  const runs=s.hist.runs.filter(r=>r.hasTrace&&!have.has(r.id)).slice(0,Math.max(0,TRACE_TAKES-s.takes.length));if(!runs.length)return;
- const traces=await Promise.all(runs.map(r=>idbGet('traces',r.id).catch(()=>null)));
- if(songHash()!==key)return;// another song was opened meanwhile
- let room=TRACE_TAKES-s.takes.length,points=TRACE_POINTS-s.takes.reduce((a,t)=>a+t.points.length,0);const back=[];
- for(let i=0;i<runs.length&&room>0;i++){const r=runs[i],tr=traces[i];if(!tr)continue;
-  try{const pts=unpackTrace(tr);if(pts.length>points)break;
-   const L=LEVELS[r.level]||LEVELS.normal,duration=(r.b-r.a)/r.speed;
+ const traces=await Promise.all(runs.map(r=>idbGet('traces',r.id).catch(()=>null))),back=[];
+ for(let i=0;i<runs.length;i++){const r=runs[i],tr=traces[i];if(!tr)continue;
+  if(back.length)await new Promise(ok=>setTimeout(ok));if(stale())return;// another song opened, or this one cleared, meanwhile
+  try{const pts=unpackTrace(tr),L=LEVELS[r.level]||LEVELS.normal,duration=(r.b-r.a)/r.speed;
    const meta={a:r.a,b:r.b,speed:r.speed,octave:r.octave||0,view:r.view,tolerance:r.tolerance,slack:L.slack,ratio:L.ratio,octaveFree:L.octaveFree,level:r.level,latency:r.latency||0,referenceId:song.id,rangeId:0,verified:structuredClone(s.verified),startedAt:r.startedAt,hasAudio:false,mapVersion:mapVersion(),punches:r.punches||0};
-   back.push({...meta,...analyzeTake(meta,pts,duration),duration,clipped:!!r.clipped,url:null,blob:null,endSong:r.b,runId:r.id,restored:true});room--;points-=pts.length;}
+   back.push({...meta,...analyzeTake(meta,pts,duration),duration,clipped:!!r.clipped,url:null,blob:null,endSong:r.b,runId:r.id,restored:true});}
   catch(_){}// a trace that no longer decodes stays in the history, out of the list
  }
- if(!back.length)return;
- for(let i=back.length-1;i>=0;i--)back[i].id=++s.takeCounter;// numbered oldest first, as they were sung
- s.takes.push(...back);renderTakes();sync();
+ if(stale())return;
+ // counted now, so what the tab took in meanwhile keeps its place; newest first, stopping at the first that does not fit
+ let room=TRACE_TAKES-s.takes.length,points=TRACE_POINTS-s.takes.reduce((a,t)=>a+t.points.length,0);const fit=[];
+ for(const t of back){if(room<=0||t.points.length>points)break;fit.push(t);room--;points-=t.points.length;}
+ if(!fit.length)return;
+ for(let i=fit.length-1;i>=0;i--)fit[i].id=++s.takeCounter;// numbered oldest first, as they were sung
+ s.takes.push(...fit);refreshCaptions();sync();
 }
 function byNewest(a,b){return a.startedAt<b.startedAt?1:a.startedAt>b.startedAt?-1:0;}
 // A record belongs to the day it was first reached: equal scores go to the smaller median |Δ|, then to the earlier date.
@@ -732,11 +737,11 @@ async function mergeHistory(d){
   const times=[cur.firstRunAt,cur.lastRunAt,...added.map(r=>r.startedAt)].filter(Boolean).sort();
   ops.push(['songs','put',{...x,...cur,maps:[...maps.values()],firstRunAt:times[0],lastRunAt:times[times.length-1],runCount:(cur.runCount||0)+added.length}]);}
  await idbWrite(ops);
- await loadHistory();
+ s.hist.restored=false;await loadHistory();// the lines a file brought fill the list the way a reopen does
  return {imported:fresh.length,skipped:d.runs.length-fresh.length};
 }
 async function clearSongHistory(){
- const key=songHash(),runs=await idbAll('runs','bySong',IDBKeyRange.bound([key,''],[key,'￿']));
+ wipes++;const key=songHash(),runs=await idbAll('runs','bySong',IDBKeyRange.bound([key,''],[key,'￿']));
  const ops=[['songs','delete',key]];
  for(const r of runs)ops.push(['runs','delete',r.id],['traces','delete',r.id]);
  await idbWrite(ops);
@@ -825,7 +830,7 @@ function renderTakes(){const root=$('takesList');root.replaceChildren();for(cons
  }
  if(!s.takes.length&&s.hist.runs.length){const p=document.createElement('p');p.className='takes-empty';
   p.textContent='У цій вкладці спроб ще немає. Те, що ти співав раніше, — у вкладці «Прогрес».';root.append(p);}
- $('takesCount').textContent=s.takes.length;renderProgress();}
+ $('takesCount').textContent=s.takes.length;$('takesPanel').dataset.empty=s.takes.length?'0':'1';renderProgress();}
 // ── Progress tab ────────────────────────────────────────────────────────────────────────────────────────────────
 // The attempt panel gets two tabs instead of one heading; nothing is added inside .stage, so the geometry the stage
 // redesign made reliable stays untouched. Mint means better, muted rose means worse, and every bar carries its number.

@@ -244,6 +244,35 @@ await p.locator('#stopBtn').click();await p.waitForFunction(()=>window.Luma.test
   assert(qlogs.length===0,'console clean through reopen, clear and sing '+JSON.stringify(qlogs));
   await q.close();
 }
+// ── the same clear, landing while the lines are still coming back: nothing returns whose row is gone ──
+{
+  const {page:q,logs:qlogs}=await open(b);
+  await q.evaluate(({a})=>{const T=window.Luma.test;for(let i=0;i<21;i++)T.injectTake({a,b:a+.8,points:[{t:.1,f:440,confidence:.95,db:-20}]});T.closeTrace();},win);
+  await q.waitForFunction(()=>window.Luma.test.history.runs().length===21,null,{timeout:9000});
+  await q.reload({waitUntil:'domcontentloaded'});
+  await q.waitForFunction(()=>window.Luma&&window.Luma.test.history.runs().length===21,null,{timeout:9000,polling:1});
+  const early=await q.evaluate(()=>{const n=window.Luma.test.takes().length;window.Luma.test.history.clearSong();return n;});
+  await q.waitForTimeout(900);
+  const tips=await q.evaluate(()=>[...document.querySelectorAll('#takesList .take-actions>button:last-child')].map(e=>e.getAttribute('aria-label')));
+  assert(tips.every(t=>/історію пісні очищено/.test(t)),'a clear during the restore leaves no card whose row is gone unmarked '+JSON.stringify({listedWhenCleared:early,listed:tips.length}));
+  await q.evaluate(a=>{const T=window.Luma.test;T.clearRange();T.seek(a);},win.a);
+  await q.locator('#singBtn').click();
+  await q.waitForFunction(()=>window.Luma.test.state().mode==='singing'||!document.getElementById('errorBanner').hidden,null,{timeout:9000});
+  assert(await q.evaluate(()=>window.Luma.test.state().mode==='singing'),'and «Співати» records after it');
+  await q.locator('#stopBtn').click();await q.waitForFunction(()=>window.Luma.test.state().mode==='idle',null,{timeout:9000});
+  assert(qlogs.length===0,'console clean through a clear during the restore '+JSON.stringify(qlogs));
+  await q.close();
+}
+// ── a history with no line to show: the panel holds its one sentence, not the height of a list ──
+{
+  const {page:q}=await open(b);
+  await q.evaluate(()=>window.Luma.test.history.seedMany([{match:7000,target:600}]));
+  await q.waitForTimeout(300);
+  const empty=await q.evaluate(()=>({panel:Math.round(document.getElementById('takesPanel').getBoundingClientRect().height),
+    text:document.querySelector('#takesList .takes-empty')?.textContent||'',takes:window.Luma.test.takes().length}));
+  assert(empty.takes===0&&empty.text&&empty.panel<112,'an empty list does not take the height of one '+JSON.stringify(empty));
+  await q.close();
+}
 // ── the notes keep their height however many attempts pile up: the list scrolls inside a panel of fixed height ──
 for(const [width,height] of [[1440,900],[1366,768],[390,844]]){
   const {page:q,logs:qlogs}=await open(b,{width,height});
