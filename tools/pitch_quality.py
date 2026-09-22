@@ -17,7 +17,11 @@ by tools/pitch_frames.py (the pipeline deletes its own work/ files). Nothing her
   pitch_quality.py arbitrate --cache DIR [--variant V | --gate G | --shipped] songs/*
                                                            harmonic arbiter over octave disputes; --gate arbitrates the
                                                            notes a rule change promotes to ok; --shipped uses the package's notes
-  --seed N   numpy seed for torchcrepe's ±20-cent dither (default 0: repeatable). --json prints JSON rows.
+  --seed N   numpy seed for torchcrepe's ±20-cent dither when a variant re-decodes the cached activations (default 0).
+             Rows built on the cached f0 (baseline) report the seed the cache was extracted with (tools/pitch_frames.py
+             --seed), read from the cache. --json prints JSON rows.
+A cache is used only if its recorded stem hash, gain and extraction settings match the package (pitch_frames.load());
+a stale or unfingerprinted cache gives an error row for that song.
 
 `frames`/`gates`/`decode` reconstruct notes with this file's copy of build_map(); they measure prototypes, never a
 changed pipeline. `package` measures what a pipeline wrote. Every number is a proxy for accuracy; the doc says which."""
@@ -25,6 +29,8 @@ from __future__ import annotations
 import argparse, json, sys
 from pathlib import Path
 import numpy as np, scipy.ndimage as ndi
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import pitch_frames
 
 HOP = .02
 CENTS_OFFSET = 1997.3794084376191   # torchcrepe: cents = 20 * bin + offset
@@ -108,7 +114,8 @@ def note_metrics(notes, duration, valid=None, points=None):
     """`valid` (bool per frame on the HOP grid) classifies the gaps between notes by what the mask holds there; in `map`
     mode it comes from points[] (midi is null exactly where the frame is not valid)."""
     if valid is None and points is not None: valid = np.array([p[1] is not None for p in points])
-    a = np.array([n['a'] for n in notes]); b = np.array([n['b'] for n in notes]); m = np.array([n['m'] for n in notes]); ok = np.array([n['ok'] for n in notes], bool)
+    a = np.array([n['a'] for n in notes], float); b = np.array([n['b'] for n in notes], float); m = np.array([n['m'] for n in notes], float); ok = np.array([n['ok'] for n in notes], bool)
+    some = len(notes) > 0   # with no notes, shares and percentiles are undefined: null, and every count is 0
     dur = b - a; gap = a[1:] - b[:-1]; dm = np.diff(m); adj = gap < .3
     oct_jump = adj & (np.abs(np.abs(dm) - 12) <= 1.0)
     sandwich = sum(1 for k in range(1, len(m) - 1) if abs(abs(m[k] - m[k - 1]) - 12) <= 1 and abs(abs(m[k] - m[k + 1]) - 12) <= 1 and abs(m[k - 1] - m[k + 1]) <= 2 and a[k] - b[k - 1] < .3 and a[k + 1] - b[k] < .3)
@@ -117,7 +124,7 @@ def note_metrics(notes, duration, valid=None, points=None):
     for i in range(1, len(notes)):
         if a[i] - b[i - 1] < 1e-3 and abs(m[i] - m[i - 1]) <= 1.0: cur += 1
         else: chains.append(cur); cur = 1
-    chains.append(cur)
+    if some: chains.append(cur)
     # gap classes, read off the valid mask between the two notes
     cls = {'touch_same_semitone': 0, 'touch_new_semitone': 0, 'hole_1_2': 0, 'hole_3_10': 0, 'hole_gt10': 0, 'valid_gap_discarded': 0, 'mixed_gap_le10': 0, 'mixed_gap_gt10': 0}
     ix = note_index(notes)
@@ -129,11 +136,11 @@ def note_metrics(notes, duration, valid=None, points=None):
         if not v.any(): cls['hole_1_2' if g <= 2 else 'hole_3_10' if g <= 10 else 'hole_gt10'] += 1
         elif v.all(): cls['valid_gap_discarded'] += 1          # frames with pitch, but the note segment there was < 4 frames
         else: cls['mixed_gap_le10' if g <= 10 else 'mixed_gap_gt10'] += 1
-    out = {'notes': len(notes), 'ok_notes': int(ok.sum()), 'ok_pct': round(100 * ok.mean(), 1) if len(ok) else 0,
-           'note_med_dur_s': round(float(np.median(dur)), 3), 'notes_under_150ms_pct': round(100 * float((dur < .15).mean()), 1),
+    out = {'notes': len(notes), 'ok_notes': int(ok.sum()), 'ok_pct': round(100 * ok.mean(), 1) if some else None,
+           'note_med_dur_s': round(float(np.median(dur)), 3) if some else None, 'notes_under_150ms_pct': round(100 * float((dur < .15).mean()), 1) if some else None,
            'sustained_notes_ge600ms': int((dur >= .6).sum()), 'octave_jumps_adjacent': int(oct_jump.sum()), 'octave_sandwich': int(sandwich), 'octave_outliers_nbhd': int(outliers),
            'split_chains': int((np.array(chains) >= 2).sum()), 'pieces_in_chains': int(sum(c for c in chains if c >= 2)), **{'gap_' + k: v for k, v in cls.items()},
-           'midi_p5': round(float(np.percentile(m, 5)), 1), 'midi_p50': round(float(np.percentile(m, 50)), 1), 'midi_p95': round(float(np.percentile(m, 95)), 1)}
+           **{f'midi_p{q}': round(float(np.percentile(m, q)), 1) if some else None for q in (5, 50, 95)}}
     if points is not None:
         rel = np.array([p[3] for p in points], bool)
         out['candidate_pct'] = round(100 * valid.mean(), 1); out['comparable_pct'] = round(100 * rel.sum() * HOP / duration, 1)
@@ -247,8 +254,8 @@ def decode_variant(cache, variant, song_notes, seed=0):
     fmin, fmax = 50., 1500.
     if variant.startswith('narrow'): fmin, fmax = 65.4, 1046.5
     if variant.startswith('song_range'):
-        m = np.array([n['m'] for n in song_notes if n['ok']]); lo, hi = np.percentile(m, 2) - 3, np.percentile(m, 98) + 3
-        fmin, fmax = float(midi_to_hz(lo)), float(midi_to_hz(hi))
+        m = np.array([n['m'] for n in song_notes if n['ok']])
+        if len(m): lo, hi = np.percentile(m, 2) - 3, np.percentile(m, 98) + 3; fmin, fmax = float(midi_to_hz(lo)), float(midi_to_hz(hi))
     decoder = {'argmax': torchcrepe.decode.argmax, 'viterbi_norm': viterbi_normalised, 'viterbi_octave': viterbi_octave, 'no_dither': viterbi_no_dither}.get(variant.split('+')[0], torchcrepe.decode.viterbi)
     T = act.shape[2]; step = T if 'whole_song' in variant else 1024; f0s, pds = [], []
     with torch.no_grad():
@@ -292,14 +299,18 @@ def arbitrate(pkg, cache, variant='baseline', gate=None, shipped=False, th=.2, s
     if shipped:
         notes = [dict(n) for n in song['notes']]; fr = package_frames(song, c['P'])
     yy, sr = sf.read(pkg / 'vocals_44k.flac', dtype='float32', always_2d=True); y = yy.mean(1); mp = fr['mp']
-    r = {'package': pkg.name, 'variant': 'shipped' if shipped else variant, 'gate': gate}
+    r = {'package': pkg.name, 'variant': 'shipped' if shipped else variant, 'gate': gate, 'seed': None if shipped else row_seed(c, variant, seed)}
+    def pyin_dispute(n, s, e):
+        """None if the note has no octave dispute with pYIN, else True when the arbiter sides with CREPE (the note's octave)."""
+        q = np.isfinite(mp[s:e]) & (fr['pyin_prob'][s:e] > .5)
+        if q.sum() < 4: return None
+        pm = float(np.median(mp[s:e][q])); dd = n['m'] - pm
+        if not (abs(abs(dd) - 12) <= 1.0 or abs(abs(dd) - 24) <= 1.0): return None
+        lo = min(n['m'], pm); lower_real = odd_even(y, sr, n['a'], n['b'], float(midi_to_hz(lo))) > th; return (n['m'] == lo) == lower_real
     cr = py = lost = 0
     for n, (s, e) in zip(notes, note_index(notes)):
-        q = np.isfinite(mp[s:e]) & (fr['pyin_prob'][s:e] > .5)
-        if q.sum() < 4: continue
-        pm = float(np.median(mp[s:e][q])); dd = n['m'] - pm
-        if abs(abs(dd) - 12) <= 1.0 or abs(abs(dd) - 24) <= 1.0:
-            lo = min(n['m'], pm); lower_real = odd_even(y, sr, n['a'], n['b'], float(midi_to_hz(lo))) > th; crepe_right = (n['m'] == lo) == lower_real
+        crepe_right = pyin_dispute(n, s, e)
+        if crepe_right is not None:
             cr += crepe_right; py += not crepe_right; lost += crepe_right and not n['ok'] and n['b'] - n['a'] >= .4
     r.update(disputes=cr + py, crepe_right=cr, pyin_right=py, crepe_right_but_not_ok_ge400ms=lost)
     good = bad = 0
@@ -327,8 +338,16 @@ def arbitrate(pkg, cache, variant='baseline', gate=None, shipped=False, th=.2, s
     if gate:
         ns2, _ = build(ct, f0, pd, c['P'], song['duration'], **GATE_KW[gate]); base_ok = {(n['a'], n['b']): n['ok'] for n in notes}
         promoted = [n for n in ns2 if n['ok'] and not base_ok.get((n['a'], n['b']), True)]
-        flagged = sum(1 for n in promoted if judge(y, sr, n, th) != 0); sust = sum(1 for n in promoted if n['b'] - n['a'] >= .4)
-        r.update(gate_promoted=len(promoted), gate_promoted_ge400ms=sust, gate_promoted_flagged_octave=flagged, gate_promoted_flagged_ge400ms=sum(1 for n in promoted if n['b'] - n['a'] >= .4 and judge(y, sr, n, th) != 0))
+        j = [judge(y, sr, n, th) for n in promoted]; disp = [pyin_dispute(n, *n['_i']) for n in promoted]
+        pyin_right = [d is False for d in disp]; higher = [x == 1 for x in j]
+        # a note can be both a pYIN-favoured dispute and flagged "higher": count each note once
+        r.update(gate_promoted=len(promoted), gate_promoted_ge400ms=sum(1 for n in promoted if n['b'] - n['a'] >= .4),
+                 gate_promoted_flagged_octave=sum(1 for x in j if x != 0), gate_promoted_flagged_ge400ms=sum(1 for n, x in zip(promoted, j) if n['b'] - n['a'] >= .4 and x != 0),
+                 gate_promoted_higher=sum(higher), gate_promoted_lower=sum(1 for x in j if x == -1),
+                 gate_promoted_pyin_dispute=sum(1 for d in disp if d is not None), gate_promoted_pyin_right=sum(pyin_right),
+                 gate_promoted_pyin_right_and_higher=sum(1 for p, h in zip(pyin_right, higher) if p and h),
+                 gate_promoted_wrong_octave=sum(1 for p, h in zip(pyin_right, higher) if p or h),
+                 gate_promoted_lower_only=sum(1 for p, x in zip(pyin_right, j) if x == -1 and not p))
     return {k: (int(v) if isinstance(v, (np.integer, np.bool_)) else v) for k, v in r.items()}
 
 # ---------------------------------------------------------------- evaluating what a package ships
@@ -343,9 +362,8 @@ def package_frames(song, P):
     with np.errstate(divide='ignore', invalid='ignore'): db = 20 * np.log10(rms + 1e-12)
     return {'ts': ts, 'midi': midi, 'mp': mp, 'pdg': pdg, 'db': db, 'valid': valid, 'reliable': reliable, 'pyin_prob': np.interp(ts, P[:, 0], np.nan_to_num(P[:, 2], nan=0))}
 
-def run_package(pkg, cache_dir):
-    song = json.loads((pkg / 'target.json').read_text(encoding='utf-8')); c = load_cache(cache_dir, pkg)
-    if c is None: return {'package': pkg.name, 'error': 'no cache'}
+def run_package(pkg, c):
+    song = json.loads((pkg / 'target.json').read_text(encoding='utf-8'))
     fr = package_frames(song, c['P']); notes = song['notes']
     row = {'package': pkg.name, 'mode': 'package', 'duration_s': round(song['duration'], 1), 'map_id': song.get('id'), **note_metrics(notes, song['duration'], fr['valid'], song['points'])}
     row.update(disagreement(fr, notes)); loud = fr['db'] > -30
@@ -354,20 +372,24 @@ def run_package(pkg, cache_dir):
 
 # ---------------------------------------------------------------- driver
 def load_cache(cache_dir, pkg):
-    f = Path(cache_dir) / (pkg.name + '.npz')
-    return dict(np.load(f)) if f.exists() else None
+    """The validated cache of `pkg`; raises pitch_frames.CacheError when it is missing or stale."""
+    return pitch_frames.load(cache_dir, pkg)
 
-def run_song(pkg, cache_dir, variant, with_stability, seed=0):
+def row_seed(c, variant, seed):
+    """The dither seed behind the f0 a row is built on: the cache's own for baseline, `seed` for a re-decode, None
+    for no_dither (no noise to seed)."""
+    if variant in (None, 'baseline'): return c['meta'].get('seed')
+    return None if variant.startswith('no_dither') else seed
+
+def run_song(pkg, c, variant, with_stability, seed=0):
     song = json.loads((pkg / 'target.json').read_text(encoding='utf-8')); duration = song['duration']
     row = {'package': pkg.name, 'duration_s': round(duration, 1)}
-    if cache_dir is None: return {**row, 'mode': 'map', **note_metrics(song['notes'], duration, points=song['points'])}
-    c = load_cache(cache_dir, pkg)
-    if c is None: return {**row, 'error': 'no cache'}
+    if c is None: return {**row, 'mode': 'map', **note_metrics(song['notes'], duration, points=song['points'])}
     P = c['P']; ct = np.arange(len(c['f0'])) * 160 / 16000; f0, pd = c['f0'], c['pd']; extra = {}
     if variant and variant != 'baseline':
         ct, f0, pd, rng = decode_variant(c, variant, song['notes'], seed); extra['fmin_fmax'] = rng
     notes, fr = build(ct, f0, pd, P, duration, octave_fix=variant is not None and 'octave_fix' in variant)
-    row.update({'mode': 'rebuild', 'variant': variant or 'baseline', 'seed': seed, **extra, 'shipped_notes': len(song['notes']), 'boundaries_kept_vs_shipped_pct': boundaries_kept(song['notes'], notes)})
+    row.update({'mode': 'rebuild', 'variant': variant or 'baseline', 'seed': row_seed(c, variant, seed), **extra, 'shipped_notes': len(song['notes']), 'boundaries_kept_vs_shipped_pct': boundaries_kept(song['notes'], notes)})
     row.update(note_metrics(notes, duration, fr['valid'])); row['candidate_pct'] = round(100 * fr['valid'].mean(), 1); row['comparable_pct'] = round(100 * fr['reliable'].sum() * HOP / duration, 1)
     row.update(disagreement(fr, notes)); row.update(losses(fr)); row.update(truncation(fr))
     if with_stability: row['stability'] = stability(ct, f0, pd, P, duration, notes)
@@ -389,14 +411,18 @@ def main():
     for p in a.package:
         pkg = Path(p).expanduser().resolve()
         if not (pkg / 'target.json').exists(): continue
+        c = None
+        if a.mode != 'map':
+            try: c = load_cache(a.cache, pkg)
+            except pitch_frames.CacheError as e: print(json.dumps({'package': pkg.name, 'error': str(e)}, ensure_ascii=False), flush=True); continue
         if a.mode == 'map': r = run_song(pkg, None, None, False)
-        elif a.mode == 'package': r = run_package(pkg, a.cache)
-        elif a.mode == 'arbitrate': r = arbitrate(pkg, load_cache(a.cache, pkg), a.variant, a.gate, a.shipped, seed=a.seed)
+        elif a.mode == 'package': r = run_package(pkg, c)
+        elif a.mode == 'arbitrate': r = arbitrate(pkg, c, a.variant, a.gate, a.shipped, seed=a.seed)
         elif a.mode == 'gates':
-            c = load_cache(a.cache, pkg); song = json.loads((pkg / 'target.json').read_text(encoding='utf-8'))
+            song = json.loads((pkg / 'target.json').read_text(encoding='utf-8'))
             r = {'package': pkg.name, 'gates': gates(np.arange(len(c['f0'])) * 160 / 16000, c['f0'], c['pd'], c['P'], song['duration'])}
             print(json.dumps(r, ensure_ascii=False) if a.json else '\n'.join(f"{pkg.name[:24]:<24} {k:<20} " + ' '.join(f'{kk}={vv}' for kk, vv in v.items()) for k, v in r['gates'].items()), flush=True); continue
-        else: r = run_song(pkg, a.cache, a.variant if a.mode == 'decode' else 'baseline', a.stability, a.seed)
+        else: r = run_song(pkg, c, a.variant if a.mode == 'decode' else 'baseline', a.stability, a.seed)
         print(json.dumps(r, ensure_ascii=False) if a.json else (fmt(r) if 'notes' in r else json.dumps(r, ensure_ascii=False)), flush=True)
 
 if __name__ == '__main__':
