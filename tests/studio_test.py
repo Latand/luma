@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import runpy
+import socket
 import sys
 import tempfile
 import threading
@@ -44,6 +45,28 @@ class StudioHTTPTests(unittest.TestCase):
         self.assertEqual((first[0], second[0]), (200, 200))
         self.assertEqual(len(self.module['jobs']), 1)
         self.assertEqual(len(list((Path(self.directory.name) / 'inbox').iterdir())), 1)
+
+    def test_upload_is_streamed_to_the_inbox_whole(self):
+        body = bytes(range(256)) * (3 * 4096) + b'tail'  # three 1 MiB pieces and a remainder
+        status, _ = self.request('/upload?name=long.wav&title=Long', body, 'PUT')
+        self.assertEqual(status, 200)
+        files = list((Path(self.directory.name) / 'inbox').iterdir())
+        self.assertEqual(len(files), 1, 'no .part file is left behind')
+        self.assertEqual(files[0].read_bytes(), body)
+        self.assertEqual(self.module['jobs'][0]['path'], str(files[0]))
+
+    def test_upload_limits_and_a_body_cut_short(self):
+        def raw(length, body):
+            with socket.create_connection(('127.0.0.1', self.server.server_port), timeout=3) as sock:
+                sock.sendall(f'PUT /upload?name=cut.wav&title=Cut HTTP/1.1\r\nHost: x\r\nContent-Length: {length}\r\n\r\n'.encode() + body)
+                sock.shutdown(socket.SHUT_WR); reply = b''
+                while chunk := sock.recv(65536): reply += chunk
+            return int(reply.split(b' ', 2)[1]), reply.split(b'\r\n\r\n', 1)[1].decode()
+        self.assertEqual(self.module['MAX_UPLOAD'], 1 << 30, 'a 40-minute uncompressed song fits')
+        status, text = raw(self.module['MAX_UPLOAD'] + 1, b'x')
+        self.assertEqual((status, text), (400, 'Розмір файлу має бути від 1 байта до 1024 МБ.'))
+        self.assertEqual(raw(100, b'only ten b'), (400, 'Файл отримано не повністю.'))
+        self.assertEqual((self.module['jobs'], list((Path(self.directory.name) / 'inbox').iterdir())), ([], []))
 
     def test_import_uses_our_app_and_never_overwrites(self):
         song = {'schema': 'luma.song.v1', 'title': '<img src=x onerror=alert(1)>', 'artist': 'A', 'duration': 4, 'notes': [], 'points': [], 'phrases': [], 'lyrics': [], 'hop': .02}

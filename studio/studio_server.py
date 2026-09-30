@@ -25,6 +25,9 @@ for d in (SONGS, INBOX, LOGS): d.mkdir(parents=True, exist_ok=True)
 COPY_TO = Path(args.copy_to).expanduser() if args.copy_to else None
 PREP = ROOT / 'studio' / 'prepare_song.py'
 jobs: list[dict] = []; lock = threading.Lock(); upload_lock = threading.Lock()
+# prepare_song.py takes songs up to 40 minutes: an uncompressed 40-minute WAV (48 kHz, 24 bit) is under 700 MB, a trainer
+# of that length 350 MiB (measured). Imports are parsed in memory, uploads are streamed to disk.
+MAX_UPLOAD = 1024 << 20; MAX_IMPORT = 512 << 20
 
 # Pipeline stages as prepare_song.py logs them ("[n/8] name"), with typical seconds for a 5-minute song on a mid-range GPU.
 # The weights only shape the progress bar and the rough ETA; a slower machine stretches them by the observed pace.
@@ -142,7 +145,9 @@ class Handler(BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         if u.path not in ('/upload', '/import'): return self.send(404, 'not found', 'text/plain')
         q = urllib.parse.parse_qs(u.query); name = os.path.basename(q.get('name', ['song'])[0]); n = int(self.headers.get('Content-Length', '0'))
-        if n <= 0 or n > 200 * 1024 * 1024: return self.send(400, 'Розмір файлу має бути від 1 байта до 200 МБ.', 'text/plain; charset=utf-8')
+        limit = MAX_IMPORT if u.path == '/import' else MAX_UPLOAD
+        if n <= 0 or n > limit: return self.send(400, f'Розмір файлу має бути від 1 байта до {limit >> 20} МБ.', 'text/plain; charset=utf-8')
+        if u.path == '/upload': return self.upload(q, name, n)
         data = self.rfile.read(n)
         if len(data) != n: return self.send(400, 'Файл отримано не повністю.', 'text/plain; charset=utf-8')
         if u.path == '/import':
@@ -165,16 +170,28 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 return self.send(500, 'Не вдалося зберегти тренажер. Перевір вільне місце та доступ до каталогу songs.', 'text/plain; charset=utf-8')
             return self.send(200, json.dumps({'html': output.name}), 'application/json')
+
+    def upload(self, q, name, n):
+        """The audio body goes straight to the inbox in 1 MiB pieces: a 40-minute WAV never sits in memory."""
         t, a = guess(name); title = q.get('title', [t])[0].strip() or t; artist = q.get('artist', [a])[0].strip() or a
         request_id = q.get('requestId', [''])[0]
+        dst = INBOX / (uuid.uuid4().hex + '_' + name); part = dst.with_name(dst.name + '.part'); left = n
+        try:
+            with part.open('xb') as f:
+                while left:
+                    chunk = self.rfile.read(min(left, 1 << 20))
+                    if not chunk: break
+                    f.write(chunk); left -= len(chunk)
+        except OSError:
+            part.unlink(missing_ok=True); return self.send(500, 'Не вдалося зберегти аудіофайл.', 'text/plain; charset=utf-8')
+        if left: part.unlink(missing_ok=True); return self.send(400, 'Файл отримано не повністю.', 'text/plain; charset=utf-8')
         with upload_lock:
             with lock:
                 previous = next((j for j in jobs if request_id and j.get('requestId') == request_id), None)
             if previous:
-                return self.send(200, json.dumps({'queued': previous['id']}), 'application/json')
-            dst = INBOX / (uuid.uuid4().hex + '_' + name)
-            try: dst.write_bytes(data)
-            except OSError: return self.send(500, 'Не вдалося зберегти аудіофайл.', 'text/plain; charset=utf-8')
+                part.unlink(missing_ok=True); return self.send(200, json.dumps({'queued': previous['id']}), 'application/json')
+            try: part.rename(dst)
+            except OSError: part.unlink(missing_ok=True); return self.send(500, 'Не вдалося зберегти аудіофайл.', 'text/plain; charset=utf-8')
             with lock: jobs.append({'id': dst.stem, 'path': str(dst), 'title': title, 'artist': artist, 'state': 'queued', 'requestId': request_id})
         return self.send(200, json.dumps({'queued': dst.name, 'title': title, 'artist': artist}), 'application/json')
 

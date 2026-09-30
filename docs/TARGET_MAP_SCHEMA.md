@@ -15,7 +15,7 @@ app parts. `--rebuild` re-wraps an existing trainer with newer app code and keep
 |---|---|---|
 | `schema` | `"luma.song.v1"` | required literal |
 | `title`, `artist` | string | shown in the top bar and `document.title` |
-| `duration` | number, s | must match the embedded audio within 0.1 s; 1..600 |
+| `duration` | number, s | must match the embedded audio within 0.1 s; 1..2400 (40 minutes, `MAX_SECONDS` in `studio/prepare_song.py`) |
 | `a4` | 440 | tuning reference |
 | `hop` | 0.02 | contour hop in seconds |
 | `status` | string | `"unverified_draft"` for automatic maps |

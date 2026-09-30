@@ -146,8 +146,50 @@ def build_map(ct, f0, pd, P, mix22, duration, title, artist, method):
     return song
 
 # ---------------------------------------------------------------- separation
+# The longest song Studio prepares. Memory does not set it (separation runs in windows, pYIN in 25 s blocks, CREPE in
+# batches); the trainer does. It carries all four stems as base64 inside one script, about 8.7 MiB of HTML per minute of
+# song, and Chromium's longest string is 2^29 - 24 characters (512 MiB), which a trainer passes near 58 minutes.
+# 40 minutes leaves room for denser audio. app/app.js validateSong holds the same number.
+MAX_SECONDS = 40 * 60
+# Demucs keeps all four sources of its whole input in RAM several times over (the bag of four models, the random shift):
+# about 4 MB per second of song on top of the models. Measured on a 608 s song: 5.5 GB peak in one run, 3.9 GB in
+# windows; one run of a 30-minute song would need about 10 GB. Longer songs therefore go through it in windows.
+SEPARATION_WINDOW_S = 300    # a song up to this long is the same single run as before
+SEPARATION_FADE_S = 4        # neighbouring windows cross-fade linearly over this span around their seam
+SEPARATION_CONTEXT_S = 8     # and each hears this much more on both sides (one Demucs segment), then drops it
+
+def duration_limit_error(seconds: float) -> str | None:
+    if 1 <= seconds <= MAX_SECONDS: return None
+    return (f'Пісня триває {int(seconds // 60)} хв {int(seconds % 60)} с. Luma Studio готує пісні від 1 секунди до '
+            f'{MAX_SECONDS // 60} хвилин: довший тренажер був би завеликим для браузера. Обріж файл або розділи його на частини.')
+
+def probe_seconds(path: Path) -> float | None:
+    """The container's duration, read before a long decode; None when ffprobe cannot tell."""
+    try: out = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', str(path)], capture_output=True, text=True, timeout=60).stdout
+    except (OSError, subprocess.SubprocessError): return None
+    try: return float(out.strip())
+    except ValueError: return None
+
+def separation_windows(n: int, sr: int, window_s: float = SEPARATION_WINDOW_S, fade_s: float = SEPARATION_FADE_S, context_s: float = SEPARATION_CONTEXT_S) -> list[tuple[int, int, np.ndarray]]:
+    """(lo, hi, weight): the frames each Demucs run hears and the weight of every one of them in the stitched stem.
+    The windows share the song evenly, the weights of all windows add up to 1 at every frame (to float32 precision), and a frame gets
+    a non-zero weight only when its window heard at least `context_s` beyond it (the song's own ends excepted)."""
+    k = max(1, int(np.ceil(n / (window_s * sr))))
+    seams = [round(n * i / k) for i in range(k + 1)]; half = int(fade_s * sr / 2); context = int(context_s * sr)
+    out = []
+    for i in range(k):
+        a, b = seams[i], seams[i + 1]
+        lo = 0 if i == 0 else max(0, a - half - context); hi = n if i == k - 1 else min(n, b + half + context)
+        t = np.arange(lo, hi, dtype=np.float64) + .5; w = np.ones(hi - lo, dtype=np.float32)
+        if i: w *= np.clip((t - (a - half)) / (2 * half), 0, 1).astype(np.float32)
+        if i < k - 1: w *= np.clip(((b + half) - t) / (2 * half), 0, 1).astype(np.float32)
+        out.append((lo, hi, w))
+    return out
+
 def separate(x: np.ndarray, model_name: str = 'htdemucs_ft', device: str = 'auto') -> tuple[np.ndarray, dict]:
-    """Official Demucs on a 44.1 kHz stereo float mix: the vocal stem at the same rate and length, and a record of the run."""
+    """Official Demucs on a 44.1 kHz stereo float mix: the vocal stem at the same rate and length, and a record of the run.
+    Songs longer than SEPARATION_WINDOW_S are separated window by window (see separation_windows), so RAM stays near
+    what a five-minute song needs whatever the length."""
     t1 = time.time()
     import torch
     from demucs.pretrained import get_model
@@ -156,11 +198,18 @@ def separate(x: np.ndarray, model_name: str = 'htdemucs_ft', device: str = 'auto
     os.environ['TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD'] = '1'  # official Demucs zoo archives only; never point this at untrusted checkpoints
     try: model = get_model(model_name).eval()
     finally: os.environ.pop('TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD', None)
-    wav = torch.from_numpy(x.T.copy()); ref = wav.mean(0); mu = ref.mean(); std = ref.std()
+    ref = torch.from_numpy(x.mean(1)); mu = ref.mean(); std = ref.std(); del ref  # the whole song's statistics in every window
     if float(std) < 1e-8: raise SystemExit('input audio is silent')
-    with torch.inference_mode(): pred = apply_model(model, ((wav - mu) / std)[None], device=device, shifts=1, split=True, overlap=.25, progress=False, num_workers=0)[0]
-    vocal = (pred[model.sources.index('vocals')].cpu() * std + mu).T.numpy()
-    return vocal, {'model': model_name, 'device': device, 'gpu': torch.cuda.get_device_name(0) if device == 'cuda' else None, 'max_vram_mib': round(torch.cuda.max_memory_allocated() / 2**20) if device == 'cuda' else None, 'seconds': round(time.time() - t1, 1), 'torch': torch.__version__}
+    vi = model.sources.index('vocals'); windows = separation_windows(len(x), model.samplerate); vocal = None
+    for lo, hi, w in windows:
+        wav = torch.from_numpy(x[lo:hi].T.copy())
+        with torch.inference_mode(): pred = apply_model(model, ((wav - mu) / std)[None], device=device, shifts=1, split=True, overlap=.25, progress=False, num_workers=0)[0]
+        part = (pred[vi].cpu() * std + mu).T.numpy(); del pred, wav
+        if len(windows) == 1: vocal = part
+        else:
+            if vocal is None: vocal = np.zeros_like(x)
+            vocal[lo:hi] += part * w[:, None]
+    return vocal, {'model': model_name, 'device': device, 'windows': len(windows), 'gpu': torch.cuda.get_device_name(0) if device == 'cuda' else None, 'max_vram_mib': round(torch.cuda.max_memory_allocated() / 2**20) if device == 'cuda' else None, 'seconds': round(time.time() - t1, 1), 'torch': torch.__version__}
 
 # ---------------------------------------------------------------- main
 def main():
@@ -176,9 +225,12 @@ def main():
     manifest = {'source': str(src), 'source_sha256': sha256(src), 'title': a.title, 'artist': a.artist, 'started': time.strftime('%Y-%m-%dT%H:%M:%S%z'), 'host': platform.node(), 'steps': {}}
     T0 = time.time()
 
-    log('[1/8] decode'); ffmpeg('-i', src, '-vn', '-ar', '44100', '-ac', '2', '-c:a', 'pcm_f32le', work / 'mix.wav')
+    log('[1/8] decode')
+    probed = probe_seconds(src)
+    if probed is not None and probed > MAX_SECONDS + 1: raise SystemExit(duration_limit_error(probed))  # before a multi-GB decode
+    ffmpeg('-i', src, '-vn', '-ar', '44100', '-ac', '2', '-c:a', 'pcm_f32le', work / 'mix.wav')
     x, sr = sf.read(work / 'mix.wav', dtype='float32', always_2d=True); duration = len(x) / sr; manifest['duration'] = duration
-    if not 1 <= duration <= 600: raise SystemExit('songs must be between 1 and 600 seconds')
+    if duration_limit_error(duration): raise SystemExit(duration_limit_error(duration))
     original = pkg / ('original' + (src.suffix.lower() or '.audio'))  # the upload itself, for later audio upgrades
     for old in pkg.glob('original.*'):
         if old not in (original, src): old.unlink()

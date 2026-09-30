@@ -2,10 +2,13 @@
 
 `studio/prepare_song.py` runs eight steps. Everything except the optional transcription happens on your machine.
 
-1. **Decode.** FFmpeg → 44.1 kHz stereo float WAV.
+1. **Decode.** FFmpeg → 44.1 kHz stereo float WAV. Songs from 1 second to 40 minutes; a longer file is refused before it is
+   decoded (see `MAX_SECONDS` for why 40).
 2. **Separation.** Official Demucs `htdemucs_ft` (four fine-tuned checkpoints, downloaded once from Meta's public bucket into
    `~/.cache/torch/hub/checkpoints`). `vocals` is the model output; `backing = mix − vocals`, so the two stems sum back to the
-   original. A 5-minute song takes about 50 s on an RTX 3060 and several minutes on CPU.
+   original. A 5-minute song takes about 50 s on an RTX 3060 and several minutes on CPU. Demucs holds every source of its
+   whole input in RAM several times over, so a song longer than 5 minutes is separated in equal windows that each hear 8 s
+   past their edges and cross-fade over 4 s at the seams; RAM stays near what a 5-minute song needs.
 3. **pYIN** (librosa) on the vocal stem: fundamental, voicing probability, RMS, plus plain YIN as a second opinion.
 4. **CREPE** (`torchcrepe`, "full" model, Viterbi decoding, 10 ms hop) on the same stem. CREPE holds up far better than pYIN on
    rough, high or breathy passages.
