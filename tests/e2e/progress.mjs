@@ -1,4 +1,4 @@
-// The Прогрес tab: the trend follows the ruler, the weak-phrase map moves the loop and frames it, the record shadow
+// The Прогрес tab: the trend follows the ruler, the phrase map shows every phrase in song order and moves the loop, the record shadow
 // appears only where a record exists, and the day streak counts days, not open tabs. Lessons show exercises, not keys.
 import {execFileSync} from 'node:child_process';
 import {launch, open, window_, assert, url} from './lib.mjs';
@@ -47,19 +47,19 @@ const weak = await hist('H.weak()');
 assert(weak[0].id === phr[0].id && weak[0].best === 40 && weak[1].id === phr[1].id && weak[1].best === 95,
   'the weakest phrase is first, ranked by its personal best ' + JSON.stringify(weak.slice(0, 3)));
 assert(weak.slice(2).every(w => w.best === null), 'phrases nobody has sung yet stand at the bottom');
-const rowText = await p.evaluate(() => [...document.querySelectorAll('#progressPanel .prog-bar')].slice(0, 3).map(e => e.textContent));
-assert(rowText[0].includes('40%') && rowText.at(-1).includes('не співано'), 'every bar carries its number, not only its colour ' + JSON.stringify(rowText));
+const rowText = await p.evaluate(() => [...document.querySelectorAll('#progressPanel .prog-col')].slice(0, 3).map(e => ({v: e.querySelector('.v').textContent, title: e.title})));
+assert(rowText[0].v === '40%' && rowText[1].v === '95%' && rowText[2].v === '—' && rowText[2].title.includes('не співано'),
+  'every column carries its number, not only its colour, and stands in song order ' + JSON.stringify(rowText));
 // the bar draws the personal best and the notch the last attempt, and the title says which is which
 await hist(`H.seedMany([{match: 4000, target: ${whole}, phrases: [{id: ${phr[1].id}, target: 300, hit: 90, median: 70}]}])`);
 await p.waitForTimeout(250);
 const moved = await p.evaluate(label => {
-  const row = [...document.querySelectorAll('#progressPanel .prog-bar')].find(e => e.title.startsWith(label + ' '));
+  const row = [...document.querySelectorAll('#progressPanel .prog-col')].find(e => e.title.startsWith(label + ' '));
   const mark = row.querySelector('.mark');
-  return {title: row.title, num: row.querySelector('.num').textContent, fill: row.querySelector('.fill').style.width,
-    mark: mark && mark.style.left, markTitle: mark && mark.title};
+  return {title: row.title, num: row.querySelector('.v').textContent, fill: row.querySelector('.fill').style.height, mark: mark && mark.style.bottom};
 }, phr[1].label);
 assert(moved.num === '95%' && moved.fill === '95%', 'a worse recent attempt does not lower the bar of a phrase you have already nailed ' + JSON.stringify(moved));
-assert(moved.mark === '30%' && /Остання спроба 30%/.test(moved.markTitle), 'the notch marks the last counted attempt ' + JSON.stringify(moved));
+assert(moved.mark === '30%', 'the tick marks the last counted attempt ' + JSON.stringify(moved));
 assert(/найкраще 95%/.test(moved.title) && /остання спроба 30%/.test(moved.title), 'the row title names both numbers: ' + moved.title);
 // count every animation frame while the click lands: no note may be drawn outside the vertical range
 const watch = async act => {
@@ -72,7 +72,7 @@ const watch = async act => {
   return p.evaluate(() => { const w = window.__watch; cancelAnimationFrame(w.raf); return {bad: w.bad, frames: w.frames}; });
 };
 await p.evaluate(() => { const T = window.Luma.test; T.closeTrace(); T.clearRange(); T.seek(0); });
-const framed = await watch(() => p.evaluate(() => document.querySelectorAll('#progressPanel .prog-bar')[0].click()));
+const framed = await watch(() => p.evaluate(() => document.querySelectorAll('#progressPanel .prog-col')[0].click()));
 const after = await p.evaluate(() => window.Luma.test.state());
 assert(Math.abs(after.range.a - phr[0].a) < .01 && Math.abs(after.range.b - phr[0].b) < .01, 'clicking a weak phrase sets the A–B loop on it ' + JSON.stringify(after.range));
 assert(framed.bad === 0 && framed.frames > 10, 'the phrase is framed before it is played ' + JSON.stringify(framed));
@@ -93,7 +93,7 @@ const frag = await p.evaluate(() => ({
   numbers: [...document.querySelectorAll('#progressPanel .prog-num b')].map(e => e.textContent),
   recordTitle: document.querySelectorAll('#progressPanel .prog-num')[0].title,
   ruler: document.querySelector('#progressPanel .prog-ruler').textContent,
-  weak: document.querySelector('#progressPanel .prog-bar').title,
+  weak: document.querySelector('#progressPanel .prog-col').title,
   foot: document.querySelector('#progressPanel .prog-foot .prog-note').textContent}));
 assert(JSON.stringify(frag.scope.map(v => Math.round(v / 100))) === JSON.stringify([30, 45, 44]),
   'a whole-song pass enters the fragment trend at its score for that phrase ' + JSON.stringify(frag.scope));
@@ -269,12 +269,16 @@ for (const [width, height] of [[1440, 900], [390, 844]]) {
   const ddur = await dp.evaluate(() => window.LUMA_SONG.duration);
   await dp.evaluate(`(${SING})({a: 0, b: ${ddur}, off: 0})`); await dp.waitForTimeout(400);
   const map = await dp.evaluate(() => ({weak: window.Luma.test.history.weak(),
-    rows: [...document.querySelectorAll('#progressPanel .prog-bar')].map(e => ({text: e.textContent, title: e.title}))}));
+    rows: [...document.querySelectorAll('#progressPanel .prog-col')].map(e => ({id: Number(e.dataset.phrase), v: e.querySelector('.v').textContent,
+      short: e.querySelector('.col').classList.contains('short'), title: e.title}))}));
   const shortRow = map.weak.find(w => w.id === 99);
   assert(shortRow && shortRow.short && shortRow.best === null && map.weak.at(-1).id === 99 && map.weak.filter(w => !w.short).every(w => w.best !== null),
     'after a full pass only the phrase under 1.5 s of target is left without a number, and it stands last ' + JSON.stringify(map.weak));
-  assert(!map.rows.some(r => /не співано/.test(r.text)) && /закоротка для рекорду/.test(map.rows.at(-1).text) && /1\.5 с/.test(map.rows.at(-1).title),
-    'no phrase that was sung reads «не співано», and the short one reads «закоротка для рекорду» ' + JSON.stringify(map.rows.map(r => r.text)));
+  const shortCol = map.rows.find(r => r.id === 99);
+  assert(!map.rows.some(r => /не співано/.test(r.title)) && shortCol.short && map.rows.filter(r => r.short).length === 1
+    && /закоротка для рекорду/.test(shortCol.title) && /1\.5 с/.test(shortCol.title) && /остання спроба \d+%/.test(shortCol.title),
+    'no phrase that was sung reads «не співано»; the short one is drawn apart, says why and still shows what was sung ' + JSON.stringify(map.rows.map(r => r.title)));
+  assert(JSON.stringify(map.rows.map(r => r.id)) === JSON.stringify(dph.map(x => x.id)), 'the short phrase keeps its place in the song ' + JSON.stringify(map.rows.map(r => r.id)));
   await dp.screenshot({path: 'tests/e2e/shot_progress_draft_1440.png'});
   // the trend: built while the panel is folded, then opened, then narrowed
   const sized = () => dp.evaluate(() => { const cv = document.querySelector('#progressPanel .prog-trend');
@@ -293,6 +297,76 @@ for (const [width, height] of [[1440, 900], [390, 844]]) {
   await dp.screenshot({path: 'tests/e2e/shot_progress_draft_390.png', fullPage: true});
   assert(dlogs.length === 0, 'console clean on the reshaped song ' + JSON.stringify(dlogs));
   await dp.close();
+}
+// ── 8 · a song with dozens of phrases: every one is on screen in song order, sung or not, and says why it has no number ─
+{
+  const N = 48, op = await b.newPage({viewport: {width: 1440, height: 900}}), ologs = [];
+  op.on('console', m => { if (['error', 'warning'].includes(m.type())) ologs.push(m.type() + ': ' + m.text()); });
+  op.on('pageerror', e => ologs.push('PAGEERROR ' + e.message));
+  // the demo with 48 overlapping 4 s phrases, the way Studio pads them; ids deliberately out of time order
+  await op.addInitScript(N => { let song;
+    Object.defineProperty(window, 'LUMA_SONG', {configurable: true, get: () => song, set: v => {
+      v.phrases = Array.from({length: N}, (_, i) => ({id: (i * 7) % N + 1, label: 'Фрагмент ' + String(i + 1).padStart(2, '0'),
+        a: +(.4 + i * .6).toFixed(2), b: +(4.4 + i * .6).toFixed(2), verified: false}));
+      song = v; }}); }, N);
+  await op.goto(url); await op.waitForFunction(() => window.Luma && window.Luma.test.history.runs); await op.waitForTimeout(400);
+  const T = await op.evaluate(() => window.LUMA_SONG.phrases.map(x => ({id: x.id, a: x.a, b: x.b, label: x.label})));
+  const ow = await op.evaluate(() => Math.ceil(window.Luma.test.history.totals().song * .97));
+  // a pass over the first 30 phrases with mixed results, fragment 20 the best of them; one phrase only on «Точно»;
+  // one attempt that clipped the end of the song; the rest never sung
+  const pct = i => i === 19 ? 95 : i === 5 ? 20 : 30 + (i * 37) % 60;
+  await op.evaluate(([T, ow, hits]) => window.Luma.test.history.seedMany([
+    {match: 7000, target: ow, a: 0, b: T[30].a - .05, phrases: T.slice(0, 30).map((q, i) => ({id: q.id, target: 200, hit: hits[i] * 2, median: 20}))},
+    {match: 8000, target: 200, level: 'strict', a: T[40].a, b: T[40].b, phrases: [{id: T[40].id, target: 200, hit: 160, median: 10}]},
+    {match: 5000, target: 120, a: T[44].a + 1, b: T[44].b}]), [T, ow, T.map((_, i) => pct(i))]);
+  await op.evaluate(() => document.getElementById('tabProgress').click()); await op.waitForTimeout(300);
+  const read = () => op.evaluate(() => ({cols: [...document.querySelectorAll('#progressPanel .prog-col')].map(e => ({id: Number(e.dataset.phrase),
+      n: e.querySelector('.n').textContent, v: e.querySelector('.v').textContent, cls: e.querySelector('.col').className, title: e.title,
+      visible: e.offsetParent !== null, pressed: e.getAttribute('aria-pressed')})),
+    more: [...document.querySelectorAll('#progressPanel button')].some(e => /Показати/.test(e.textContent)),
+    notes: [...document.querySelectorAll('#progressPanel .prog-note')].map(e => e.textContent),
+    detail: document.querySelector('#progressPanel .prog-detail').textContent, map: window.Luma.test.history.map()}));
+  let o = await read();
+  assert(o.cols.length === N && o.cols.every(c => c.visible) && !o.more, 'all ' + N + ' phrases are on screen at once, with no «show the rest» ' + o.cols.length);
+  assert(JSON.stringify(o.cols.map(c => c.id)) === JSON.stringify(T.map(q => q.id)) && o.cols.every((c, i) => c.n === String(i + 1)),
+    'the columns stand in the order the phrases are sung, numbered as the phrases are ' + JSON.stringify(o.cols.map(c => c.n)));
+  assert(o.map.slice(0, 30).every(w => !w.short), 'the seeded phrases are long enough to count ' + JSON.stringify(o.map.filter(w => w.short).map(w => w.num)));
+  assert(o.cols[19].v === '95%' && /найкраще 95%/.test(o.cols[19].title) && o.cols[5].v === '20%',
+    'fragment 20, sung best of all, keeps its own place with its number ' + JSON.stringify(o.cols[19]));
+  assert(o.cols.slice(0, 30).every((c, i) => c.v === pct(i) + '%'), 'every sung phrase shows its personal best');
+  const by = i => o.cols[i];
+  assert(by(33).v === '—' && /none/.test(by(33).cls) && / · не співано$/.test(by(33).title), 'a phrase nobody sang reads «не співано» ' + by(33).title);
+  assert(/none/.test(by(44).cls) && /лише частину фрази/.test(by(44).title), 'a phrase only clipped by an attempt says so ' + by(44).title);
+  assert(/іншою лінійкою: рівень «точно»/.test(by(40).title), 'a phrase counted only on another level names that level ' + by(40).title);
+  const unsung = o.map.filter(w => w.best === null && !w.short).length, short = o.map.filter(w => w.short).length;
+  assert(o.notes.some(t => t.startsWith('Зараховано 30 з ' + N + ' · без зарахованої спроби: ' + unsung) && /1 з них зарахований з іншою лінійкою \(рівень «точно»\)/.test(t)),
+    'one line counts what is counted, what is not and why ' + JSON.stringify({notes: o.notes, unsung, short}));
+  // worst first is the second view of the same columns
+  await op.getByRole('button', {name: 'Від найслабших'}).click(); await op.waitForTimeout(200);
+  const worst = await read();
+  assert(worst.cols.length === N && worst.cols[0].id === T[5].id && worst.cols.slice(0, 30).every(c => c.v !== '—') && worst.cols.at(-1).v === '—',
+    'the switch puts the weakest first and the unsung after the sung ' + JSON.stringify(worst.cols.slice(0, 3).map(c => c.n)));
+  await op.getByRole('button', {name: 'По пісні'}).click(); await op.waitForTimeout(200);
+  // a click on fragment 20 sets the loop on it, and its column says it is the one selected
+  await op.locator('#progressPanel .prog-col').nth(19).click(); await op.waitForTimeout(300);
+  const st = await op.evaluate(() => window.Luma.test.state());
+  o = await read();
+  assert(Math.abs(st.range.a - T[19].a) < .01 && Math.abs(st.range.b - T[19].b) < .01, 'clicking a column sets the A–B loop on that phrase ' + JSON.stringify(st.range));
+  assert(o.cols[19].pressed === 'true' && o.cols.filter(c => c.pressed === 'true').length === 1 && /Фрагмент 20 .*найкраще 95%/.test(o.detail),
+    'the chosen column is marked and read out in full under the chart ' + o.detail);
+  for (const [width, height] of [[1440, 900], [390, 844]]) {
+    await op.setViewportSize({width, height}); await op.waitForTimeout(300);
+    const fit = await op.evaluate(() => { const g = document.querySelector('#progressPanel .prog-map').getBoundingClientRect(),
+        cols = [...document.querySelectorAll('#progressPanel .prog-col')].map(e => e.getBoundingClientRect());
+      return {legend: document.querySelector('#progressPanel .prog-legend').offsetParent !== null, page: document.documentElement.scrollWidth, view: innerWidth, height: Math.round(g.height), right: Math.round(g.right),
+        minW: Math.min(...cols.map(r => r.width)), minH: Math.min(...cols.map(r => r.height)), rows: new Set(cols.map(r => Math.round(r.top))).size}; });
+    assert(fit.legend && fit.page === fit.view && fit.right <= fit.view && fit.minW >= 28 && fit.minH >= 28 && fit.height <= (width < 500 ? 520 : 300),
+      'the ' + N + ' columns and their key fit ' + width + ' px in ' + fit.rows + ' rows, each a comfortable target ' + JSON.stringify(fit));
+    await op.evaluate(() => document.querySelector('#progressPanel .prog-map').scrollIntoView({block: 'center'}));
+    await op.screenshot({path: 'tests/e2e/shot_progress_order_' + width + '.png'});
+  }
+  assert(ologs.length === 0, 'console clean on the song with ' + N + ' phrases ' + JSON.stringify(ologs));
+  await op.close();
 }
 assert(logs.length === 0, 'console clean ' + JSON.stringify(logs));
 await p.screenshot({path: process.env.LUMA_SHOT || 'shot_progress.png'});

@@ -18,7 +18,7 @@ function levelLabel(opt){return opt.level==='custom'?'свій коридор':(
 // Signed distance in cents; on the easy level the octave is forgiven (distance folds into ±6 semitones).
 function centsOff(m,refM,opt){let d=m-refM;if(opt.octaveFree){d=((d%12)+12)%12;if(d>6)d-=12;}return d*100;}
 const LOOP_LANE=24;
-const s={ctx:null,stream:null,capture:null,micSource:null,worker:null,micGeneration:0,busy:false,cancel:0,mode:'idle',transport:null,sources:[],endTimer:null,nextTimer:null,bufs:new Map(),gains:null,pos:song.initialTime||0,range:{a:0,b:song.duration},rangeId:0,history:[],current:null,takes:[],takeCounter:0,pending:new Map(),awaitFinish:false,trace:null,live:null,verified:[],dirty:true,raf:0,lastDraw:0,lastFrame:0,lastUI:0,rangeLo:48,rangeHi:76,liveSmooth:null,lastSmoothT:0,toastTimer:0,edit:null,computeMs:0,windowMs:0,unsaved:false,undoPunch:null,busyFor:'',scrub:null,lyricKey:'',resumeAt:null,tlDrag:null,seekTimer:0,dense:false,stageH:0,hist:{runs:[],days:[],loaded:false,note:'',persisted:null,stamp:'',stale:false,restored:false},shadow:null,shadowSig:'',progressSig:'',trendScope:'',weakAll:false,roomNotice:false};
+const s={ctx:null,stream:null,capture:null,micSource:null,worker:null,micGeneration:0,busy:false,cancel:0,mode:'idle',transport:null,sources:[],endTimer:null,nextTimer:null,bufs:new Map(),gains:null,pos:song.initialTime||0,range:{a:0,b:song.duration},rangeId:0,history:[],current:null,takes:[],takeCounter:0,pending:new Map(),awaitFinish:false,trace:null,live:null,verified:[],dirty:true,raf:0,lastDraw:0,lastFrame:0,lastUI:0,rangeLo:48,rangeHi:76,liveSmooth:null,lastSmoothT:0,toastTimer:0,edit:null,computeMs:0,windowMs:0,unsaved:false,undoPunch:null,busyFor:'',scrub:null,lyricKey:'',resumeAt:null,tlDrag:null,seekTimer:0,dense:false,stageH:0,hist:{runs:[],days:[],loaded:false,note:'',persisted:null,stamp:'',stale:false,restored:false},shadow:null,shadowSig:'',progressSig:'',trendScope:'',weakOrder:'song',roomNotice:false};
 const canvas=$('chart'),g=canvas.getContext('2d',{alpha:false}),tl=$('timeline'),tg=tl.getContext('2d',{alpha:false});let W=1,H=1,DPR=1,TW=1,TH=1;
 const reduced=matchMedia('(prefers-reduced-motion: reduce)');
 function fmt(t){t=Math.max(0,Number.isFinite(t)?t:0);return String(Math.floor(t/60)).padStart(2,'0')+':'+String(Math.floor(t%60)).padStart(2,'0');}
@@ -834,7 +834,7 @@ function renderTakes(){const root=$('takesList');root.replaceChildren();for(cons
 // ── Progress tab ────────────────────────────────────────────────────────────────────────────────────────────────
 // The attempt panel gets two tabs instead of one heading; nothing is added inside .stage, so the geometry the stage
 // redesign made reliable stays untouched. Mint means better, muted rose means worse, and every bar carries its number.
-const WEAK_SHOWN=12;let trendWatch=null;
+let trendWatch=null;
 function pct100(v){return v===null||v===undefined?null:clamp(Math.round(v/100),0,100);}
 function pctText(v){const p=pct100(v);return p===null?'—':p+'%';}
 function underTarget(frames){const sec=frames*GRID;return sec<60?Math.round(sec)+' с':Math.round(sec/60)+' хв';}
@@ -907,35 +907,60 @@ function drawTrend(cv,list){
  c.stroke();
  for(let i=0;i<vals.length;i++){c.beginPath();c.arc(x(i),y(vals[i]),2.4,0,Math.PI*2);c.fillStyle=i===vals.length-1?'#d9fdf4':'#9fb0c8';c.fill();}
 }
-// value is the number on the bar and in the column; mark is a second, named number drawn as a notch on the same track.
-function barRow(label,value,mark,markLabel,onclick,note){
- const row=document.createElement('button');row.className='prog-bar';row.type='button';
- if(onclick)row.onclick=onclick;else row.disabled=true;
- const name=document.createElement('span');name.className='nm';name.textContent=label;
- const track=document.createElement('span');track.className='track';
- if(value===null){const em=document.createElement('em');em.className='none';em.textContent=note||'не співано';track.append(em);}
- else{const fill=document.createElement('span');fill.className='fill'+(value>=70?' good':value<40?' low':'');fill.style.width=clamp(value,0,100)+'%';track.append(fill);}
- if(value!==null&&mark!==null&&mark!==undefined){const i=document.createElement('i');i.className='mark';i.style.left=clamp(mark,0,100)+'%';i.title=markLabel+' '+mark+'%';track.append(i);}
- const num=document.createElement('span');num.className='num';num.textContent=value===null?'—':value+'%';
- row.append(name,track,num);
- row.title=label+' · '+(value===null?(note||'ще не зараховано жодної спроби')
-  :'найкраще '+value+'%'+(mark!==null&&mark!==undefined?' · '+markLabel.toLowerCase()+' '+mark+'%':''));
- return row;
+// What a different ruler differs in, in words: «рівень «легко»», «вигляд «Ноти»», «0.8×», «до правки нот».
+function rulerDiff(r){
+ const parts=[];if(levelKey(r)!==levelKey(levelOpt()))parts.push('рівень «'+levelLabel(r)+'»'+(r.level==='custom'?' ±'+r.tolerance+' ¢':''));
+ if(r.view!==prefs.view)parts.push('вигляд «'+(r.view==='notes'?'Ноти':'Контур')+'»');
+ if(r.speed!==prefs.speed)parts.push(r.speed+'×');
+ if(r.mapVersion!==mapVersion())parts.push('до правки нот');
+ return parts.join(', ');
 }
-function weakRows(runs){
- const rec=records(runs),totals=targetTotals(prefs.view),out=[];
- for(const p of song.phrases||[]){
-  const best=rec.phrases.get(p.id);
+// Every phrase of the song, in the order it is sung. A phrase without a counted attempt says why: never sung, sung
+// only with another ruler, sung only in part, or too short for any record at all.
+function phraseMap(runs){
+ const rec=records(runs),totals=targetTotals(prefs.view),key=currentKey(),cand=new Map(s.hist.runs.map(r=>[r,phraseCandidates(r)]));
+ const mine=r=>cand.get(r)||phraseCandidates(r),others=s.hist.runs.filter(r=>r.cmpKey!==key);
+ const order=[...(song.phrases||[])].sort((x,y)=>x.a-y.a||x.id-y.id);
+ return order.map((p,i)=>{
+  const best=rec.phrases.get(p.id),label=p.label||('Фрагмент '+p.id),num=(/(\d+)\s*$/.exec(label)||[])[1];
   // under 1.5 s of target in the whole phrase no attempt can ever count it: the phrase is short, not unsung
   const short=(totals.phrase.get(p.id)||0)<HIST.minPhraseFrames;
   // the same 1.5 s floor the record uses, so the notch can never mark an attempt too short to be counted
-  let last=null;for(const r of runs){const c=phraseCandidates(r).find(c=>c.id===p.id&&c.target>=HIST.minPhraseFrames);if(c){last=c.match;break;}}
-  out.push({id:p.id,label:p.label||('Фрагмент '+p.id),best:pct100(best?best.match:null),last:pct100(last),short});
- }
- // Worst first by the personal best: one bad take must not reshuffle the practice list, a phrase nobody has sung yet
- // stands at the bottom rather than pretending to be the weakest, and a phrase too short to count stands under it.
- out.sort((a,b)=>(a.best===null)-(b.best===null)||a.short-b.short||(a.best-b.best)||a.id-b.id);
- return out;
+  let last=null,count=0,brief=null;
+  for(const r of runs)for(const c of mine(r))if(c.id===p.id){
+   if(c.target>=HIST.minPhraseFrames){count++;if(last===null)last=c.match;}else if(brief===null)brief=c.match;}
+  let why='',elsewhere=null;
+  if(!best){
+   if(!short)elsewhere=others.find(r=>mine(r).some(c=>c.id===p.id&&c.target>=HIST.minPhraseFrames))||null;
+   if(short)why='закоротка для рекорду: у фразі менше 1.5 с нот'+(brief!==null?' · остання спроба '+pct100(brief)+'%':'');
+   else if(brief!==null)why='спроба зачепила менше 1.5 с нот цієї фрази, тож не зарахована';
+   else if(runs.some(r=>r.a<p.b&&r.b>p.a&&(r.a>p.a+.05||r.b<p.b-.05)))why='спроби накрили лише частину фрази; зараховується від 80 % її нот';
+   else why=elsewhere?'':'не співано';
+   if(elsewhere)why+=(why?' · зараховано':'зараховано лише')+' з іншою лінійкою: '+rulerDiff(elsewhere);
+  }
+  return {id:p.id,a:p.a,b:p.b,label,num:num?String(+num):String(i+1),best:pct100(best?best.match:null),last:pct100(last),count,short,why,
+   elsewhere:elsewhere?rulerDiff(elsewhere):''};
+ });
+}
+// Worst first by the personal best: one bad take must not reshuffle the practice list, a phrase nobody has sung yet
+// stands after the sung ones rather than pretending to be the weakest, and a phrase too short to count stands last.
+function weakRows(runs){
+ return phraseMap(runs).sort((a,b)=>(a.best===null)-(b.best===null)||a.short-b.short||(a.best-b.best)||a.a-b.a);
+}
+function phraseText(w){
+ return w.label+' · '+fmt(w.a)+'–'+fmt(w.b)+' · '+(w.best===null?w.why
+  :'найкраще '+w.best+'%'+(w.last!==null?' · остання спроба '+w.last+'%':'')+' · '+w.count+' '+plural(w.count,'зарахована спроба','зараховані спроби','зарахованих спроб'));
+}
+// One column per phrase: the fill is the personal best, the tick the last counted attempt, the number under it the best.
+function phraseColumn(w,selected,onclick){
+ const b=document.createElement('button');b.type='button';b.className='prog-col';b.dataset.phrase=String(w.id);
+ b.setAttribute('aria-pressed',String(selected));b.title=phraseText(w);b.setAttribute('aria-label',b.title);b.onclick=onclick;
+ const n=document.createElement('span');n.className='n';n.textContent=w.num;
+ const col=document.createElement('span');col.className='col'+(w.best!==null?'':w.short?' short':' none');
+ if(w.best!==null){const fill=document.createElement('span');fill.className='fill'+(w.best>=70?' good':w.best<40?' low':'');fill.style.height=clamp(w.best,0,100)+'%';col.append(fill);
+  if(w.last!==null){const i=document.createElement('i');i.className='mark';i.style.bottom=clamp(w.last,0,100)+'%';col.append(i);}}
+ const v=document.createElement('span');v.className='v';v.textContent=w.best===null?'—':w.best+'%';
+ b.append(n,col,v);return b;
 }
 // A lesson trains a skill, not nine separate keys: rows are exercises, and each carries one lamp per level.
 function exerciseRows(){
@@ -958,7 +983,7 @@ function exerciseRows(){
 }
 function progressSignature(){
  return [prefs.tab,prefs.shadow,currentKey(),s.trendScope||'',s.rangeId,s.range.a.toFixed(2),s.range.b.toFixed(2),
-  s.hist.runs.length,s.hist.stamp||'',s.hist.note,s.hist.persisted,s.takes.length,s.weakAll].join('|');
+  s.hist.runs.length,s.hist.stamp||'',s.hist.note,s.hist.persisted,s.takes.length,s.weakOrder].join('|');
 }
 function renderProgress(){
  const panel=$('takesPanel'),box=$('progressPanel');
@@ -979,6 +1004,8 @@ function renderProgress(){
  buildProgress(box);
 }
 function buildProgress(box){
+ // the panel is rebuilt on every change, so a column that had the keyboard keeps it
+ const had=box.contains(document.activeElement)?document.activeElement.dataset.phrase:undefined;
  box.replaceChildren();
  const key=currentKey(),runs=s.hist.runs.filter(r=>r.cmpKey===key),today=localDay(Date.now());
  const whole=trendScope()==='song',phraseId=scopePhrase(),scored=scopeEntries(runs);
@@ -1019,10 +1046,10 @@ function buildProgress(box){
  box.append(note);
  // drawn whenever the canvas takes a size: now, when a folded panel opens, when the window narrows
  trendWatch?.disconnect();trendWatch=new ResizeObserver(()=>drawTrend(cv,list));trendWatch.observe(cv);
- // 3 · weak places, or the lesson's exercises
- const h2=document.createElement('h3');h2.textContent=song.lesson?'Вправи':'Слабкі місця';box.append(h2);
- const rows=document.createElement('div');rows.className='prog-rows';
+ // 3 · every phrase in the order it is sung, or the lesson's exercises
  if(song.lesson){
+  const h2=document.createElement('h3');h2.textContent='Вправи';box.append(h2);
+  const rows=document.createElement('div');rows.className='prog-rows';
   for(const r of exerciseRows()){
    const line=document.createElement('div');line.className='prog-ex';
    const nm=document.createElement('span');nm.className='nm';nm.textContent=r.ex;line.append(nm);
@@ -1033,23 +1060,48 @@ function buildProgress(box){
     el.title=lamp.label+' · найкраще '+(lamp.best===null?'ще не співано':lamp.best+'%')+' · спроб: '+lamp.count+' · лампа світиться від '+HIST.lamp+'%';
     line.append(el);}
    rows.append(line);}
- }else if(!(song.phrases||[]).length){
-  const empty=document.createElement('p');empty.className='prog-note';empty.textContent='У цій пісні немає готових фраз, тож карта слабких місць порожня. Виділи фрагмент — тренд рахуватиметься по ньому.';rows.append(empty);
+  box.append(rows);
  }else{
-  // A four-minute song has dozens of phrases and most of them are still unsung: the worst twelve are the map, the rest
-  // are one line until you ask for them.
-  const all=weakRows(runs),shown=s.weakAll?all:all.slice(0,WEAK_SHOWN);
-  for(const w of shown){const bar=barRow(w.label,w.best,w.last,'Остання спроба',()=>{
-   const p=(song.phrases||[]).find(p=>p.id===w.id);if(!p||s.mode!=='idle'||s.busy||s.awaitFinish)return;
-   closeTrace();setRange(p.a,p.b,p.id);s.pos=p.a;setRangeScale();sync();toast('Фрагмент: '+(p.label||('Фрагмент '+p.id)));},w.short?'закоротка для рекорду':'');
-   if(w.short)bar.title+=': у фразі менше 1.5 с нот';
-   rows.append(bar);}
-  if(all.length>shown.length){const more=document.createElement('button');more.className='ghost sm prog-more';
-   const rest=all.length-shown.length,unsung=all.slice(shown.length).filter(w=>w.best===null&&!w.short).length;
-   more.textContent='Показати решту '+rest+' '+plural(rest,'фразу','фрази','фраз')+(unsung?' · без зарахованої спроби: '+unsung:'');
-   more.onclick=()=>{s.weakAll=true;s.progressSig='';renderProgress();};rows.append(more);}
+  const head3=document.createElement('div');head3.className='prog-head';
+  const h2=document.createElement('h3');h2.textContent='Фрагменти';head3.append(h2);
+  const map=phraseMap(runs);
+  if(map.length>1){
+   const seg3=document.createElement('div');seg3.className='segmented';seg3.setAttribute('aria-label','Порядок фрагментів');
+   for(const [id,label]of [['song','По пісні'],['weak','Від найслабших']]){
+    const b=document.createElement('button');b.textContent=label;b.className=s.weakOrder===id?'active':'';b.setAttribute('aria-pressed',String(s.weakOrder===id));
+    b.onclick=()=>{s.weakOrder=id;s.progressSig='';renderProgress();};seg3.append(b);}
+   head3.append(seg3);}
+  box.append(head3);
+  if(!map.length){
+   const empty=document.createElement('p');empty.className='prog-note';empty.textContent='У цій пісні немає готових фраз, тож карта фрагментів порожня. Виділи фрагмент — тренд рахуватиметься по ньому.';box.append(empty);
+  }else{
+   // A four-minute song has dozens of phrases: every one of them is a column, in the order they are sung, so a gap in
+   // the practice reads as a gap in the row. Worst first is one switch away and keeps the same columns.
+   const shown=s.weakOrder==='weak'?weakRows(runs):map;
+   const picked=customRange()?((song.phrases||[]).find(p=>Math.abs(p.a-s.range.a)<=.25&&Math.abs(p.b-s.range.b)<=.25)?.id??null):null;
+   const grid=document.createElement('div');grid.className='prog-map';grid.setAttribute('role','group');grid.setAttribute('aria-label','Фрагменти пісні: найкращий результат кожного');
+   const detail=document.createElement('p');detail.className='prog-note prog-detail';
+   const pickedRow=map.find(w=>w.id===picked);
+   const rest=pickedRow?phraseText(pickedRow):'Клік по стовпчику вибирає цей фрагмент для тренування.';
+   detail.textContent=rest;
+   for(const w of shown){const col=phraseColumn(w,w.id===picked,()=>{
+    const p=(song.phrases||[]).find(p=>p.id===w.id);if(!p||s.mode!=='idle'||s.busy||s.awaitFinish)return;
+    closeTrace();setRange(p.a,p.b,p.id);s.pos=p.a;setRangeScale();sync();toast('Фрагмент: '+(p.label||('Фрагмент '+p.id)));});
+    // a pointer or the keyboard on a column reads it out in full, on a phone the tap selects it and the line stays
+    const tell=()=>{detail.textContent=phraseText(w);},back=()=>{detail.textContent=rest;};
+    col.addEventListener('mouseenter',tell);col.addEventListener('focus',tell);col.addEventListener('mouseleave',back);col.addEventListener('blur',back);
+    grid.append(col);}
+   const counted=map.filter(w=>w.best!==null).length,short=map.filter(w=>w.short).length,unsung=map.length-counted-short,away=map.filter(w=>w.elsewhere);
+   const sum=document.createElement('p');sum.className='prog-note';
+   sum.textContent='Зараховано '+counted+' з '+map.length+' · без зарахованої спроби: '+unsung+(short?' · закоротких для рекорду: '+short:'')
+    +(away.length?' · '+away.length+' з них '+(away.length===1?'зарахований':'зараховані')+' з іншою лінійкою ('+[...new Set(away.map(w=>w.elsewhere))].join('; ')+')':'');
+   const key=document.createElement('div');key.className='legend prog-legend';
+   for(const [cls,text]of [['good','найкраще'],['mark','остання спроба'],['none','не співано'],['short','закоротка для рекорду, менше 1.5 с нот']]){
+    const sp=document.createElement('span'),i=document.createElement('i');i.className=cls;sp.append(i,text);key.append(sp);}
+   box.append(sum,grid,detail,key);
+   if(had!==undefined)grid.querySelector('[data-phrase="'+had+'"]')?.focus({preventScroll:true});
+  }
  }
- box.append(rows);
  // 4 · footer: where the history lives and what you can do with it
  const foot=document.createElement('div');foot.className='prog-foot';
  const state=document.createElement('p');state.className='prog-note';
@@ -1377,7 +1429,7 @@ const historyHooks={
  shadow:()=>s.shadow?{id:s.shadow.id,match:s.shadow.match,points:s.shadow.points.length}:null,
  streak:streakDays,trend:()=>trendRuns(s.hist.runs.filter(r=>r.cmpKey===currentKey())).map(r=>r.match),
  totals:()=>({song:targetTotals(prefs.view).song,draft:targetTotals(prefs.view).draft}),
- weak:()=>weakRows(s.hist.runs.filter(r=>r.cmpKey===currentKey())),exercises:exerciseRows,
+ weak:()=>weakRows(s.hist.runs.filter(r=>r.cmpKey===currentKey())),map:()=>phraseMap(s.hist.runs.filter(r=>r.cmpKey===currentKey())),exercises:exerciseRows,
  // Write attempts straight into the store, dated freely: the seed a progress test needs.
  seedRun:async spec=>{const ids=await historyHooks.seedMany([spec]);return ids[0];},
  seedMany:async list=>{
