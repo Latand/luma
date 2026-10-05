@@ -22,6 +22,7 @@ RUN=${LUMA_JS:-bun}; command -v "$RUN" >/dev/null || RUN=node
 status=0
 for t in scoring audio ux studio scale lessons history progress; do echo "== $t"; LUMA_SHOT="tests/e2e/shot_$t.png" "$RUN" "tests/e2e/$t.mjs" || status=1; done
 "$PY" tests/studio_test.py || status=1
+"$PY" tests/separation_test.py || status=1
 "$PY" tests/lyrics_text_test.py || status=1
 "$PY" tests/lyrics_align_test.py || status=1
 "$PY" tests/retranscribe_song_test.py || status=1

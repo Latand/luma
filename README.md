@@ -47,7 +47,7 @@ git clone https://github.com/Latand/luma && cd luma
 studio/luma-studio.sh          # creates .venv, installs deps, starts http://127.0.0.1:8792 and opens it
 ```
 
-Drop an `m4a` / `mp3` / `flac` / `wav`, confirm title and artist (a file named `Song - Artist.m4a` fills them in), press
+Drop an `m4a` / `mp3` / `flac` / `wav` of up to 40 minutes, confirm title and artist (a file named `Song - Artist.m4a` fills them in), press
 **Підготувати**. The pipeline (see [docs/PIPELINE.md](docs/PIPELINE.md)):
 
 1. FFmpeg decode

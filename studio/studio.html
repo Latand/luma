@@ -54,7 +54,7 @@ details{font-size:12px;color:var(--muted)}summary{cursor:pointer;padding:6px 0;c
 <div class="lib" id="lib"><p class="st">Завантажуємо бібліотеку…</p></div>
 <div class="library-actions"><button class="secondary" id="importTrainer" type="button">Додати готовий тренажер</button><a class="secondary" href="/demo" target="_blank" rel="noopener">Спробувати демо</a><input id="trainerFile" type="file" accept=".html" hidden></div>
 <details class="card upload" id="uploadPanel"><summary>Додати свою пісню<small>вокал і мелодію Studio визначить на цьому комп’ютері</small></summary>
-<div class="drop" id="drop"><b id="fileName">Перетягни аудіофайл сюди</b><button class="secondary" id="choose" type="button">Вибрати аудіофайл</button><small>m4a, mp3, flac, wav, ogg · до 10 хв · до 200 МБ · назва «Пісня - Виконавець» заповнює поля сама</small><input type="file" id="file" accept="audio/*,.m4a,.mp3,.flac,.wav,.ogg" hidden></div>
+<div class="drop" id="drop"><b id="fileName">Перетягни аудіофайл сюди</b><button class="secondary" id="choose" type="button">Вибрати аудіофайл</button><small>m4a, mp3, flac, wav, ogg · до 40 хв · до 1 ГБ · назва «Пісня - Виконавець» заповнює поля сама</small><input type="file" id="file" accept="audio/*,.m4a,.mp3,.flac,.wav,.ogg" hidden></div>
 <form id="prepareForm" class="row"><label for="title">Назва пісні<input id="title" autocomplete="off"></label><label for="artist">Виконавець<input id="artist" autocomplete="off"></label><button class="primary" id="go" disabled>Підготувати</button></form>
 <div class="notice" id="uploadNotice" hidden role="alert"></div>
 </details>
@@ -68,7 +68,7 @@ const fmt=t=>{t=Math.max(0,Math.round(t||0));return t>=3600?Math.floor(t/3600)+'
 const clock=t=>{t=Math.max(0,Math.round(t||0));return Math.floor(t/60)+':'+String(t%60).padStart(2,'0');};
 function message(text){$('uploadNotice').textContent=text;$('uploadNotice').hidden=!text;}
 function syncForm(){for(const id of ['go','choose','title','artist','importTrainer'])$(id).disabled=busy||(id==='go'&&!file);$('go').textContent=busy?'Завантажуємо…':'Підготувати';}
-function pick(f){if(busy)return;if(f.size>200*1024*1024){message('Файл завеликий. Вибери аудіо до 200 МБ.');return;}file=f;requestId=crypto.randomUUID();const stem=f.name.replace(/\.[^.]+$/,''),m=stem.match(/^(.*?)\s+-\s+(.*)$/);$('title').value=m?m[1].trim():stem;$('artist').value=m?m[2].trim():'';$('fileName').textContent=f.name;message('');syncForm();}
+function pick(f){if(busy)return;if(f.size>1024*1024*1024){message('Файл завеликий. Вибери аудіо до 1 ГБ.');return;}file=f;requestId=crypto.randomUUID();const stem=f.name.replace(/\.[^.]+$/,''),m=stem.match(/^(.*?)\s+-\s+(.*)$/);$('title').value=m?m[1].trim():stem;$('artist').value=m?m[2].trim():'';$('fileName').textContent=f.name;message('');syncForm();}
 $('choose').onclick=()=>$('file').click();$('file').onchange=()=>{if($('file').files[0])pick($('file').files[0]);$('file').value='';};
 // The form lives at the bottom, folded: the first screen is for singing. The header button and a file dropped anywhere open it.
 function openUpload(focus){const panel=$('uploadPanel');const wasOpen=panel.open;panel.open=true;if(!wasOpen)panel.scrollIntoView({block:'center',behavior:'smooth'});if(focus&&!busy)$('choose').focus();}
