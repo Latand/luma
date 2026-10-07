@@ -116,6 +116,18 @@ function livesResume(m){
  // fresh: a new attempt from the rewind point, never a punch into the one just saved; the normal count-in plays first
  startTransport(true,false,true).then(()=>{if(s.mode==='singing'&&s.live)livesBegin(r.to);});return true;
 }
+// The count-in sits centred over the roll. On a short stage the centre falls on the lyric lines, so with the retry notice
+// in it the block moves down just far enough to clear the last lyric line; with no room for that, the lyrics step back
+// until the count-in ends. A stage tall enough keeps the centred block as it is.
+function placeCountdown(){
+ const cd=$('countdown'),band=$('lyricBand');let pad=0,hide=false;
+ if(!cd.hidden&&!$('livesNotice').hidden){
+  const kids=[...cd.children].filter(e=>!e.hidden),h=kids.at(-1).offsetTop+kids.at(-1).offsetHeight-kids[0].offsetTop,H=cd.clientHeight;
+  const line=[...band.children].filter(e=>e.offsetHeight&&e.textContent).pop();
+  if(line){pad=Math.max(0,2*(band.offsetTop+line.offsetTop+line.offsetHeight+10)-H+h);if(pad>H-h){pad=0;hide=true;}}
+ }
+ const p=pad?pad+'px':'',v=hide?'hidden':'';if(cd.style.paddingTop!==p)cd.style.paddingTop=p;if(band.style.visibility!==v)band.style.visibility=v;
+}
 // What the suites read: the engine's numbers and what the corner and the count-in actually show.
 function livesState(){const lv=s.lives;return {on:prefs.lives,size:prefs.livesCount,total:lv?lv.total:null,left:lv?lv.left:null,out:!!lv?.out,retry:s.livesRetry?s.livesRetry.to:null,last:s.livesLast||null,
  shown:!$('lives').hidden,hearts:$('lives').children.length,lost:$('lives').querySelectorAll('.life.lost').length,refill:$('lives').classList.contains('refill'),
@@ -405,7 +417,7 @@ function scheduleLoop(sing){clearTimeout(s.nextTimer);const token=s.cancel;s.nex
 function stopTransport(reason='user'){
  clearTimeout(s.nextTimer);s.cancel++;
  if(s.busy){s.busy=false;releaseMic();sync();return;}
- const active=s.transport,wasSing=s.mode==='singing';if(active)s.pos=now();clearSources();s.transport=null;s.mode='idle';$('countdown').hidden=true;
+ const active=s.transport,wasSing=s.mode==='singing';if(active)s.pos=now();clearSources();s.transport=null;s.mode='idle';$('countdown').hidden=true;placeCountdown();
  if(wasSing&&s.worker){s.awaitFinish=true;s.worker.postMessage({type:'stop',time:s.ctx.currentTime,reason});setTimeout(()=>{if(s.awaitFinish){s.awaitFinish=false;s.pending.clear();s.live=null;error('Запис не відповів на завершення. Незавершена спроба могла не зберегтися.');releaseMic();sync();}},2500);}
  else if(reason==='worker')releaseMic();renderTakes();sync();
 }
@@ -1389,7 +1401,7 @@ function updateReadout(t){
  else if(sc){pe.textContent='—';de.textContent=s.mode==='singing'?'Чекаю на першу намальовану ноту…':'У цій спробі не було намальованих нот';}
  else{pe.textContent='—';de.textContent=s.mode==='listen'?'Слухаємо ціль · збіг рахується тільки під час співу':'Заспівай — рахую по намальованих нотах · '+levelLabel(levelOpt())+' ±'+levelOpt().tolerance+'¢';}
  $('timeNow').textContent=fmt(t);if(s.transport&&s.ctx.currentTime<s.transport.when&&s.mode==='singing'){$('countdown').hidden=false;$('countNumber').textContent=Math.ceil(s.transport.when-s.ctx.currentTime);}else $('countdown').hidden=true;
- renderLyric(t);
+ renderLyric(t);placeCountdown();
  if($('settingsDialog').open)$('diagnostics').textContent='YIN · '+(s.ctx?(s.ctx.sampleRate/1000).toFixed(1)+' kHz':'мікрофон вимкнено')+'\nВікно аналізу: '+s.windowMs.toFixed(1)+' мс\nОбчислення останнього кадру: '+s.computeMs.toFixed(2)+' мс\nЦе не вимір повної затримки.\nКалібрування: ручний зсув '+prefs.latency+' мс';
 }
 function requestDraw(){if(!s.raf&&!document.hidden)s.raf=requestAnimationFrame(tick);}

@@ -29,6 +29,17 @@ const setLives = (page, on, size) => page.evaluate(({on, size}) => {
   if (size) { const n = document.getElementById('livesCount'); n.value = String(size); n.dispatchEvent(new Event('change')); }
 }, {on, size});
 
+// Where the retry notice sits against the lyric lines: the text boxes of both, and how many pixels they share.
+const noticeOverLyrics = page => page.evaluate(() => {
+  const $ = id => document.getElementById(id), boxes = el => { const r = document.createRange(); r.selectNodeContents(el); return [...r.getClientRects()].filter(q => q.width && q.height); };
+  const band = $('lyricBand'), hidden = getComputedStyle(band).visibility === 'hidden';
+  const notice = [$('livesFrom'), $('livesNotice').querySelector('small')].flatMap(boxes), lyric = hidden ? [] : [$('lyricNow'), $('lyricNext')].flatMap(boxes);
+  let px = 0; for (const n of notice) for (const l of lyric) px = Math.max(px, Math.min(n.bottom, l.bottom) - Math.max(n.top, l.top) > 0 && Math.min(n.right, l.right) - Math.max(n.left, l.left) > 0 ? Math.min(n.bottom, l.bottom) - Math.max(n.top, l.top) : 0);
+  const stage = $('chartWrap').getBoundingClientRect(), cd = $('countNumber').getBoundingClientRect();
+  return {px, hidden, lyrics: lyric.length, notice: notice.length, pad: $('countdown').style.paddingTop, inside: notice.every(n => n.top >= stage.top && n.bottom <= stage.bottom) && cd.bottom <= stage.bottom,
+    noticeBox: notice.map(n => [Math.round(n.top), Math.round(n.bottom)]), lyricBox: lyric.map(l => [Math.round(l.top), Math.round(l.bottom)])};
+});
+
 const b = await launch();
 const {page: p, logs} = await open(b);
 const song = await p.evaluate(() => ({duration: window.LUMA_SONG.duration, phrases: window.LUMA_SONG.phrases.map(x => ({a: x.a, b: x.b})),
@@ -85,6 +96,24 @@ for (const vp of [{width: 390, height: 844}, {width: 1440, height: 900}]) {
     `at ${vp.width}px the hearts sit inside the stage head, above the piano roll ` + JSON.stringify(box));
   if (process.env.LUMA_SHOT) await p.screenshot({path: process.env.LUMA_SHOT.replace(/\.png$/, `_${vp.width}.png`)});
 }
+// ── the retry notice in the count-in stays readable whatever the stage height: on a short stage the count-in moves down
+// past the lyric lines; a tall one keeps the centred block as it was ──────────────────────────────────────────────
+const ph = song.phrases.find(x => x.a > 5 && x.b - x.a > 4);
+for (const {vp, range} of [{vp: {width: 1366, height: 768}}, {vp: {width: 1440, height: 900}, range: true}, {vp: {width: 390, height: 844}}, {vp: {width: 1920, height: 1080}}]) {
+  await p.setViewportSize(vp); await p.waitForTimeout(250);
+  await p.evaluate(({range, ph}) => {
+    const T = window.Luma.test; T.closeTrace(); if (range) T.setRange(ph.a, ph.b, ph.id); else T.clearRange(); T.seek(ph.a);
+    const started = T.fakeSing({a: ph.a, b: ph.b}); T.fakeTick(started.when - 1.5);// inside the count-in
+    document.getElementById('livesFrom').textContent = 'Ще раз з 00:07'; document.getElementById('livesNotice').hidden = false; T.draw();
+  }, {range, ph: {a: ph.a, b: ph.b, id: ph.id}});
+  const g = await noticeOverLyrics(p);
+  assert(g.notice === 2 && (g.lyrics >= 1 || g.hidden) && g.px === 0 && g.inside, `at ${vp.width}×${vp.height}${range ? ' with a fragment' : ''} the «Ще раз з …» notice crosses no lyric line ` + JSON.stringify(g));
+  if (vp.width === 390 || vp.width === 1920) assert(!g.pad && !g.hidden, `at ${vp.width}×${vp.height} the count-in keeps its centred place and the lyrics stay ` + JSON.stringify(g));
+  if (process.env.LUMA_SHOT && range) await p.screenshot({path: process.env.LUMA_SHOT.replace(/\.png$/, '_notice_1440.png')});
+  await p.evaluate(() => { const T = window.Luma.test; T.fakeFinish(); T.draw(); T.clearRange(); });
+  const back = await p.evaluate(() => ({pad: document.getElementById('countdown').style.paddingTop, band: document.getElementById('lyricBand').style.visibility}));
+  assert(!back.pad && !back.band, 'after the count-in the stage is as before ' + JSON.stringify(back));
+}
 assert(logs.length === 0, 'console clean (driven clock) ' + JSON.stringify(logs));
 await b.close();
 
@@ -108,6 +137,8 @@ assert(mid.left === 2 && mid.lost === 1 && mid.retry === null, 'singing off pitc
 await q.waitForFunction(() => window.Luma.test.state().lives.last, null, {timeout: 15000});
 await q.waitForFunction(() => { const s = window.Luma.test.state(); return s.mode === 'singing' && s.lives.countdown && s.lives.notice; }, null, {timeout: 8000});
 const re = await q.evaluate(() => { const T = window.Luma.test, s = T.state(); return {lives: s.lives, time: s.time, takes: T.takes(), shot: null}; });
+const placed = await noticeOverLyrics(q);
+assert(placed.px === 0 && placed.inside, 'the notice of a real rewind at 390 px crosses no lyric line ' + JSON.stringify(placed));
 await q.evaluate(() => { window.__off = 0; });// the fragment again, in tune this time
 if (process.env.LUMA_SHOT) { await q.waitForTimeout(600); await q.screenshot({path: process.env.LUMA_SHOT.replace(/\.png$/, '_rewind_390.png')}); }
 const at = re.lives.last.at, expect = (() => { let to = null; for (const ph of song.phrases) if (ph.a <= at - 3 && (to === null || ph.a > to)) to = ph.a; return to === null || at - to > 20 ? Math.max(0, at - 9) : to; })();

@@ -86,7 +86,8 @@ takes the one before it along), or `back` = 9 s back when there is no such phras
 before the start of the A–B fragment. A **new attempt** starts from there with a full set of lives after the normal
 2-second count-in, which says «Ще раз з 01:23». It is a fresh attempt, never a punch-in into the one just saved, so the
 two stay separate rows of the history and no record is overwritten. Losing a life, the refill and the notice are
-animated; with `prefers-reduced-motion` only their end states are shown.
+animated; with `prefers-reduced-motion` only their end states are shown. On a short stage, where the centred count-in
+would cover the lyric lines, it moves down just below them (or, with no room left, the lyrics hide until it ends).
 
 ## Strict statistics
 "У коридорі", "Покриття" and "Медіана |Δ|" on attempt cards use only `ok` frames inside fragments the user confirmed by ear.
