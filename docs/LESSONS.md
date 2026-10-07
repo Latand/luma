@@ -82,12 +82,14 @@ picker. The design and the alternatives it was chosen over are in [design/GUIDED
   («✓ Урок 1 пройдено · збіг 78 %») with «Ще раз». The next trainer loads behind the card and opens by itself after 5 s;
   «Почати урок» opens it at once. Singing still starts with the trainer's own «Співати».
 - **Finished.** A lesson counts as finished when a sung attempt runs to the end of the lesson: the attempt ends on its own
-  (not stopped) within 0.25 s of the lesson's length. An attempt over a selected fragment, a loop pass, a stopped attempt
-  or listening does not count; an attempt started midway that reaches the end does. The trainer reports it with
+  (not stopped) within 0.25 s of the lesson's length. A stopped attempt, a loop pass, listening or a selected fragment
+  that ends before the lesson's end does not count; an attempt started midway, or a fragment that ends where the lesson
+  ends, does. The trainer reports it with
   `postMessage({type:'luma:finished', file, match})` to the Studio page that embeds it (`tellHost` in `app/app.js`); a
   trainer opened on its own posts nothing. Studio accepts the message only from the current lesson's frame.
 - **Skip and leave.** «Пропустити урок» works on an intro and during a lesson; it removes the frame, which stops sound and
-  frees the microphone (an attempt in progress is dropped; finished ones are already in the history). × «Завершити» and
+  frees the microphone (an attempt in progress is dropped; finished ones are already in the history). Skipping a lesson
+  reopened with «Ще раз» keeps its earlier result. × «Завершити» and
   the browser's Back button leave the session from any step.
 - **Song picker.** After the last lesson: the run summary («✓ 78 %» or «пропущено» per lesson) and the library with
   covers. «Співати» opens a song in the same frame; «До пісень» in the bar returns to the picker.

@@ -101,6 +101,14 @@ try {
     assert(await page.locator('#session .sintro .secondary', {hasText: 'Ще раз'}).isVisible(), `${width}: «Ще раз» offers lesson 1 again`);
     await shot(page, 'intro2', width);
 
+    // ── 6b · «Ще раз» then «Пропустити урок» keeps lesson 1 finished ───────────────────────────────────────────
+    await page.locator('#session .sintro .secondary', {hasText: 'Ще раз'}).click(); await waitLesson(page, lessonFiles[0]);
+    assert((await dots(page))[0] === 'current', `${width}: «Ще раз» reopens lesson 1 ` + JSON.stringify(await dots(page)));
+    await page.locator('#sessionSkip').click(); await waitIntro(page, 2);
+    const kept = await page.locator('#session .sintro .result').textContent();
+    assert((await dots(page))[0] === 'done' && kept === result, `${width}: skipping the repeat keeps lesson 1 done (${kept}) ` + JSON.stringify(await dots(page)));
+    assert((await page.locator('#sessionLive').textContent()).startsWith('Повтор уроку 1 пропущено'), `${width}: the live region does not call lesson 1 skipped`);
+
     // ── 7 · a message that does not come from the lesson frame is ignored ───────────────────────────────────
     await page.evaluate(file => window.postMessage({type: 'luma:finished', file, match: 99}, location.origin), lessonFiles[1]);
 

@@ -246,7 +246,9 @@ function finishStep(match){nextPhase('finishing');S.results[S.i]={done:true,matc
  later(()=>{dropFrame();later(advance,ms(200));},1200);}   // the hold lets the trainer's own result show first
 function skipStep(){if(S.phase==='song'){showPicker();return;}
  if(!['intro','lesson','finishing'].includes(S.phase))return;
- if(S.phase!=='finishing'){S.results[S.i]={skipped:true};announce('Урок '+(S.i+1)+' пропущено.'+(S.i+1<S.steps.length?'':' Обери пісню.'));}
+ // Skipping a repeat («Ще раз») keeps the result the lesson already has.
+ if(S.phase!=='finishing'){const done=S.results[S.i]?.done;if(!done)S.results[S.i]={skipped:true};
+  announce((done?'Повтор уроку '+(S.i+1)+' пропущено, результат збережено.':'Урок '+(S.i+1)+' пропущено.')+(S.i+1<S.steps.length?'':' Обери пісню.'));}
  nextPhase('leaving');dropFrame();advance();}
 function showPicker(){nextPhase('picker');dropFrame();clearBody();renderBar();
  const body=$('sessionBody'),box=el('div',null,'spicker');body.classList.add('scroll');
