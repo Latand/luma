@@ -28,18 +28,45 @@ details{font-size:12px;color:var(--muted)}summary{cursor:pointer;padding:6px 0;c
 /* One line of what a singer cares about — duration first, and room for the best score once a trainer reports one. */
 .song .facts{display:flex;flex-wrap:wrap;gap:4px 6px;font-size:13px;color:#c7d2e2;margin-top:auto}.song .facts span+span::before{content:'· ';color:var(--dim)}.song .facts .len{font-variant-numeric:tabular-nums}
 .song .actions{display:flex;gap:8px}.song details{margin-top:2px}.song .meta{font:11px var(--mono);color:var(--dim);margin:4px 0 0}
-.lesson .head{display:flex;gap:10px;align-items:baseline;justify-content:space-between}.lesson .chip{flex:none}.lesson .chip.easy{color:var(--mint)}.lesson .chip.easy i{background:var(--mint)}.lesson .chip.normal{color:var(--violet)}.lesson .chip.normal i{background:var(--violet)}.lesson .chip.strict{color:var(--amber)}.lesson .chip.strict i{background:var(--amber)}
+.lesson .head{display:flex;gap:10px;align-items:baseline;justify-content:space-between}.lesson .chip{flex:none}.chip.easy{color:var(--mint)}.chip.easy i{background:var(--mint)}.chip.normal{color:var(--violet)}.chip.normal i{background:var(--violet)}.chip.strict{color:var(--amber)}.chip.strict i{background:var(--amber)}
 .lesson .goal{color:#cbd6e6;font-size:13.5px}.lesson p{margin:0;color:var(--muted);font-size:13px;line-height:1.65}
 .upload{margin-top:18px;padding:14px 18px;font-size:14px;color:var(--text)}.upload>summary{color:var(--text);font-size:15px;font-weight:600;padding:2px 0}.upload>summary small{color:var(--muted);font-weight:400;font-size:13px;margin-left:8px}.upload[open]>summary{margin-bottom:12px}
 .empty{padding:18px;border:1px dashed #3a4760;border-radius:14px;color:var(--muted);font-size:13px;grid-column:1/-1}.st{color:var(--muted);font-size:13px}
 .library-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0 0}
 .note{font-size:12px;color:var(--dim);margin-top:26px;line-height:1.6}.note summary{padding:4px 0}
+/* Album covers: a square on top of each library tile; songs without embedded art get a generated one (hue from the file name). */
+.lib.songs{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}.songs .song{min-height:0}
+.song .title.clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}.song .artist.clamp{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cover{position:relative;container-type:inline-size;aspect-ratio:1;border-radius:10px;overflow:hidden;background:var(--stage);border:1px solid var(--border);margin-bottom:2px}.cover img{display:block;width:100%;height:100%;object-fit:cover}
+.cover.ph{background:radial-gradient(circle at 28% 24%,hsl(var(--h) 42% 34%),transparent 62%),radial-gradient(circle at 78% 82%,hsl(calc(var(--h) + 50) 36% 26%),transparent 58%),var(--stage)}
+.cover.ph b{position:absolute;left:12%;top:8%;font-size:clamp(28px,22cqi,56px);font-weight:600;color:#e9edf5d0;letter-spacing:-1px}.cover.ph svg{position:absolute;left:18%;bottom:14%;width:64%;color:var(--mint);opacity:.4}
+.songs .song .actions .primary{flex:1}
+/* «Заняття»: the entry at the top of Studio, and the full-screen session that plays the lessons one after another. */
+.hero{display:flex;gap:18px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin:0 0 6px}.hero-copy{flex:1;min-width:240px;display:flex;flex-direction:column;gap:8px}.hero-title{font-size:20px;font-weight:600;letter-spacing:-.3px}.hero p{margin:0;color:var(--muted);font-size:13.5px}
+.path{display:flex;flex-wrap:wrap;gap:6px;align-items:center;color:var(--dim);font-size:12px}.path .chip{text-transform:none;letter-spacing:0}
+.hero .primary{height:46px;font-size:14px;padding:0 24px}
+body.locked{overflow:hidden}
+.session{position:fixed;inset:0;z-index:10;display:flex;flex-direction:column;background:var(--bg);animation:fade .2s ease-out}.session.closing{opacity:0;transition:opacity .2s}
+.sbar{height:52px;flex:none;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--border);background:#0c1018}.sbar .secondary{height:36px}.sbar .sclose svg{width:14px;height:14px}
+.sprog{flex:1;display:flex;align-items:center;justify-content:center;gap:12px;min-width:0}.sstep{font-size:12.5px;color:var(--muted);white-space:nowrap}
+.dots{display:flex;align-items:center;gap:6px}.dot{width:8px;height:8px;border-radius:8px;background:#ffffff1f;transition:width .3s,background .3s}.dot.done{background:#a1eed8a0}.dot.skipped{background:#95a3b855}.dot.current{width:28px;background:var(--mint)}
+.sbody{flex:1;position:relative;overflow:hidden;min-height:0}.sbody.scroll{overflow:auto}
+.sframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:var(--bg);opacity:0;pointer-events:none;transition:opacity .25s}.sframe.shown{opacity:1;pointer-events:auto}
+.sintro{position:absolute;inset:0;z-index:2;display:flex;align-items:center;justify-content:center;padding:20px;background:var(--bg);overflow:auto}.sintro.out{opacity:0;transition:opacity .18s;pointer-events:none}
+.sintro .card{width:100%;max-width:460px;display:flex;flex-direction:column;gap:12px;padding:22px;animation:rise .32s ease-out}.sintro .eyebrow{font-size:12px;color:var(--muted)}.sintro .result{font-size:13px;color:var(--mint)}.sintro .title{font-size:22px;font-weight:600;letter-spacing:-.3px}
+.sintro .head{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}.sintro .goal{color:#cbd6e6;font-size:14px;line-height:1.6;margin:0}.sintro .facts{font-size:13px;color:#c7d2e2}.sintro .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}.sintro .primary{height:46px;font-size:14px;padding:0 24px}.sintro .secondary{height:46px}.sintro .auto{font-size:12px;color:var(--dim);margin:0}
+.spicker{max-width:960px;margin:0 auto;padding:22px 24px 40px;animation:rise .32s ease-out}.spicker .hero-title{margin-bottom:10px}.spicker h2{margin-top:24px}.summary{display:flex;flex-wrap:wrap;gap:8px}.summary .chip{text-transform:none;letter-spacing:0}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;margin:0}
+@keyframes rise{from{opacity:0;transform:translateY(10px)}}@keyframes fade{from{opacity:0}}
 @keyframes blink{50%{opacity:.35}}@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
-@media(max-width:560px){.bar{padding:10px 14px}.wrap{padding:18px 14px 40px}.row{flex-direction:column;align-items:stretch}.row label,.row .primary{width:100%}.card{padding:14px}.lib{grid-template-columns:1fr}.bar .status{display:none}}
+@media(max-width:560px){.bar{padding:10px 14px}.wrap{padding:18px 14px 40px}.row{flex-direction:column;align-items:stretch}.row label,.row .primary{width:100%}.card{padding:14px}.lib{grid-template-columns:1fr}.bar .status{display:none}
+ .lib.songs{grid-template-columns:repeat(2,minmax(0,1fr))}.songs .song{padding:10px}.songs .song .title{font-size:14.5px}.songs .song .primary{padding:0 8px;font-size:12.5px}.hero .primary{width:100%}
+ .sbar{padding:0 10px;gap:8px}.sbar .sclose{width:40px;padding:0;justify-content:center}.sbar .sclose span,.sstep{display:none}.sbar .sskip{font-size:12.5px;padding:0 10px}.spicker{padding:18px 14px 32px}.sintro{padding:14px}.sintro .card{padding:18px}.sintro .primary{flex:1}}
 </style></head><body>
 <header class="bar"><div class="brand"><svg viewBox="0 0 34 34" fill="none" aria-hidden="true"><path d="M3 22c5 0 4-14 8-14s3 19 7 19 3-13 7-13 3 5 5 5" stroke="currentColor" stroke-width="1.8"/></svg>luma<span>studio</span></div><button class="secondary add" id="addSong" type="button">Додати пісню</button><div class="status" id="serverStatus"><i></i><span id="serverStatusText">ПІДКЛЮЧАЮСЬ</span></div></header>
 <main class="wrap">
-<p class="lead">Почни з уроку або відкрий пісню з бібліотеки — і співай.</p>
+<p class="lead" id="lead">Почни з уроку або відкрий пісню з бібліотеки — і співай.</p>
+<section class="card hero" id="sessionEntry" hidden aria-labelledby="sessionTitle"><div class="hero-copy"><div class="hero-title" id="sessionTitle">Заняття</div><p id="sessionPitch"></p><div class="path" id="sessionPath"></div></div><button class="primary" id="sessionStart" type="button">Почати заняття</button></section>
 <div class="notice" id="connectionNotice" hidden role="status"><p>Зв’язок зі Studio втрачено. Показано останні отримані дані; перевіряємо з’єднання.</p><button class="secondary" id="refreshBtn" type="button">Перевірити знову</button></div>
 <section id="jobsSection" hidden aria-labelledby="jobsTitle">
 <h2 id="jobsTitle">Черга <span class="count" id="jobsCount"></span></h2>
@@ -51,7 +78,7 @@ details{font-size:12px;color:var(--muted)}summary{cursor:pointer;padding:6px 0;c
 <div class="lib" id="lessons"></div>
 </section>
 <h2>Бібліотека <span class="count" id="libCount"></span></h2>
-<div class="lib" id="lib"><p class="st">Завантажуємо бібліотеку…</p></div>
+<div class="lib songs" id="lib"><p class="st">Завантажуємо бібліотеку…</p></div>
 <div class="library-actions"><button class="secondary" id="importTrainer" type="button">Додати готовий тренажер</button><a class="secondary" href="/demo" target="_blank" rel="noopener">Спробувати демо</a><input id="trainerFile" type="file" accept=".html" hidden></div>
 <details class="card upload" id="uploadPanel"><summary>Додати свою пісню<small>вокал і мелодію Studio визначить на цьому комп’ютері</small></summary>
 <div class="drop" id="drop"><b id="fileName">Перетягни аудіофайл сюди</b><button class="secondary" id="choose" type="button">Вибрати аудіофайл</button><small>m4a, mp3, flac, wav, ogg · до 40 хв · до 1 ГБ · назва «Пісня - Виконавець» заповнює поля сама</small><input type="file" id="file" accept="audio/*,.m4a,.mp3,.flac,.wav,.ogg" hidden></div>
@@ -61,9 +88,16 @@ details{font-size:12px;color:var(--muted)}summary{cursor:pointer;padding:6px 0;c
 <div class="note">Відкривай пісні з бібліотеки: так працює запис голосу. Готові тренажери зберігаються в каталозі songs цього проєкту; HTML з іншого місця можна додати кнопкою вище.
 <details><summary>Час підготовки та приватність</summary><p>Одна пісня потребує кількох хвилин на GPU; на CPU підготовка триває довше. Demucs, CREPE та pYIN працюють локально. Якщо налаштовано ключ Soniox, аудіо надсилається цьому сервісу для розпізнавання слів. Записи твого голосу залишаються у вкладці тренажера.</p></details></div>
 </main>
+<section class="session" id="session" role="dialog" aria-modal="true" aria-label="Заняття" hidden>
+<div class="sbar"><button class="secondary sclose" id="sessionClose" type="button" aria-label="Завершити заняття"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 2l10 10M12 2L2 12" stroke="currentColor" stroke-width="1.8"/></svg><span>Завершити</span></button>
+<div class="sprog"><div class="dots" id="sessionDots" role="progressbar" aria-label="Хід заняття"></div><span class="sstep" id="sessionStep"></span></div>
+<button class="secondary sskip" id="sessionSkip" type="button">Пропустити урок</button></div>
+<div class="sbody" id="sessionBody"></div>
+<p class="sr" id="sessionLive" aria-live="polite"></p>
+</section>
 <script>
 const $=id=>document.getElementById(id);
-let file=null, requestId=null, busy=false, timer=null, refreshing=false, jobsKey='', songsKey='', lessonsKey='', lessons=null, lessonsFor=null;
+let file=null, requestId=null, busy=false, timer=null, refreshing=false, jobsKey='', songsKey='', lessonsKey='', lessons=null, lessonsFor=null, shownLessons=[], librarySongs=[];
 const fmt=t=>{t=Math.max(0,Math.round(t||0));return t>=3600?Math.floor(t/3600)+' год '+Math.floor(t%3600/60)+' хв':t>=60?Math.floor(t/60)+' хв '+String(t%60).padStart(2,'0')+' с':t+' с';};
 const clock=t=>{t=Math.max(0,Math.round(t||0));return Math.floor(t/60)+':'+String(t%60).padStart(2,'0');};
 function message(text){$('uploadNotice').textContent=text;$('uploadNotice').hidden=!text;}
@@ -118,23 +152,122 @@ function renderLessons(list){const key=JSON.stringify(list);if(key===lessonsKey)
   const acts=el('div',null,'actions'),a=el('a','Відкрити урок','primary');a.href='/song/'+encodeURIComponent(l.html);a.target='_blank';a.rel='noopener';acts.append(a);card.append(acts);
   const more=el('details');more.append(el('summary','Як виконувати'),el('p',l.description),el('p',[l.bpm?l.bpm+' BPM':null,l.range,l.notes+' нот'].filter(Boolean).join(' · '),'meta'));
   card.append(more);root.append(card);}}
-function renderSongs(songs){const key=JSON.stringify(songs);if(key===songsKey)return;songsKey=key;const root=$('lib');root.replaceChildren();$('libCount').textContent=songs.length?String(songs.length):'';
+// Song cards, shared by the library and the session's song picker: the album cover on top, then what a singer picks by.
+const WAVE='<svg viewBox="0 0 34 34" fill="none" aria-hidden="true"><path d="M3 22c5 0 4-14 8-14s3 19 7 19 3-13 7-13 3 5 5 5" stroke="currentColor" stroke-width="1.8"/></svg>';
+const songTitle=s=>s.title||s.name.replace(/^Luma_|\.html$/g,'').replace(/_/g,' ');
+function hue(name){let h=0;for(const c of name)h=(h*31+c.codePointAt(0))>>>0;return h%360;}
+// The picture is decorative (the title is text right below it). No cover, or one that fails to load: a placeholder
+// with a hue that stays the same for the same file, the Luma wave and the title's first letter.
+function coverBox(s,title){const box=el('div',null,'cover');
+ const placeholder=()=>{box.className='cover ph';box.style.setProperty('--h',hue(s.name));box.replaceChildren(el('b',([...title.trim()][0]||'♪').toUpperCase()));box.insertAdjacentHTML('beforeend',WAVE);};
+ if(s.cover){const img=el('img');img.alt='';img.loading='lazy';img.decoding='async';img.onerror=placeholder;img.src='/cover/'+encodeURIComponent(s.name)+'?v='+s.cover;box.append(img);}else placeholder();
+ return box;}
+function songCard(s,session){const name=songTitle(s),card=el('article',null,'card song'),title=el('div',name,'title clamp'),artist=el('div',s.artist||'Виконавця не вказано','artist clamp');title.title=name;artist.title=artist.textContent;
+ card.append(coverBox(s,name),title,artist);
+ // What a singer chooses by: how long it is, whose it is. The best score joins this row once a trainer reports one.
+ const facts=el('div',null,'facts');if(s.duration)facts.append(el('span',clock(s.duration),'len'));card.append(facts);
+ const acts=el('div',null,'actions');
+ if(session){const b=el('button','Співати','primary');b.type='button';b.onclick=()=>openSong(s);acts.append(b);card.append(acts);return card;}
+ const a=el('a','Відкрити тренажер','primary');a.href='/song/'+encodeURIComponent(s.name);a.target='_blank';a.rel='noopener';acts.append(a);card.append(acts);
+ const more=el('details');more.append(el('summary','Подробиці файлу'),el('p',[(s.bytes/1048576).toFixed(0)+' МБ',s.mtime?'зібрано '+s.mtime:null,s.name].filter(Boolean).join(' · '),'meta'));
+ card.append(more);return card;}
+function renderSongs(songs){librarySongs=songs;const key=JSON.stringify(songs);if(key===songsKey)return;songsKey=key;const root=$('lib');root.replaceChildren();$('libCount').textContent=songs.length?String(songs.length):'';
  if(!songs.length){root.append(el('p','Тут поки немає пісень. Додай свою пісню кнопкою вгорі, постав готовий тренажер або відкрий демо.','empty'));return;}
- for(const s of songs){const card=el('article',null,'card song'),title=el('div',s.title||s.name.replace(/^Luma_|\.html$/g,'').replace(/_/g,' '),'title');card.append(title);card.append(el('div',s.artist||'Виконавця не вказано','artist'));
-  // What a singer chooses by: how long it is, whose it is. The best score joins this row once a trainer reports one.
-  const facts=el('div',null,'facts');if(s.duration)facts.append(el('span',clock(s.duration),'len'));card.append(facts);
-  const acts=el('div',null,'actions'),a=el('a','Відкрити тренажер','primary');a.href='/song/'+encodeURIComponent(s.name);a.target='_blank';a.rel='noopener';acts.append(a);card.append(acts);
-  const more=el('details');more.append(el('summary','Подробиці файлу'),el('p',[(s.bytes/1048576).toFixed(0)+' МБ',s.mtime?'зібрано '+s.mtime:null,s.name].filter(Boolean).join(' · '),'meta'));
-  card.append(more);root.append(card);}}
+ for(const s of songs)root.append(songCard(s,false));}
 function setStatus(kind,text){const el=$('serverStatus');el.className='status'+(kind?' '+kind:'');$('serverStatusText').textContent=text;}
 async function refresh(){clearTimeout(timer);if(refreshing)return;refreshing=true;let delay=5000;
  try{const r=await fetch('/status');if(!r.ok)throw Error('status');const d=await r.json();if(!Array.isArray(d.jobs)||!Array.isArray(d.songs))throw Error('format');$('connectionNotice').hidden=true;renderJobs(d.jobs);
   const files=d.songs.map(s=>s.name).filter(n=>LESSON_FILE.test(n)).sort().join('|');
   if(files&&files!==lessonsFor)await loadLessons(files);   // first poll, and again whenever a lesson is added, renamed or removed
   const built=new Set(d.songs.map(s=>s.name)),shown=(lessons||[]).filter(l=>built.has(l.html));
-  renderLessons(shown);renderSongs(d.songs.filter(s=>!shown.some(l=>l.html===s.name)));const working=d.jobs.some(j=>['running','queued'].includes(j.state));setStatus(working?'busy':'live',working?'ГОТУЄМО ПІСНЮ':'STUDIO ПРАЦЮЄ');delay=working?2000:15000;}
+  renderLessons(shown);renderEntry(shown);renderSongs(d.songs.filter(s=>!shown.some(l=>l.html===s.name)));const working=d.jobs.some(j=>['running','queued'].includes(j.state));setStatus(working?'busy':'live',working?'ГОТУЄМО ПІСНЮ':'STUDIO ПРАЦЮЄ');delay=working?2000:15000;}
  catch(e){$('connectionNotice').hidden=false;setStatus('','НЕМАЄ ЗВ’ЯЗКУ');}
  finally{refreshing=false;timer=setTimeout(refresh,delay);}
 }
+// ── «Заняття»: the built-in lessons one after another, then a song. Studio hosts the session; each trainer runs in a
+// same-origin frame and posts {type:'luma:finished'} when a whole lesson has been sung (tellHost in app/app.js).
+// Held in memory only: a reload returns to the library.
+const NUMBERS=['','Один урок','Два уроки','Три уроки','Чотири уроки'];
+function renderEntry(list){$('sessionEntry').hidden=!list.length;$('lead').hidden=!!list.length;shownLessons=list;if(!list.length)return;
+ $('sessionPitch').textContent=(NUMBERS[list.length]||list.length+' уроків')+' поспіль, потім пісня з бібліотеки. Будь-який урок можна пропустити.';
+ const path=$('sessionPath'),parts=[];for(const l of list){const chip=el('span',null,'chip '+(LEVELS[l.level]||''));chip.append(el('i'),el('span',l.title.split(' · ').pop()));parts.push(chip);}
+ const song=el('span',null,'chip');song.append(el('i'),el('span','Пісня'));parts.push(song);
+ const key=parts.map(p=>p.textContent).join('|');if(path.dataset.key===key)return;path.dataset.key=key;path.replaceChildren();
+ parts.forEach((p,i)=>{if(i)path.append(el('span','→'));path.append(p);});}
+const S={open:false,steps:[],results:[],i:0,phase:'',frame:null,loaded:false,wantOpen:false,gen:0,timers:[]};
+const REDUCED=matchMedia('(prefers-reduced-motion: reduce)');
+const ms=t=>REDUCED.matches?0:t;   // the reduced-motion rule above zeroes every transition, so nothing here waits for transitionend
+function later(fn,t){const gen=S.gen;S.timers.push(setTimeout(()=>{if(gen===S.gen&&S.open)fn();},t));}
+function nextPhase(phase){S.gen++;S.timers.forEach(clearTimeout);S.timers=[];S.phase=phase;}
+function announce(text){$('sessionLive').textContent=text;}
+function lessonLabel(i){return 'Урок '+(i+1)+' з '+S.steps.length;}
+function matchText(m){return 'збіг '+(m===null||m===undefined?'—':m+' %');}
+function renderBar(){const dots=$('sessionDots'),n=S.steps.length,at=S.phase==='picker'||S.phase==='song'?n:S.i;
+ if(dots.children.length!==n+1)dots.replaceChildren(...Array.from({length:n+1},()=>el('span',null,'dot')));
+ [...dots.children].forEach((d,k)=>{const r=S.results[k];d.className='dot'+(k===at?' current':r?.done?' done':r?.skipped?' skipped':'');});
+ const label=at<n?lessonLabel(at):S.phase==='song'?'Пісня':'Вибір пісні';
+ dots.setAttribute('aria-valuemin','1');dots.setAttribute('aria-valuemax',String(n+1));dots.setAttribute('aria-valuenow',String(at+1));dots.setAttribute('aria-valuetext',label);$('sessionStep').textContent=label;
+ const skip=$('sessionSkip');skip.hidden=S.phase==='picker';skip.textContent=S.phase==='song'?'До пісень':'Пропустити урок';}
+function dropFrame(){const f=S.frame;S.frame=null;S.loaded=false;S.wantOpen=false;if(!f)return;f.classList.remove('shown');
+ // Removing the document stops its audio and frees the microphone without a beforeunload prompt; an attempt still in
+ // progress is dropped, a finished one is already in the history.
+ setTimeout(()=>f.remove(),ms(200));}
+function makeFrame(src){dropFrame();const f=el('iframe',null,'sframe');f.src=src;f.title='Тренажер';f.allow='microphone; autoplay; fullscreen';f.inert=true;f.tabIndex=-1;
+ f.addEventListener('load',()=>{if(S.frame!==f)return;S.loaded=true;if(S.wantOpen)showFrame();});S.frame=f;$('sessionBody').append(f);return f;}
+function showFrame(){const f=S.frame;if(!f)return;S.wantOpen=false;
+ const card=$('sessionBody').querySelector('.sintro');if(card){card.classList.add('out');setTimeout(()=>card.remove(),ms(180));}
+ f.inert=false;f.removeAttribute('tabindex');f.classList.add('shown');f.focus();}
+function clearBody(){const body=$('sessionBody');body.classList.remove('scroll');for(const n of [...body.children])if(n!==S.frame)n.remove();}
+function startSession(){if(S.open||!shownLessons.length)return;
+ Object.assign(S,{open:true,steps:shownLessons.slice(),results:shownLessons.map(()=>null),i:0});
+ history.pushState({lumaSession:1},'');
+ const box=$('session');box.classList.remove('closing');box.hidden=false;document.body.classList.add('locked');document.querySelector('header').inert=document.querySelector('main').inert=true;
+ $('sessionDots').replaceChildren();showIntro(0);}
+function showIntro(i){nextPhase('intro');S.i=i;clearBody();renderBar();
+ const l=S.steps[i],prev=i>0?S.results[i-1]:null,wrap=el('div',null,'sintro'),card=el('article',null,'card');
+ card.append(el('div',lessonLabel(i),'eyebrow'));
+ if(prev?.done)card.append(el('div','✓ Урок '+i+' пройдено · '+matchText(prev.match),'result'));
+ const head=el('div',null,'head'),chip=el('span',null,'chip '+(LEVELS[l.level]||''));chip.title='Рекомендований рівень оцінювання';chip.append(el('i'),el('span',l.level));head.append(el('div',l.title,'title'),chip);
+ const facts=el('div',null,'facts');facts.textContent=[l.duration?clock(l.duration):null,l.repetitions?l.repetitions+' повторів':null].filter(Boolean).join(' · ');
+ const acts=el('div',null,'actions'),go=el('button','Почати урок','primary');go.type='button';go.onclick=()=>openStep();acts.append(go);
+ if(prev?.done){const again=el('button','Ще раз','secondary');again.type='button';again.onclick=()=>repeatLesson(i-1);acts.append(again);}
+ const auto=el('p',null,'auto');card.append(head,el('p',l.summary,'goal'),facts,acts,auto);wrap.append(card);$('sessionBody').append(wrap);
+ makeFrame('/song/'+encodeURIComponent(l.html));   // preloads behind the card, so the countdown hides the 6–9 MB load
+ go.focus();
+ let left=5;const tick=()=>{if(left<=0){openStep();return;}auto.textContent='Урок відкриється сам через '+left+' с';left--;later(tick,1000);};tick();}
+function openStep(){if(S.phase!=='intro')return;nextPhase('lesson');
+ if(S.loaded){showFrame();return;}
+ S.wantOpen=true;const go=$('sessionBody').querySelector('.sintro .primary'),auto=$('sessionBody').querySelector('.sintro .auto');if(go)go.textContent='Завантажуємо урок…';if(auto)auto.textContent='';}
+function repeatLesson(i){nextPhase('lesson');S.i=i;renderBar();makeFrame('/song/'+encodeURIComponent(S.steps[i].html));S.wantOpen=true;
+ const go=$('sessionBody').querySelector('.sintro .primary');if(go)go.textContent='Завантажуємо урок…';}
+function advance(){if(S.i+1<S.steps.length)showIntro(S.i+1);else showPicker();}
+function finishStep(match){nextPhase('finishing');S.results[S.i]={done:true,match};renderBar();
+ const more=S.i+1<S.steps.length;announce('Урок '+(S.i+1)+' пройдено, '+matchText(match)+'. '+(more?'Далі урок '+(S.i+2)+'.':'Розспівку завершено, обери пісню.'));
+ later(()=>{dropFrame();later(advance,ms(200));},1200);}   // the hold lets the trainer's own result show first
+function skipStep(){if(S.phase==='song'){showPicker();return;}
+ if(!['intro','lesson','finishing'].includes(S.phase))return;
+ if(S.phase!=='finishing'){S.results[S.i]={skipped:true};announce('Урок '+(S.i+1)+' пропущено.'+(S.i+1<S.steps.length?'':' Обери пісню.'));}
+ nextPhase('leaving');dropFrame();advance();}
+function showPicker(){nextPhase('picker');dropFrame();clearBody();renderBar();
+ const body=$('sessionBody'),box=el('div',null,'spicker');body.classList.add('scroll');
+ box.append(el('div','Розспівку завершено','hero-title'));
+ const sum=el('div',null,'summary');S.steps.forEach((l,k)=>{const r=S.results[k],chip=el('span',null,'chip'+(r?.done?' done':''));chip.append(el('i'),el('span',l.title+' · '+(r?.done?'✓ '+(r.match===null||r.match===undefined?'—':r.match+' %'):'пропущено')));sum.append(chip);});
+ const h=el('h2','Обери пісню');h.append(el('span',librarySongs.length?String(librarySongs.length):'','count'));
+ const grid=el('div',null,'lib songs');
+ if(librarySongs.length)for(const s of librarySongs)grid.append(songCard(s,true));
+ else grid.append(el('p','У бібліотеці поки немає пісень. Заверши заняття й додай свою пісню на головній сторінці Studio.','empty'));
+ box.append(sum,h,grid);body.append(box);body.scrollTop=0;
+ const first=grid.querySelector('button');(first||$('sessionClose')).focus({preventScroll:true});}
+function openSong(s){nextPhase('song');clearBody();renderBar();makeFrame('/song/'+encodeURIComponent(s.name));S.wantOpen=true;}
+function closeSession(){if(!S.open)return;nextPhase('');S.open=false;dropFrame();
+ const box=$('session');box.classList.add('closing');document.body.classList.remove('locked');document.querySelector('header').inert=document.querySelector('main').inert=false;
+ setTimeout(()=>{if(!S.open){box.hidden=true;box.classList.remove('closing');clearBody();announce('');}},ms(200));
+ $('sessionStart').focus();}
+function leaveSession(){if(history.state&&history.state.lumaSession)history.back();else closeSession();}   // Back and × end the same way
+addEventListener('popstate',()=>{if(S.open)closeSession();});
+addEventListener('message',e=>{const d=e.data;
+ if(e.origin!==location.origin||!S.frame||e.source!==S.frame.contentWindow||!d||d.type!=='luma:finished'||S.phase!=='lesson')return;
+ if(d.file!==S.steps[S.i].html)return;finishStep(typeof d.match==='number'?d.match:null);});
+$('sessionStart').onclick=startSession;$('sessionClose').onclick=leaveSession;$('sessionSkip').onclick=skipStep;
 $('refreshBtn').onclick=refresh;refresh();
 </script></body></html>

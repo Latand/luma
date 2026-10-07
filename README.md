@@ -61,6 +61,17 @@ Drop an `m4a` / `mp3` / `flac` / `wav` of up to 40 minutes, confirm title and ar
 The library on the Studio page serves the trainers over http, so the microphone works out of the box. Додати готовий тренажер imports an existing Luma HTML, preserves its song data, and wraps it in the current app. Imported files get unique names so existing songs are preserved.
 Command line equivalent: `.venv/bin/python studio/prepare_song.py song.m4a --title "Song" --artist "Artist"`.
 
+**Album covers.** Each library tile shows the album picture embedded in the song's audio file. `studio/covers.py` takes the
+most nearly square attached picture (many files carry a letterboxed 16:9 thumbnail before the real cover), writes it as
+`songs/<slug>/cover.jpg` (at most 512 px), and the server serves it at `/cover/<trainer>.html`. Preparing a song extracts
+its cover; songs prepared earlier are filled in when the server starts, or at once with `.venv/bin/python studio/covers.py`.
+A song without a picture (and an imported trainer, which has no audio file) gets a generated placeholder. Covers stay in
+the ignored `songs/` directory.
+
+**«Заняття».** «Почати заняття» at the top of Studio plays the three built-in lessons one after another, then opens the song
+picker. Each lesson runs in a frame inside Studio: singing it through to the end moves on by itself, «Пропустити урок» moves
+on at once, × or the browser's Back button leaves. Details in [docs/LESSONS.md](docs/LESSONS.md#заняття-three-lessons-in-a-row).
+
 **Hardware.** A 5-minute song takes about 4 minutes on an RTX 3060 (Demucs ≈ 50 s, pYIN ≈ 1 min, CREPE ≈ 30 s). CPU works
 and takes considerably longer. Python 3.11, FFmpeg and a few GB of RAM are required; `requirements.txt` pins PyTorch 2.10.
 
@@ -90,17 +101,18 @@ seek, vocal toggle, an attempt with the recording switch off and the same with i
 `history.mjs` builds a practice history without a microphone and checks that it survives a reload and a rebuilt trainer,
 that a stored trace re-scores to the same numbers, that records stay inside one ruler, and that export and import
 round-trip. `progress.mjs` checks the Прогрес tab: trend, weak phrases, the record shadow, the day streak, lesson lamps,
-and the 390 px layout. Every suite requires a clean console. Set `LUMA_BROWSER=/path/to/chrome` to use a specific
+and the 390 px layout. `session.mjs` drives «Заняття» in Studio at 390 px and 1440 px (finish, skip, the song picker,
+leaving, reduced motion) and checks covers against an ffmpeg-made fixture. Every suite requires a clean console. Set `LUMA_BROWSER=/path/to/chrome` to use a specific
 Chromium build.
 
 ## Layout
 
 ```
 app/       head.html (styles + markup, {{TITLE}} / {{ARTIST}} placeholders), workers.html (AudioWorklet capture + YIN worker), app.js
-studio/    prepare_song.py (pipeline), build_html.py (package → HTML, --rebuild), studio_server.py + studio.html, luma-studio.sh
+studio/    prepare_song.py (pipeline), build_html.py (package → HTML, --rebuild), studio_server.py + studio.html, covers.py, luma-studio.sh
 examples/  make_demo.py (synthetic demo song)
 tests/e2e/ Playwright suites
-docs/      TARGET_MAP_SCHEMA.md, PIPELINE.md, SCORING.md, HISTORY_SCHEMA.md, PROGRESS_DESIGN.md, LESSONS.md, screenshots
+docs/      TARGET_MAP_SCHEMA.md, PIPELINE.md, SCORING.md, HISTORY_SCHEMA.md, PROGRESS_DESIGN.md, LESSONS.md, design/, screenshots
 ```
 
 Updating the app for already built trainers: `studio/build_html.py --rebuild songs/Luma_*.html` keeps each file's song
