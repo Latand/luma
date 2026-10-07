@@ -57,6 +57,37 @@ same. The WAV and the points are spliced and rescored; with the recording switch
 The attempt and the switch have to agree, and so do the speeds — otherwise the button says "Співати" and a separate
 attempt is recorded.
 
+## Lives mode («Режим життів»)
+A switch in the settings, **off by default**; with it off nothing above changes. With it on, the stage's corner (under the
+match percentage; on a phone, a row of its own under it) shows a set of hearts — 10 by default, 3 or 5 on request, kept
+with the other settings — and every recorded attempt starts with a full set.
+
+Lives are read from the live score's own frames, so the corridor, the time slack and the level are the attempt's, and
+only frames **with a target** count: silence where nothing is drawn never costs a life. Silence *under* a note is a miss
+here exactly as it is in the match. The rule, with the constants named as they are in `LIVES` in `app/app.js`:
+
+| constant | value | meaning |
+|---|---|---|
+| `window` | 4 s of song | the misses are counted over the last 4 s of song time since the previous loss |
+| `minMiss` | 1.5 s | at least 1.5 s of target frames in that window were missed |
+| `share` | 60 % | and the misses are at least 60 % of the target frames in it |
+| `cooldown` | 2.5 s | the next life can go no sooner than 2.5 s of song later; the window also starts afresh after each loss |
+| `count` / `sizes` | 10 / 3, 5, 10 | lives per attempt |
+
+So a single miss shorter than 1.5 s — a late entry, one note sung flat, one note left silent — never costs a life, and
+one bad passage costs at most one life every 2.5 s. Measured with the suite's synthetic voice on the demo: a decent
+singer on «легко» (each note entered 0.15 s late, ±45 ¢ of drift with a wobble) keeps all ten over the whole song at an
+86 % match; the same song two semitones off loses the first life after 1.5 s of missed notes and one more every 2.5 s.
+
+When the last life goes, the attempt ends there and is **saved like any other attempt** — in the tab and in the history,
+with its trace and its score up to that point; it is a partial pass, so it can never claim a song record. The song then
+rewinds to the latest phrase that began at least `minBack` = 3 s before the loss (so a phrase that had only just begun
+takes the one before it along), or `back` = 9 s back when there is no such phrase within `maxBack` = 20 s, and never
+before the start of the A–B fragment. A **new attempt** starts from there with a full set of lives after the normal
+2-second count-in, which says «Ще раз з 01:23». It is a fresh attempt, never a punch-in into the one just saved, so the
+two stay separate rows of the history and no record is overwritten. Losing a life, the refill and the notice are
+animated; with `prefers-reduced-motion` only their end states are shown.
+
 ## Strict statistics
 "У коридорі", "Покриття" and "Медіана |Δ|" on attempt cards use only `ok` frames inside fragments the user confirmed by ear.
 They exist so that a verified fragment can be judged without draft noise.
