@@ -5,9 +5,11 @@
   PUT  /upload?name=&title=&artist=   raw file body -> inbox/, job queued
   PUT  /import?name=             finished trainer HTML -> re-wrapped with the current app, added to the library
   POST /retry?id=                queue a failed job again
+  POST /activity                 {"events":[…]} from Studio and its trainers -> songs/logs/activity/<day>.jsonl
   GET  /status                   jobs with stage progress, library with title / artist / duration
   GET  /song/<name>.html         generated trainers (served over http so the microphone works)
   GET  /demo                     the synthetic demo trainer, if it has been built
+  GET  /activity.js              the activity logger Studio shares with the trainers (docs/ACTIVITY_LOG.md)
 
 Run: python studio/studio_server.py [--port 8792] [--songs DIR] [--copy-to DIR]
 """
@@ -28,6 +30,28 @@ jobs: list[dict] = []; lock = threading.Lock(); upload_lock = threading.Lock()
 # prepare_song.py takes songs up to 40 minutes: an uncompressed 40-minute WAV (48 kHz, 24 bit) is under 700 MB, a trainer
 # of that length 350 MiB (measured). Imports are parsed in memory, uploads are streamed to disk.
 MAX_UPLOAD = 1024 << 20; MAX_IMPORT = 512 << 20
+
+# Activity log (docs/ACTIVITY_LOG.md): append-only JSONL, one file per local day. A batch is at most 64 KiB and 200
+# events; anything malformed is refused whole, so a line in the file is always one well-formed event.
+ACTIVITY = LOGS / 'activity'; MAX_ACTIVITY = 64 << 10; MAX_EVENTS = 200; MAX_EVENT = 16 << 10
+EVENT_TYPE = re.compile(r'^[a-z][a-z0-9_]{0,39}$'); activity_lock = threading.Lock()
+
+def activity_events(body: bytes) -> list[str]:
+    """The JSONL lines of one client batch; ValueError when any event is malformed."""
+    events = json.loads(body.decode('utf-8')).get('events')
+    if not isinstance(events, list) or not 0 < len(events) <= MAX_EVENTS: raise ValueError('events')
+    lines = []
+    for e in events:
+        if not isinstance(e, dict): raise ValueError('event')
+        for key, n in (('ts', 40), ('session', 64), ('page', 200)):
+            if not isinstance(e.get(key), str) or not 0 < len(e[key]) <= n: raise ValueError(key)
+        if not isinstance(e.get('type'), str) or not EVENT_TYPE.match(e['type']): raise ValueError('type')
+        data = e.get('data', {}); seq = e.get('seq')
+        if not isinstance(data, dict) or (seq is not None and (not isinstance(seq, int) or isinstance(seq, bool))): raise ValueError('data')
+        line = json.dumps({'v': 1, 'ts': e['ts'], 'session': e['session'], 'page': e['page'], 'seq': seq, 'type': e['type'], 'data': data}, ensure_ascii=False, separators=(',', ':'))
+        if len(line.encode()) > MAX_EVENT: raise ValueError('size')
+        lines.append(line)
+    return lines
 
 # Pipeline stages as prepare_song.py logs them ("[n/8] name"), with typical seconds for a 5-minute song on a mid-range GPU.
 # The weights only shape the progress bar and the rough ETA; a slower machine stretches them by the observed pace.
@@ -122,6 +146,7 @@ class Handler(BaseHTTPRequestHandler):
             demo = ROOT / 'examples' / 'demo' / 'Luma_Demo.html'
             if demo.is_file(): return self.send(200, demo.read_bytes())
             return self.send(404, 'Демо ще не зібрано. Додай готовий тренажер до бібліотеки.', 'text/plain; charset=utf-8')
+        if u.path == '/activity.js': return self.send(200, (ROOT / 'app' / 'activity.js').read_bytes(), 'text/javascript; charset=utf-8')
         if u.path == '/status':
             now = time.time()
             with lock: snapshot = [dict(j) for j in jobs]
@@ -197,6 +222,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)
+        if u.path == '/activity': return self.activity()
         if u.path != '/retry': return self.send(404, 'not found', 'text/plain')
         job_id = urllib.parse.parse_qs(u.query).get('id', [''])[0]
         with lock:
@@ -205,6 +231,26 @@ class Handler(BaseHTTPRequestHandler):
             job['state'] = 'queued'
             for key in ('started', 'finished', 'error', 'log'): job.pop(key, None)
         return self.send(200, '{}', 'application/json')
+
+    def activity(self):
+        """Append a batch of activity events. Pages of another origin may not write here; a request without an Origin
+        header (a local script, a test) may."""
+        origin = self.headers.get('Origin')
+        if origin and origin != 'http://' + (self.headers.get('Host') or ''): return self.send(403, 'origin', 'text/plain')
+        try: n = int(self.headers.get('Content-Length') or 0)
+        except ValueError: n = -1
+        if n > MAX_ACTIVITY: return self.send(413, 'too large', 'text/plain')
+        if n <= 0: return self.send(400, 'empty', 'text/plain')
+        body = self.rfile.read(n)
+        try:
+            if len(body) != n: raise ValueError('short')
+            lines = activity_events(body)
+        except (ValueError, AttributeError, UnicodeError): return self.send(400, 'bad events', 'text/plain')
+        try:
+            ACTIVITY.mkdir(parents=True, exist_ok=True)
+            with activity_lock, open(ACTIVITY / (datetime.date.today().isoformat() + '.jsonl'), 'a', encoding='utf-8') as f: f.write('\n'.join(lines) + '\n')
+        except OSError: return self.send(500, 'not written', 'text/plain')
+        self.send_response(204); self.end_headers()
 
 if __name__ == '__main__':
     print(f'Luma Studio on http://127.0.0.1:{args.port}/  (songs: {SONGS})', flush=True)

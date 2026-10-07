@@ -1,7 +1,8 @@
 # Practice history: schema, retention and the export file
 
 Every finished attempt is written to IndexedDB in the trainer page's own origin, automatically and without a WAV. The
-trainer makes no network requests; nothing here leaves the computer it was sung on. Luma Studio serves its own page and
+history itself is never sent anywhere; nothing here leaves the computer it was sung on. (A trainer served by Studio
+also posts an activity log, attempt summaries included, to that same Studio: [ACTIVITY_LOG.md](ACTIVITY_LOG.md).) Luma Studio serves its own page and
 the trainers from the same origin (`http://127.0.0.1:8792` by default), so a Studio panel can read this base directly,
 with no change to `studio/studio_server.py`.
 

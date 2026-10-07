@@ -115,6 +115,41 @@ class StudioHTTPTests(unittest.TestCase):
         song = json.loads(body)['songs'][0]
         self.assertEqual((status, song['title'], song['artist'], song['duration']), (200, 'T\u00e9st "q"', 'Band', 123.4))
 
+    def test_activity_is_appended_as_jsonl(self):
+        event = lambda n, kind: {'ts': '2026-10-07T10:00:0%dZ' % n, 'session': 's1', 'page': 'Luma_Test', 'seq': n, 'type': kind, 'data': {'id': 'singBtn', 'extra': 'кліки'}, 'junk': 1}
+        for batch in ([event(1, 'page_open'), event(2, 'click')], [event(3, 'attempt')]):
+            status, _ = self.request('/activity', json.dumps({'events': batch}).encode(), 'POST')
+            self.assertEqual(status, 204)
+        files = list((Path(self.directory.name) / 'logs' / 'activity').iterdir())
+        self.assertEqual([f.name for f in files], [time.strftime('%Y-%m-%d') + '.jsonl'], 'one file per local day')
+        lines = [json.loads(line) for line in files[0].read_text(encoding='utf-8').splitlines()]
+        self.assertEqual([e['type'] for e in lines], ['page_open', 'click', 'attempt'], 'batches are appended in order')
+        self.assertEqual(lines[1], {'v': 1, 'ts': '2026-10-07T10:00:02Z', 'session': 's1', 'page': 'Luma_Test', 'seq': 2, 'type': 'click', 'data': {'id': 'singBtn', 'extra': 'кліки'}}, 'unknown top-level keys are dropped')
+
+    def test_activity_refuses_oversize_malformed_and_foreign_batches(self):
+        folder = Path(self.directory.name) / 'logs' / 'activity'
+        ok = {'ts': '2026-10-07T10:00:00Z', 'session': 's', 'page': 'studio', 'type': 'click', 'data': {}}
+        big = json.dumps({'events': [{**ok, 'data': {'pad': 'x' * (self.module['MAX_ACTIVITY'])}}]}).encode()
+        with socket.create_connection(('127.0.0.1', self.server.server_port), timeout=3) as sock:
+            sock.sendall(f'POST /activity HTTP/1.1\r\nHost: x\r\nContent-Length: {len(big)}\r\n\r\n'.encode())
+            reply = sock.recv(65536)
+        self.assertEqual(int(reply.split(b' ', 2)[1]), 413, 'a body over 64 KiB is refused before it is read')
+        for body in (b'not json', b'[]', json.dumps({'events': []}).encode(), json.dumps({'events': [{**ok, 'type': 'Bad Type'}]}).encode(),
+                     json.dumps({'events': [{**ok, 'data': 'text'}]}).encode(), json.dumps({'events': [ok] * 201}).encode(),
+                     json.dumps({'events': [ok, {**ok, 'data': {'pad': 'x' * 17000}}]}).encode()):
+            self.assertEqual(self.request('/activity', body, 'POST')[0], 400, body[:60])
+        foreign = Request(self.url + '/activity', data=json.dumps({'events': [ok]}).encode(), method='POST', headers={'Origin': 'https://example.com'})
+        with self.assertRaises(HTTPError) as refused: urlopen(foreign, timeout=3)
+        self.assertEqual(refused.exception.code, 403, 'another site cannot write into the log')
+        self.assertFalse(folder.exists() and any(folder.iterdir()), 'nothing refused reaches the file')
+        same = Request(self.url + '/activity', data=json.dumps({'events': [ok]}).encode(), method='POST', headers={'Origin': self.url})
+        with urlopen(same, timeout=3) as response: self.assertEqual(response.status, 204, 'the Studio origin may write')
+
+    def test_activity_script_is_served(self):
+        status, body = self.request('/activity.js')
+        self.assertEqual(status, 200)
+        self.assertIn(b'window.LumaActivity', body)
+
 
 if __name__ == '__main__':
     unittest.main()
