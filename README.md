@@ -96,11 +96,13 @@ Chromium build.
 ## Layout
 
 ```
-app/       head.html (styles + markup, {{TITLE}} / {{ARTIST}} placeholders), workers.html (AudioWorklet capture + YIN worker), app.js
-studio/    prepare_song.py (pipeline), build_html.py (package → HTML, --rebuild), studio_server.py + studio.html, luma-studio.sh
+app/       head.html (styles + markup, {{TITLE}} / {{ARTIST}} placeholders), workers.html (AudioWorklet capture + YIN worker), app.js,
+           activity.js (activity log, shared with Studio)
+studio/    prepare_song.py (pipeline), build_html.py (package → HTML, --rebuild), studio_server.py + studio.html, luma-studio.sh,
+           activity_report.py (digest of the activity log)
 examples/  make_demo.py (synthetic demo song)
 tests/e2e/ Playwright suites
-docs/      TARGET_MAP_SCHEMA.md, PIPELINE.md, SCORING.md, HISTORY_SCHEMA.md, PROGRESS_DESIGN.md, LESSONS.md, screenshots
+docs/      TARGET_MAP_SCHEMA.md, PIPELINE.md, SCORING.md, HISTORY_SCHEMA.md, ACTIVITY_LOG.md, PROGRESS_DESIGN.md, LESSONS.md, screenshots
 ```
 
 Updating the app for already built trainers: `studio/build_html.py --rebuild songs/Luma_*.html` keeps each file's song
@@ -108,7 +110,10 @@ data byte-for-byte and swaps in the current `app/` parts.
 
 ## Privacy
 
-The trainer makes no network requests. Recordings live in the tab's memory until you save them, and the voice is only
+A trainer opened from a file makes no network requests. Opened from Luma Studio, it and the Studio page post an activity
+log (clicks, switches, attempt summaries; no audio, no typed text) to that Studio, which appends it to
+`songs/logs/activity/` for a later UX and singing analysis — see [docs/ACTIVITY_LOG.md](docs/ACTIVITY_LOG.md). The line
+«Записувати мої дії» at the bottom of Studio switches it off. Recordings live in the tab's memory until you save them, and the voice is only
 recorded at all when you turn that switch on. The practice history is IndexedDB in the trainer page's own origin: it holds
 pitch, confidence and level numbers plus scores, never audio, and a voice cannot be reconstructed from it. It stays on this
 computer; export is a file you choose to write, and "Очистити пісню" in the Прогрес tab deletes a song's history. Because
