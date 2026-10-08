@@ -8,6 +8,7 @@
   POST /activity                 {"events":[…]} from Studio and its trainers -> songs/logs/activity/<day>.jsonl
   GET  /status                   jobs with stage progress, library with title / artist / duration
   GET  /song/<name>.html         generated trainers (served over http so the microphone works)
+  GET  /cover/<name>.html        the album cover cached beside that trainer's package (studio/covers.py)
   GET  /demo                     the synthetic demo trainer, if it has been built
   GET  /activity.js              the activity logger Studio shares with the trainers (docs/ACTIVITY_LOG.md)
 
@@ -15,6 +16,7 @@ Run: python studio/studio_server.py [--port 8792] [--songs DIR] [--copy-to DIR]
 """
 from __future__ import annotations
 import argparse, datetime, json, os, re, shutil, subprocess, sys, threading, time, urllib.parse, uuid
+import covers
 from build_html import wrap
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
@@ -110,6 +112,12 @@ def song_meta(p: Path) -> dict:
     except (OSError, ValueError): meta = {}
     _meta_cache[p.name] = (sig, meta); return meta
 
+def cover_stamp(name: str) -> int | None:
+    """The cover's mtime for /status: Studio asks for /cover/<name>?v=<stamp>, so a re-extracted cover is a new URL."""
+    cover = covers.cover_for(SONGS, name)
+    try: return int(cover.stat().st_mtime) if cover else None
+    except OSError: return None
+
 def worker():
     while True:
         job = None
@@ -134,6 +142,7 @@ def worker():
                 try: COPY_TO.mkdir(parents=True, exist_ok=True); shutil.copy2(out_html, COPY_TO / out_html.name); job['copy'] = str(COPY_TO / out_html.name)
                 except OSError as e: job['copy_error'] = str(e)
 threading.Thread(target=worker, daemon=True).start()
+threading.Thread(target=covers.backfill, args=(SONGS,), daemon=True).start()  # covers of songs prepared before covers existed
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -160,11 +169,18 @@ class Handler(BaseHTTPRequestHandler):
                 js.append(d)
             songs = []
             for p in sorted(SONGS.glob('Luma_*.html'), key=lambda p: -p.stat().st_mtime):
-                songs.append({'name': p.name, 'bytes': p.stat().st_size, 'mtime': time.strftime('%Y-%m-%d %H:%M', time.localtime(p.stat().st_mtime)), **song_meta(p)})
+                songs.append({'name': p.name, 'bytes': p.stat().st_size, 'mtime': time.strftime('%Y-%m-%d %H:%M', time.localtime(p.stat().st_mtime)), 'cover': cover_stamp(p.name), **song_meta(p)})
             return self.send(200, json.dumps({'jobs': js, 'songs': songs}), 'application/json')
         if u.path.startswith('/song/'):
             name = os.path.basename(urllib.parse.unquote(u.path[6:])); p = SONGS / name
             if p.is_file() and name.endswith('.html'): return self.send(200, p.read_bytes())
+        if u.path.startswith('/cover/'):
+            name = urllib.parse.unquote(u.path[7:]); cover = covers.cover_for(SONGS, name) if '/' not in name and '\\' not in name else None
+            if cover:
+                try: b = cover.read_bytes()
+                except OSError: b = None
+                if b:
+                    self.send_response(200); self.send_header('Content-Type', 'image/jpeg'); self.send_header('Content-Length', str(len(b))); self.send_header('Cache-Control', 'max-age=86400'); self.end_headers(); self.wfile.write(b); return
         return self.send(404, 'not found', 'text/plain')
     def do_PUT(self):
         u = urllib.parse.urlparse(self.path)

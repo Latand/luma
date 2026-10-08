@@ -19,7 +19,7 @@ import numpy as np, soundfile as sf, librosa, scipy.ndimage as ndi
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'studio'))
 from build_html import build as build_html
-import stems
+import stems, covers
 from align_lyrics import context as align_context, realign, save_transcript, aligned_note
 
 def sha256(p: Path) -> str:
@@ -236,6 +236,8 @@ def main():
         if old not in (original, src): old.unlink()
     if src != original: shutil.copyfile(src, original)
     manifest['original'] = original.name
+    try: log('cover:', 'extracted' if covers.extract(pkg) else 'none')  # the album picture for the Studio library
+    except Exception as e: log('cover: skipped', type(e).__name__)
 
     log('[2/8] separation', a.model)
     vocal, manifest['steps']['separation'] = separate(x, a.model, a.device); device = manifest['steps']['separation']['device']; back = x - vocal

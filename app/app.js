@@ -856,13 +856,15 @@ function saveTakeJSON(t){download(new Blob([JSON.stringify(takePayload(t))],{typ
 // What closing the tab would lose for good: an attempt the history refused to take, whose line exists nowhere else.
 // A WAV is a listen-back copy of a line the history already holds, so it never holds the tab open.
 function markUnsaved(){s.unsaved=s.takes.some(t=>t.historyError);}
+// A trainer embedded by a Studio session tells it when a whole lesson has been sung; on its own it does nothing.
+function tellHost(t){if(window.parent===window||t.endSong<song.duration-.25)return;parent.postMessage({type:'luma:finished',file:decodeURIComponent(location.pathname.split('/').pop()),match:scorePct(t.score)},location.origin);}
 function storeTake(meta,m){
  let replaced=null;
  if(meta.punchInto!==undefined){const old=s.takes.find(t=>t.id===meta.punchInto);const merged=old?mergeTake(old,meta,m):null;if(merged){meta=merged.meta;m=merged.m;replaced=old;}else{s.takeCounter++;meta={...meta,id:s.takeCounter};m={...m,id:meta.id};}}
  const a=analyzeTake(meta,m.points,m.duration);
  const take={...meta,...m,...a,hasAudio:!!m.blob,clipped:!!m.clipped,url:m.blob?URL.createObjectURL(m.blob):null,endSong:meta.a+m.duration*meta.speed,runId:replaced?.runId||newRunId()};
  if(replaced){clearUndoPunch();if(meta.keepUndo!==false)s.undoPunch={before:replaced,after:take};else if(replaced.url)URL.revokeObjectURL(replaced.url);s.takes[s.takes.indexOf(replaced)]=take;}else s.takes.unshift(take);
- s.trace={take,points:take.points,score:take.score};s.current=null;saveRun(take);markUnsaved();renderTakes();if(window.LumaActivity?.enabled())act('attempt',attemptLog(take,!!replaced));
+ s.trace={take,points:take.points,score:take.score};s.current=null;saveRun(take);if(m.reason==='end')tellHost(take);markUnsaved();renderTakes();if(window.LumaActivity?.enabled())act('attempt',attemptLog(take,!!replaced));
  say(replaced?'Спробу '+String(take.id)+' перезаписано від '+fmt(meta.lastPunchAt)+'.':'Спробу '+String(take.id)+' записано: лінія й оцінка зберігаються самі.');return take;
 }
 function clearUndoPunch(){if(s.undoPunch){if(s.undoPunch.before.url)URL.revokeObjectURL(s.undoPunch.before.url);s.undoPunch=null;}}
