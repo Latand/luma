@@ -68,17 +68,25 @@ body.locked{overflow:hidden}
 .nsong{display:flex;gap:10px;align-items:center;min-width:0}.nsong>div:last-child{min-width:0;display:flex;flex-direction:column}.nsong .cover{width:44px;flex:none;margin:0;border-radius:8px}.nsong .cover.ph b{font-size:20px}.nsong .cover.ph svg{display:none}
 .sintro.over{background:#0b0e15d9}.sintro.over .primary{height:52px}
 .spicker{max-width:960px;margin:0 auto;padding:22px 24px 40px;animation:rise .32s ease-out}.spicker .hero-title{margin-bottom:10px}.spicker h2{margin-top:24px}.summary{display:flex;flex-wrap:wrap;gap:8px}.summary .chip{text-transform:none;letter-spacing:0}
+/* «Обери за мене» (docs/design/AUTOPICK.md): the tile in the song picker, the button on the home card, the step meter and
+   the reason under «Далі». */
+.autotile{border-color:#a1eed830;background:linear-gradient(135deg,#a1eed80d,transparent 60%),var(--panel)}.autotile .hero-copy{gap:6px}
+.hero .btns{display:flex;gap:8px;flex-wrap:wrap}.hero .btns .secondary{height:46px;font-size:14px;padding:0 18px;justify-content:center}
+.steps{display:flex;align-items:center;gap:6px 10px;font-size:12.5px;color:#c7d2e2;flex-wrap:wrap}.steps small{color:var(--dim);font-size:12px}
+.meter{display:inline-flex;gap:4px;align-items:flex-end;flex:none}.meter i{width:14px;border-radius:3px;background:#ffffff1f}.meter i.on{background:var(--mint)}.meter i:nth-child(1){height:6px}.meter i:nth-child(2){height:9px}.meter i:nth-child(3){height:12px}.meter i:nth-child(4){height:15px}
+.why{display:flex;gap:6px 8px;align-items:center;flex-wrap:wrap;font-size:12.5px;color:#c7d2e2}.why .chip{text-transform:none;letter-spacing:0}
+.chip.up{color:var(--mint)}.chip.up i{background:var(--mint)}.chip.same{color:var(--violet)}.chip.same i{background:var(--violet)}.chip.down{color:var(--amber)}.chip.down i{background:var(--amber)}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;margin:0}
 @keyframes rise{from{opacity:0;transform:translateY(10px)}}@keyframes fade{from{opacity:0}}
 @keyframes blink{50%{opacity:.35}}@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 @media(max-width:560px){.bar{padding:10px 14px}.wrap{padding:18px 14px 40px}.row{flex-direction:column;align-items:stretch}.row label,.row .primary{width:100%}.card{padding:14px}.lib{grid-template-columns:1fr}.bar .status{display:none}
  .lib.songs{grid-template-columns:repeat(2,minmax(0,1fr))}.songs .song{padding:10px}.songs .song .title{font-size:14.5px}.songs .song .primary{padding:0 8px;font-size:12.5px}.hero .primary{width:100%}
- .sbar{padding:0 10px;gap:8px}.sbar .sclose{width:40px;padding:0;justify-content:center}.sbar .sclose span,.sstep{display:none}.sbar .sskip{font-size:12.5px;padding:0 10px}.spicker{padding:18px 14px 32px}.sintro{padding:12px;align-items:flex-start}.sintro .card{padding:18px}.sintro .primary{flex:1 1 100%}.sintro .secondary{flex:1;justify-content:center}.rnum b{font-size:20px}.rhead{font-size:24px}}
+ .sbar{padding:0 10px;gap:8px}.sbar .sclose{width:40px;padding:0;justify-content:center}.sbar .sclose span,.sstep{display:none}.sbar .sskip{font-size:12.5px;padding:0 10px}.spicker{padding:18px 14px 32px}.hero .btns,.hero .btns>*{width:100%}.sintro{padding:12px;align-items:flex-start}.sintro .card{padding:18px}.sintro .primary{flex:1 1 100%}.sintro .secondary{flex:1;justify-content:center}.rnum b{font-size:20px}.rhead{font-size:24px}}
 </style></head><body>
 <header class="bar"><div class="brand"><svg viewBox="0 0 34 34" fill="none" aria-hidden="true"><path d="M3 22c5 0 4-14 8-14s3 19 7 19 3-13 7-13 3 5 5 5" stroke="currentColor" stroke-width="1.8"/></svg>luma<span>studio</span></div><button class="secondary add" id="addSong" type="button">Додати пісню</button><div class="status" id="serverStatus"><i></i><span id="serverStatusText">ПІДКЛЮЧАЮСЬ</span></div></header>
 <main class="wrap">
 <p class="lead" id="lead">Почни з уроку або відкрий пісню з бібліотеки — і співай.</p>
-<section class="card hero" id="sessionEntry" hidden aria-labelledby="sessionTitle"><div class="hero-copy"><div class="hero-title" id="sessionTitle">Заняття</div><p id="sessionPitch"></p><div class="path" id="sessionPath"></div></div><button class="primary" id="sessionStart" type="button">Почати заняття</button></section>
+<section class="card hero" id="sessionEntry" hidden aria-labelledby="sessionTitle"><div class="hero-copy"><div class="hero-title" id="sessionTitle">Заняття</div><p id="sessionPitch"></p><div class="path" id="sessionPath"></div><div class="steps" id="autopickHomeSteps" hidden></div></div><div class="btns"><button class="primary" id="sessionStart" type="button">Почати заняття</button><button class="secondary" id="autopickHome" type="button" hidden>Одразу пісні: обери за мене</button></div></section>
 <div class="notice" id="connectionNotice" hidden role="status"><p>Зв’язок зі Studio втрачено. Показано останні отримані дані; перевіряємо з’єднання.</p><button class="secondary" id="refreshBtn" type="button">Перевірити знову</button></div>
 <section id="jobsSection" hidden aria-labelledby="jobsTitle">
 <h2 id="jobsTitle">Черга <span class="count" id="jobsCount"></span></h2>
@@ -198,7 +206,7 @@ async function refresh(){clearTimeout(timer);if(refreshing)return;refreshing=tru
   const files=d.songs.map(s=>s.name).filter(n=>LESSON_FILE.test(n)).sort().join('|');
   if(files&&files!==lessonsFor)await loadLessons(files);   // first poll, and again whenever a lesson is added, renamed or removed
   const built=new Set(d.songs.map(s=>s.name)),shown=(lessons||[]).filter(l=>built.has(l.html));
-  renderLessons(shown);renderEntry(shown);renderSongs(d.songs.filter(s=>!shown.some(l=>l.html===s.name)));const working=d.jobs.some(j=>['running','queued'].includes(j.state));setStatus(working?'busy':'live',working?'ГОТУЄМО ПІСНЮ':'STUDIO ПРАЦЮЄ');delay=working?2000:15000;}
+  renderLessons(shown);renderEntry(shown);renderSongs(d.songs.filter(s=>!shown.some(l=>l.html===s.name)));syncAutopick();const working=d.jobs.some(j=>['running','queued'].includes(j.state));setStatus(working?'busy':'live',working?'ГОТУЄМО ПІСНЮ':'STUDIO ПРАЦЮЄ');delay=working?2000:15000;}
  catch(e){if($('connectionNotice').hidden)activity.log('notice',{id:'connectionNotice'});$('connectionNotice').hidden=false;setStatus('','НЕМАЄ ЗВ’ЯЗКУ');}
  finally{refreshing=false;timer=setTimeout(refresh,delay);}
 }
@@ -214,7 +222,7 @@ function renderEntry(list){$('sessionEntry').hidden=!list.length;$('lead').hidde
  const song=el('span',null,'chip');song.append(el('i'),el('span','Пісня'));parts.push(song);
  const key=parts.map(p=>p.textContent).join('|');if(path.dataset.key===key)return;path.dataset.key=key;path.replaceChildren();
  parts.forEach((p,i)=>{if(i)path.append(el('span','→'));path.append(p);});}
-const S={open:false,steps:[],results:[],i:0,phase:'',frame:null,loaded:false,wantOpen:false,wantSing:null,asked:0,card:null,drawLater:null,songs:[],song:null,gen:0,timers:[]};
+const S={open:false,steps:[],results:[],i:0,phase:'',frame:null,loaded:false,wantOpen:false,wantSing:null,asked:0,card:null,drawLater:null,songs:[],song:null,gen:0,timers:[],auto:false,autoPick:null,autoNext:null,autoStarted:false};
 const COUNT=3;
 const REDUCED=matchMedia('(prefers-reduced-motion: reduce)');
 const ms=t=>REDUCED.matches?0:t;   // the reduced-motion rule above zeroes every transition, so nothing here waits for transitionend
@@ -255,11 +263,12 @@ function openStep(phase,src,pressed){const box=$('sessionBody').querySelector('.
  box.querySelectorAll('.actions button').forEach(b=>{b.disabled=true;if(b.id===pressed)b.textContent='Завантажуємо…';});
  const sec=box.querySelector('.nsec');if(sec&&pressed==='resultRepeat'){sec.classList.add('off');sec.setAttribute('aria-hidden','true');}}
 function clearBody(){const body=$('sessionBody');body.classList.remove('scroll');for(const n of [...body.children])if(n!==S.frame)n.remove();}
-function startSession(){if(S.open||!shownLessons.length)return;
- Object.assign(S,{open:true,steps:shownLessons.slice(),results:shownLessons.map(()=>null),i:0,song:null,songs:[]});
+// steps: the lessons this session plays; none when «Одразу пісні» on the home card skips them.
+function openSession(steps){Object.assign(S,{open:true,steps,results:steps.map(()=>null),i:0,song:null,songs:[],auto:false,autoPick:null,autoNext:null,autoStarted:false});
  history.pushState({lumaSession:1},'');
  const box=$('session');box.classList.remove('closing');box.hidden=false;document.body.classList.add('locked');document.querySelector('header').inert=document.querySelector('main').inert=true;
- $('sessionDots').replaceChildren();showCard({next:{kind:'lesson',i:0}});}
+ $('sessionDots').replaceChildren();}
+function startSession(){if(S.open||!shownLessons.length)return;openSession(shownLessons.slice());showCard({next:{kind:'lesson',i:0}});}
 
 // ── the result card: what was just sung against its median, then «Далі» with a 3-2-1 into the next step ───────────
 const svg=(tag,attrs={})=>{const n=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const k in attrs)n.setAttribute(k,attrs[k]);return n;};
@@ -302,7 +311,7 @@ function drawChart(box,r){const bars=r.days.map(d=>({label:dayLabel(d.day),value
   if(spot){t.setAttribute('x',spot[0]);t.setAttribute('y',spot[1]);t.setAttribute('text-anchor',spot[2]);}else{t.remove();named=false;}}
  return {named};}
 function resultSection(r,from){const sec=el('section',null,'rsec');sec.setAttribute('aria-label','Результат');
- const what=from.kind==='lesson'?lessonLabel(from.i)+' · '+S.steps[from.i].title.split(' · ').pop()+' · пройдено':'Пісня · «'+songTitle(from.s)+'» · завершено';
+ const what=from.kind==='lesson'?lessonLabel(from.i)+' · '+S.steps[from.i].title.split(' · ').pop()+' · пройдено':'Пісня · «'+songTitle(from.s)+'» · завершено'+(from.auto?' · обрано за тебе':'');
  const v=verdict(r),d=delta(r);sec.append(el('div',what,'eyebrow'),el('div',v.head,'rhead'));if(v.line)sec.append(el('p',v.line.trim(),'rline'));
  const nums=el('div',null,'rnums'),cell=(value,label,dot)=>{const c=el('div',null,'rnum'),b=el('b');if(dot)b.append(el('i',null,dot));b.append(document.createTextNode(value));c.append(b,el('span',label));nums.append(c);return c;};
  cell(r.score===null?'—':r.score+' %','сьогодні').dataset.cell='score';
@@ -331,8 +340,9 @@ function showCard({result,from,next}){nextPhase('card');S.card={from,next};if(ne
  if(next){const sec=el('section',null,'nsec');sec.setAttribute('aria-label','Далі');
   ring=el('div',null,'ring');ring.setAttribute('aria-hidden','true');ring.append(el('b',String(COUNT)));
   const row=el('div',null,'nrow');if(result){const what=nextLine(next);auto=what.auto;row.append(ring,what.box);}else{auto=el('p',null,'auto');row.append(ring,auto);}
-  sec.append(row);card.append(sec);
-  go=button(result?(next.kind==='picker'?'До пісень':'Почати зараз'):'Почати урок','resultNow','primary',()=>advanceTo('now'));}
+  sec.append(row);if(next.auto)sec.append(whyRow(next.auto));card.append(sec);
+  if(next.auto?.hold){ring.remove();auto.textContent='Далі · без відліку: голосу майже не було';}
+  go=button(result?(next.kind==='picker'?'До пісень':next.auto?.hold?'Почати':'Почати зараз'):'Почати урок','resultNow','primary',()=>advanceTo('now'));}
  if(result&&from){const again=button(from.kind==='lesson'?'Повторити урок '+(from.i+1):'Повторити','resultRepeat','secondary',repeatStep);if(!next)acts.prepend(again);}
  if(from?.kind==='song'){const songs=button('До пісень','resultSongs',next?'secondary':'primary',()=>toPicker('songs'));if(!next){acts.prepend(songs);go=songs;}}
  card.append(acts);wrap.append(card);$('sessionBody').append(wrap);
@@ -342,9 +352,9 @@ function showCard({result,from,next}){nextPhase('card');S.card={from,next};if(ne
  (go||acts.querySelector('button'))?.focus();
  if(result){const v=verdict(result);
   announce(v.head+' '+(from.kind==='lesson'?'Урок '+(from.i+1):'Пісня')+': '+(result.score===null?'без оцінки':result.score+' %')+(delta(result)!==null?', '+signed(delta(result))+' до медіани':'')+'. '
-   +(next?'Далі '+(next.kind==='lesson'?'урок '+(next.i+1):next.kind==='song'?'наступна пісня':'вибір пісні')+' за '+COUNT+' секунди.':'Це остання пісня бібліотеки.'));
+   +(next?'Далі '+(next.kind==='lesson'?'урок '+(next.i+1):next.kind==='song'?'наступна пісня':'вибір пісні')+(next.auto?', '+autoReason(next.auto):'')+(next.auto?.hold?'. Натисни «Почати», коли будеш готовий.':' за '+COUNT+' секунди.'):'Це остання пісня бібліотеки.'));
   activity.log('session_result',{kind:from.kind,file:stepFile(from),score:result.score,median:result.median,prev:result.prev,delta:delta(result),full:!!result.full,saved:result.saved!==false,next:next?stepFile(next):null});}
- if(!next)return;
+ if(!next||next.auto?.hold)return;
  let left=COUNT;const tick=()=>{if(left<=0){advanceTo('countdown');return;}
   ring.firstChild.textContent=String(left);ring.style.setProperty('--p',Math.round(100*(left-1)/COUNT)+'%');
   auto.textContent=(result?'Далі · почнеться сам за ':next.kind==='lesson'?'Урок почнеться сам за ':'Почнеться сам за ')+left+' с';left--;later(tick,1000);};
@@ -354,16 +364,18 @@ function advanceTo(how){if(S.phase!=='card')return;const {from,next}=S.card;if(!
  activity.log('session_next',{from:stepFile(from),to:stepFile(next),how});
  if(next.kind==='picker'){showPicker();return;}
  if(next.kind==='lesson'){S.i=next.i;openStep('lesson',null,'resultNow');return;}
+ if(next.auto)S.autoPick={s:next.s,moved:false};
  S.song=next.s;openStep('song',null,'resultNow');}
 function repeatStep(){if(S.phase!=='card')return;const {from}=S.card;if(!from)return;
  activity.log('session_next',{from:stepFile(from),to:stepFile(from),how:'repeat'});
  if(from.kind==='lesson'){S.i=from.i;openStep('lesson','/song/'+encodeURIComponent(stepFile(from)),'resultRepeat');}
  else{S.song=from.s;openStep('song','/song/'+encodeURIComponent(stepFile(from)),'resultRepeat');}}
-function toPicker(how){activity.log('session_next',{from:S.phase==='card'?stepFile(S.card.from):S.song?S.song.name:null,to:'picker',how});showPicker();}
+function toPicker(how){S.auto=false;activity.log('session_next',{from:S.phase==='card'?stepFile(S.card.from):S.song?S.song.name:null,to:'picker',how});showPicker();}
 function advance(i){if(i+1<S.steps.length)showCard({next:{kind:'lesson',i:i+1}});else showPicker();}
 function finishLesson(d){const i=S.i,r=resultOf(d);S.results[i]={done:true,match:r.score};
  showCard({result:r,from:{kind:'lesson',i},next:i+1<S.steps.length?{kind:'lesson',i:i+1}:{kind:'picker'}});}
-function finishSong(d){const s=S.song,k=S.songs.findIndex(x=>x.name===s.name),after=k>=0?S.songs[k+1]:null;
+function finishSong(d){if(S.auto){autoFinish(d);return;}
+ const s=S.song,k=S.songs.findIndex(x=>x.name===s.name),after=k>=0?S.songs[k+1]:null;
  showCard({result:resultOf(d),from:{kind:'song',s},next:after?{kind:'song',s:after}:null});}
 // A trainer built before the result existed sends only its match: the card then shows that number and nothing else.
 function resultOf(d){const r=d.result;if(r&&typeof r==='object')return {score:typeof r.score==='number'?r.score:null,full:!!r.full,from:+r.from||0,median:typeof r.median==='number'?r.median:null,prev:typeof r.prev==='number'?r.prev:null,days:Array.isArray(r.days)?r.days.filter(x=>x&&typeof x.value==='number').slice(-6):[],ruler:String(r.ruler||''),saved:r.saved!==false};
@@ -377,19 +389,104 @@ function skipStep(){
  announce((done?'Повтор уроку '+(i+1)+' пропущено, результат збережено.':'Урок '+(i+1)+' пропущено.')+(i+1<S.steps.length?'':' Обери пісню.'));
  activity.log('session_next',{from:S.steps[i].html,to:i+1<S.steps.length?S.steps[i+1].html:'picker',how:'skip'});
  nextPhase('leaving');dropFrame();advance(i);}
-function showPicker(){nextPhase('picker');dropFrame();clearBody();renderBar();
+function showPicker(){nextPhase('picker');S.auto=false;dropFrame();clearBody();renderBar();
  // The queue for «next song» is the order the singer sees here; a library poll later in the session does not reshuffle it.
  S.songs=librarySongs.slice();
  const body=$('sessionBody'),box=el('div',null,'spicker');body.classList.add('scroll');
- box.append(el('div','Розспівку завершено','hero-title'));
- const sum=el('div',null,'summary');S.steps.forEach((l,k)=>{const r=S.results[k],chip=el('span',null,'chip'+(r?.done?' done':''));chip.append(el('i'),el('span',l.title+' · '+(r?.done?'✓ '+(r.match===null||r.match===undefined?'—':r.match+' %'):'пропущено')));sum.append(chip);});
- const h=el('h2','Обери пісню');h.append(el('span',S.songs.length?String(S.songs.length):'','count'));
+ if(S.steps.length){box.append(el('div','Розспівку завершено','hero-title'));
+  const sum=el('div',null,'summary');S.steps.forEach((l,k)=>{const r=S.results[k],chip=el('span',null,'chip'+(r?.done?' done':''));chip.append(el('i'),el('span',l.title+' · '+(r?.done?'✓ '+(r.match===null||r.match===undefined?'—':r.match+' %'):'пропущено')));sum.append(chip);});box.append(sum);}
+ const tile=S.songs.length?autopickTile():null;
+ if(tile)box.append(el('h2','Пісня'),tile);
+ const h=el('h2',tile?'Або обери сам':'Обери пісню');h.append(el('span',S.songs.length?String(S.songs.length):'','count'));
  const grid=el('div',null,'lib songs');
  if(S.songs.length)for(const s of S.songs)grid.append(songCard(s,true));
  else grid.append(el('p','У бібліотеці поки немає пісень. Заверши заняття й додай свою пісню на головній сторінці Studio.','empty'));
- box.append(sum,h,grid);body.append(box);body.scrollTop=0;
- const first=grid.querySelector('button');(first||$('sessionClose')).focus({preventScroll:true});}
-function openSong(s){activity.log('session_next',{from:'picker',to:s.name,how:'picker'});S.song=s;clearBody();openStep('song','/song/'+encodeURIComponent(s.name));}
+ box.append(h,grid);body.append(box);body.scrollTop=0;syncAutopick();
+ const first=box.querySelector('button:not(:disabled)');(first||$('sessionClose')).focus({preventScroll:true});}
+function openSong(s,how='picker'){activity.log('session_next',{from:'picker',to:s.name,how});S.song=s;clearBody();openStep('song','/song/'+encodeURIComponent(s.name));}
+// ── «Обери за мене»: Studio picks the songs, easy first, then harder (docs/design/AUTOPICK.md) ─────────────────────
+// Difficulty D comes from /status (studio/difficulty.py). The singer's own results shift it: D′ = D + k × (baseline −
+// pooled match), capped. The library is cut into four equal steps by D′; a pick is random inside the current step and
+// skips the songs picked lately. A result at or above the usual climbs a step; a lives rewind or 10+ below the usual
+// steps down; a repeat never moves it. Stored in localStorage luma.autopick; the practice history is only read.
+const AUTO={key:'luma.autopick',steps:4,k:.5,cap:20,silent:5,below:10,keep:8,runs:10,minRuns:3,minPool:1500,minFrames:200,fallback:50};
+const median=a=>{if(!a.length)return null;const z=[...a].sort((x,y)=>x-y),h=z.length>>1;return z.length%2?z[h]:(z[h-1]+z[h])/2;};
+const round1=v=>Math.round(v*10)/10;
+// Library songs with a difficulty, one per song hash (a re-imported copy of the same audio is the same song).
+function autoSongs(){const seen=new Set();return librarySongs.filter(s=>!LESSON_FILE.test(s.name)&&Number.isInteger(s.difficulty)&&s.songHash&&!seen.has(s.songHash)&&seen.add(s.songHash));}
+function autoState(){try{const v=JSON.parse(localStorage.getItem(AUTO.key)||'null');if(v&&v.v===1&&Number.isInteger(v.step)&&Array.isArray(v.recent))return {step:v.step,recent:v.recent.filter(h=>typeof h==='string')};}catch(_){}return null;}
+function saveAuto(step,recent){try{localStorage.setItem(AUTO.key,JSON.stringify({v:1,step,recent,at:new Date().toISOString()}));}catch(_){}}
+function remember(recent,hash,n){return [hash,...recent.filter(h=>h!==hash)].slice(0,Math.max(0,Math.min(AUTO.keep,n-1)));}
+const clampStep=(step,top)=>Math.max(1,Math.min(top,step));
+// Where the next start stands: one step below where the last session ended; a second start in the same session keeps it.
+function startStep(top){const st=autoState();if(!st)return {from:null,step:1};return {from:st.step,step:clampStep(S.autoStarted?st.step:st.step-1,top)};}
+function trainerLevel(){try{const l=JSON.parse(localStorage.getItem('luma.trainer.settings')||'{}').level;if(['easy','normal','strict','custom'].includes(l))return l;}catch(_){}return 'normal';}
+// The trainers' practice history, read only. Opening at version 1 with an upgrade that aborts: where there is no base yet,
+// nothing is created (an empty base would stop the trainer's own upgrade from ever running). Any failure means no history.
+function readRuns(){return new Promise(resolve=>{let done=false,req;const end=v=>{if(!done){done=true;resolve(v);}};setTimeout(()=>end([]),3000);
+ try{req=indexedDB.open('luma',1);}catch(_){end([]);return;}
+ req.onupgradeneeded=e=>e.target.transaction.abort();req.onblocked=()=>end([]);req.onerror=e=>{e.preventDefault();end([]);};
+ req.onsuccess=()=>{const db=req.result;try{const get=db.transaction('runs','readonly').objectStore('runs').getAll();get.onsuccess=()=>{db.close();end(get.result||[]);};get.onerror=e=>{e.preventDefault();db.close();end([]);};}catch(_){db.close();end([]);}};});}
+// The usual score (median of the last ten attempts across the library) and each song's pooled match, at the trainer's
+// current level and 1×. Partial attempts count by their own frames: lives mode produces them.
+function autoHistory(runs,songs){const lvl=trainerLevel(),hashes=new Set(songs.map(s=>s.songHash));
+ const ok=runs.filter(r=>r&&hashes.has(r.songHash)&&(r.level===lvl||String(r.level).startsWith(lvl+':'))&&r.speed===1&&typeof r.match==='number'&&r.target>=AUTO.minFrames).sort((a,b)=>String(b.startedAt).localeCompare(String(a.startedAt)));
+ const last=ok.slice(0,AUTO.runs).map(r=>r.match/100),baseline=last.length>=AUTO.minRuns?median(last):AUTO.fallback,pooled=new Map();
+ for(const s of songs){const rs=ok.filter(r=>r.songHash===s.songHash).slice(0,AUTO.runs),target=rs.reduce((a,r)=>a+r.target,0);if(target>=AUTO.minPool)pooled.set(s.songHash,100*rs.reduce((a,r)=>a+r.hit,0)/target);}
+ return {baseline,pooled};}
+function ladder(songs,h){const list=songs.map(s=>{const p=h.pooled.get(s.songHash);return {s,D:s.difficulty,Dp:s.difficulty+(p===undefined?0:AUTO.k*Math.max(-AUTO.cap,Math.min(AUTO.cap,h.baseline-p)))};})
+  .sort((a,b)=>a.Dp-b.Dp||(a.s.songHash<b.s.songHash?-1:a.s.songHash>b.s.songHash?1:0));
+ const n=list.length;list.forEach((x,r)=>x.step=n<AUTO.steps?r+1:Math.floor(AUTO.steps*r/n)+1);return {list,top:Math.min(AUTO.steps,n)};}
+// A random song of the step that was not picked lately and is not the one just sung; with none left, the one picked longest ago.
+function pickIn(lad,step,recent,just){const all=lad.list.filter(x=>x.step===step),fresh=all.filter(x=>!recent.includes(x.s.songHash)&&x.s.songHash!==just);
+ if(fresh.length)return {x:fresh[Math.floor(Math.random()*fresh.length)],pool:fresh.length};
+ const others=all.filter(x=>x.s.songHash!==just),from=others.length?others:all,age=x=>{const i=recent.indexOf(x.s.songHash);return i<0?Infinity:i;};
+ return {x:from.reduce((a,b)=>age(b)>age(a)?b:a),pool:0};}
+function autoMove(r,step,baseline,top){const s=r.score;
+ if(s===null||s<AUTO.silent)return {why:'silent',to:step};   // nobody sang: never walk an empty room through the library
+ if(!r.full)return {why:'lives',to:clampStep(step-1,top)};      // a session sings from 0, so a later start followed a lives rewind
+ if(s>=baseline)return {why:'up',to:clampStep(step+1,top)};
+ if(s<baseline-AUTO.below)return {why:'down',to:clampStep(step-1,top)};
+ return {why:'stay',to:step};}
+async function startAutopick(origin){if(origin==='home'){if(S.open||!autoSongs().length)return;openSession([]);nextPhase('picking');renderBar();}
+ else if(S.phase!=='picker')return;else nextPhase('picking');
+ const gen=S.gen,runs=await readRuns();if(gen!==S.gen||!S.open)return;
+ const songs=autoSongs();if(!songs.length){showPicker();return;}
+ const h=autoHistory(runs,songs),lad=ladder(songs,h),{from,step}=startStep(lad.top),{x,pool}=pickIn(lad,step,autoState()?.recent||[],null);
+ saveAuto(step,remember(autoState()?.recent||[],x.s.songHash,lad.list.length));
+ Object.assign(S,{auto:true,autoStarted:true,autoPick:{s:x.s,moved:false},autoNext:null});
+ activity.log('autopick',{why:'start',from,to:step,songHash:x.s.songHash,D:x.D,Dp:round1(x.Dp),baseline:round1(h.baseline),score:null,pool,origin});
+ openSong(x.s,'autopick');}
+// A picked song was sung to its end: its first result moves the step and picks the next song; a repeat shows that same pick.
+async function autoFinish(d){const s=S.song,r=resultOf(d),pick=S.autoPick,silent=r.score===null||r.score<AUTO.silent;
+ if(pick&&pick.s.name===s.name&&pick.moved&&S.autoNext){showCard({result:r,from:{kind:'song',s,auto:true},next:{kind:'song',s:S.autoNext.s,auto:{...S.autoNext,why:silent?'silent':'repeat',from:S.autoNext.to,hold:silent}}});return;}
+ const gen=S.gen,runs=await readRuns();if(gen!==S.gen||!S.open)return;
+ const songs=autoSongs();if(!songs.length){S.auto=false;showCard({result:r,from:{kind:'song',s},next:null});return;}
+ const h=autoHistory(runs,songs),lad=ladder(songs,h),st=autoState()||{step:1,recent:[]},step=clampStep(st.step,lad.top),mv=autoMove(r,step,h.baseline,lad.top);
+ const {x,pool}=pickIn(lad,mv.to,st.recent,s.songHash);
+ saveAuto(mv.to,remember(st.recent,x.s.songHash,lad.list.length));
+ if(pick&&pick.s.name===s.name&&!silent)pick.moved=true;
+ S.autoNext={s:x.s,why:mv.why,from:step,to:mv.to,top:lad.top,baseline:h.baseline,score:r.score,hold:silent};
+ activity.log('autopick',{why:mv.why,from:step,to:mv.to,songHash:x.s.songHash,D:x.D,Dp:round1(x.Dp),baseline:round1(h.baseline),score:r.score,pool});
+ showCard({result:r,from:{kind:'song',s,auto:true},next:{kind:'song',s:x.s,auto:S.autoNext}});}
+function meter(step,top){const m=el('span',null,'meter');m.setAttribute('aria-hidden','true');for(let k=0;k<top;k++)m.append(el('i',null,k<step?'on':''));return m;}
+function autoReason(a){const b=Math.round(a.baseline),at='ступінь '+a.to+' з '+a.top;
+ return at+' · '+({up:a.score+' % ≥ твоїх звичних '+b+' %',stay:a.score+' % — біля твоїх звичних '+b+' %',down:'нижче звичних '+b+' % більш ніж на '+AUTO.below,lives:'спроба з перемотуванням життів',silent:'голосу майже не було, ступінь той самий',repeat:'повтор не змінює ступінь'})[a.why];}
+function whyRow(a){const row=el('div',null,'why'),dir=a.to>a.from?'up':a.to<a.from?'down':'same',chip=el('span',null,'chip '+dir);row.dataset.why=a.why;
+ chip.append(el('i'),el('span',dir==='up'?'↑ складніша':dir==='down'?'↓ легша':'= той самий ступінь'));row.append(chip,meter(a.to,a.top),el('span',autoReason(a)));return row;}
+// The tile at the top of the song picker. Its button waits until at least one song has a difficulty.
+function autopickTile(){const tile=el('section',null,'card hero autotile'),copy=el('div',null,'hero-copy');tile.setAttribute('aria-labelledby','autopickTitle');
+ const title=el('div','Обери за мене','hero-title');title.id='autopickTitle';const steps=el('div',null,'steps');steps.id='autopickSteps';
+ copy.append(title,el('p','Studio сам підбере пісню: спершу легші, далі складніші — з огляду на те, як ти їх співаєш.'),steps);
+ const b=el('button','Обери за мене','primary');b.type='button';b.id='autopickStart';b.onclick=()=>startAutopick('picker');tile.append(copy,b);return tile;}
+// Keeps both entries in step with the library and the stored step: hidden without songs, waiting while D is measured.
+function syncAutopick(){const lib=librarySongs.filter(s=>!LESSON_FILE.test(s.name)),songs=autoSongs(),top=Math.max(1,Math.min(AUTO.steps,songs.length)),{from,step}=startStep(top);
+ const fill=(box,text,small)=>{const key=[text,small,step,top].join('|');if(box.dataset.key===key)return;box.dataset.key=key;box.replaceChildren(meter(step,top),el('span',text));if(small)box.append(el('small',small));};
+ const home=$('autopickHome'),homeSteps=$('autopickHomeSteps');home.hidden=homeSteps.hidden=!lib.length;home.disabled=!songs.length;home.textContent=songs.length?'Одразу пісні: обери за мене':'Оцінюємо складність…';
+ if(lib.length)fill(homeSteps,'Обери за мене: ступінь '+step+' з '+top,'без розспівки');
+ const start=$('autopickStart');if(!start||S.phase!=='picker')return;
+ start.disabled=!songs.length;start.textContent=songs.length?'Обери за мене':'Оцінюємо складність…';
+ fill($('autopickSteps'),'Почнемо зі ступеня '+step+' з '+top,from===null?'':'минулого разу — ступінь '+from);}
 // The browser kept the sound or the microphone off: a card over the trainer, with a real button to start.
 function showAutostart(reason){hideAutostart();$('sessionBody').querySelectorAll('.sintro').forEach(n=>n.remove());   // the card that led here may still be fading out
  const lesson=S.phase==='lesson',wrap=el('div',null,'sintro over'),card=el('article',null,'card');wrap.id='autostartCard';
@@ -398,7 +495,7 @@ function showAutostart(reason){hideAutostart();$('sessionBody').querySelectorAll
  go.onclick=()=>{hideAutostart();askSing(false);};own.onclick=()=>{hideAutostart();S.frame?.focus();};acts.append(go,own);card.append(acts);wrap.append(card);$('sessionBody').append(wrap);go.focus();
  announce(card.firstChild.textContent+'. Натисни «Почати співати».');}
 function hideAutostart(){$('autostartCard')?.remove();}
-function closeSession(){if(!S.open)return;nextPhase('');S.open=false;dropFrame();
+function closeSession(){if(!S.open)return;nextPhase('');S.open=false;S.auto=false;S.autoStarted=false;dropFrame();syncAutopick();
  const box=$('session');box.classList.add('closing');document.body.classList.remove('locked');document.querySelector('header').inert=document.querySelector('main').inert=false;
  setTimeout(()=>{if(!S.open){box.hidden=true;box.classList.remove('closing');clearBody();announce('');}},ms(200));
  $('sessionStart').focus();}
@@ -411,6 +508,6 @@ addEventListener('message',e=>{const d=e.data;
  if(d.type!=='luma:finished')return;
  if(S.phase==='lesson'&&d.file===S.steps[S.i].html)finishLesson(d);
  else if(S.phase==='song'&&S.song&&d.file===S.song.name)finishSong(d);});
-$('sessionStart').onclick=startSession;$('sessionClose').onclick=leaveSession;$('sessionSkip').onclick=skipStep;
+$('sessionStart').onclick=startSession;$('autopickHome').onclick=()=>startAutopick('home');$('sessionClose').onclick=leaveSession;$('sessionSkip').onclick=skipStep;
 $('refreshBtn').onclick=refresh;refresh();
 </script></body></html>
