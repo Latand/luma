@@ -229,6 +229,9 @@ button[aria-pressed=true]{color:var(--mint);border-color:#a1eed840;background:#a
 .prog-col .fill.low{background:#d99aa2}
 .prog-col .col.none,.prog-legend i.none{background:none;border:1px dashed var(--line)}
 .prog-col .col.short,.prog-legend i.short{background:repeating-linear-gradient(135deg,#1b2434 0 3px,var(--line) 3px 6px)}
+/* a wordless phrase is no box to fill: a bare rule where the column would stand, its number and dash stepped back */
+.prog-col .col.wordless,.prog-legend i.wordless{background:linear-gradient(var(--line),var(--line)) center/2px 100% no-repeat;border:0;border-radius:0}
+.prog-col.wordless .n,.prog-col.wordless .v{opacity:.5}
 .prog-col .mark{position:absolute;left:-3px;right:-3px;height:2px;margin-bottom:-1px;background:#e6edf8;border-radius:1px}
 .prog-col .v{font:12px/1.2 var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
 /* the stage legend folds away on phones; this one is the only key to the phrase columns, so it stays */

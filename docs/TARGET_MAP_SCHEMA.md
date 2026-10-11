@@ -54,6 +54,10 @@ time-stretched with FFmpeg `atempo` so pitch is preserved; both pairs are padded
 ## How the app uses the map
 - `targetAt(t)`: in notes view, the note containing `t`; in contour view, the `points` entry within 0.75 hop of `t`. The user's
   octave setting shifts the target.
-- The live match score and per-note ✓/× use every non-ignored note regardless of `ok`. The strict statistics on attempt cards
+- In a song with lyric words, `targetAt(t)` is null outside scored time: chains of notes (gap ≤ 0.85 s) that come within
+  0.5 s of a lyric line, plus the lines widened by 0.5 s. A wordless chain is drawn dimmed and never scored; lessons and
+  songs with no lyrics score every target. Computed in the trainer, so nothing in `target.json` changes
+  ([SCORING.md](SCORING.md#wordless-target-без-слів--не-рахується)).
+- The live match score and per-note ✓/× use every non-ignored, scored note regardless of `ok`. The strict statistics on attempt cards
   ("У коридорі", "Покриття") use only `ok` frames inside ranges the user has explicitly verified.
 - Validation on import: points ≤ 300 000, notes ≤ 20 000, ranges inside `duration`, MIDI 24..108, non-overlapping notes.

@@ -50,12 +50,16 @@ runs into the new song's row and thin the previous song's traces against a list 
 
 ```
 songHash   = song.sourceId  (sha256 of the source audio; for a lesson, of its synthesized mix), else song.id
-mapVersion = song.id + ':' + hash16([id, a, b, m, ignored] for every note)
+mapVersion = song.id + ':' + hash16([id, a, b, m, ignored] for every note)                  lesson, or no lyric words
+           = song.id + ':' + hash16([[id, a, b, m, ignored] for every note, scored spans])  a song with words
 cmpKey     = songHash · mapVersion · level · view · speed
 ```
 
 - Re-preparing the same audio changes `song.id` but not `sourceId`: the song keeps its history and opens a new
   `mapVersion` group inside it. `build_html.py --rebuild` changes neither.
+- The scored spans (`[a, b]` in ms, merged) are what the wordless rule scores in a song with words
+  ([SCORING.md](SCORING.md#wordless-target-без-слів--не-рахується)). They entered the hash with the rule, so every song with
+  words opened a new group once and its median started again; lessons and songs without words kept theirs.
 - Editing a note changes `mapVersion` — the ruler changed, so the old scores stand apart. Confirming a fragment by ear
   does **not**: `verified` never reaches `targetAt().m`, so a confirmation would otherwise wipe every record.
 - `level` is `easy` / `normal` / `strict` or `custom:<cents>`. The vocal octave is deliberately outside the key: it

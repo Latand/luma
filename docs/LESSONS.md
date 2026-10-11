@@ -80,7 +80,8 @@ rule, the result card, the 3-2-1 and the songs step are in [design/SESSION_FLOW_
 - **Where it runs.** Studio opens a full-screen overlay and loads each trainer in a same-origin frame, so the microphone
   permission and the practice history are the same as when the trainer opens in its own tab.
 - **Finished.** Every trainer, standalone too, ends a sung pass over the whole song 0.5 s after the last thing to sing
-  (the latest note or lyric line, `singEnd()` in `app/app.js`); the outro and the silence after it are not recorded.
+  (the latest scored note or lyric line, `singEnd()` in `app/app.js`); the outro, a wordless tail and the silence after
+  it are not recorded.
   Before, a pass ran to the end of the audio: 3–5 s of closing rest and silence on a lesson, up to 52 s of outro on a
   song. Nothing is scored after the last note, so the score and the history are the same. A lesson or song counts as
   finished when a sung attempt runs to that end on its own (not stopped), within 0.25 s. A stopped attempt, a lives-mode

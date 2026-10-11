@@ -12,7 +12,8 @@ of your voice, no server after the file is built.
   click away. Named C lines on a lit stage. Words sit right above the melody at the moment they are sung, and the current
   and next line ride in a band of their own; on a phone that band is a full row, so nothing ever covers the readout.
 - **Live match score.** Hits ÷ frames with a target, counted once per 20 ms. Silence under a note is a miss; frames with no
-  target are excluded; draft notes count and are labelled as draft. Hit notes turn mint with ✓, misses hatched red with ×,
+  target are excluded; draft notes count and are labelled as draft. In a song with lyrics, notes that come nowhere near
+  a word (stem bleed in a break, wordless singing) are drawn dimmed and never scored: «Без слів — не рахується». Hit notes turn mint with ✓, misses hatched red with ×,
   so the two differ in pattern as well as colour.
 - **Three levels.** Легко (±80 ¢, octave errors forgiven), Звично (±50 ¢), Точно (±35 ¢); each also sets timing slack and how
   much of a note must be hit. Details in [docs/SCORING.md](docs/SCORING.md).
@@ -37,7 +38,7 @@ of your voice, no server after the file is built.
   constants in [docs/SCORING.md](docs/SCORING.md#lives-mode-режим-життів).
 - **Built-in lessons.** Three warm-ups with exact synthetic targets; progress on them is kept per exercise, with one lamp
   per difficulty level, because one exercise is one skill sung through nine keys.
-- **Loop and seek.** Whole song by default, and a sung pass of it stops half a second after the last note or lyric line
+- **Loop and seek.** Whole song by default, and a sung pass of it stops half a second after the last scored note or lyric line
   (listening still plays the outro); draw an A–B region under the waveform or press A / B while listening, loop it
   without gaps. Seek during playback and the music picks up from there.
 - **Vocal on/off.** One button (V) mutes the original vocal stem so you hear only the backing and yourself.
