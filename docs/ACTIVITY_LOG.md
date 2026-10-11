@@ -92,7 +92,8 @@ Lines from one session can land in different batches and, past midnight, in two 
 |---|---|
 | `notice` | the upload notice shown (`id: uploadNotice`, `text`), or the connection lost (`id: connectionNotice`) |
 | `session_result` | «Заняття» showed a result card: `kind` (`lesson` / `song`), `file`, `score` %, `median` % of the earlier full passes, `prev` (how many; `null` when the trainer could not read its history), `delta`, `full` (a full pass), `saved` (in the trainer's history), `next` (the file that comes next, `picker`, or `null` after the last song) |
-| `session_next` | the session moved on: `from`, `to` (files, `picker`), `how` (`countdown`, `now` = «Почати зараз» / «Почати урок», `repeat`, `skip`, `songs` = «До пісень», `picker` = a song picked in the list) |
+| `session_next` | the session moved on: `from`, `to` (files, `picker`), `how` (`countdown`, `now` = «Почати зараз» / «Почати урок», `repeat`, `skip`, `songs` = «До пісень», `picker` = a song picked in the list, `autopick` = a song «Обери за мене» picked) |
+| `autopick` | «Обери за мене» picked a song ([design/AUTOPICK.md](design/AUTOPICK.md)): `why` (`start`; after a result `up`, `down`, `stay`, `silent` = nobody sang, `lives` = a pass that did not start at 0), `from` and `to` step (1–4; `from` is `null` on a first start), `songHash` picked, `D`, `Dp` (D′ after the personal shift), `baseline` (the usual score), `score` (`null` on start), `pool` (songs the step offered after skipping recent picks; 0 when it fell back to the oldest pick), `origin` on start (`picker` tile / `home` button) |
 | `session_autostart` | a trainer answered Studio's request to start singing: `file`, `ok`, `reason` (`audio` sound refused, `mic`, `busy`, `other`), `ms` from the request to the answer |
 
 Opening a song or a lesson from Studio is a `click` whose `href` is `song:<file>`; the trainer then logs its own

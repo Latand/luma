@@ -79,6 +79,12 @@ picker. Each lesson or song runs in a frame inside Studio and starts singing by 
 result card: today's score against the median of your earlier full passes, and a column per day. Then a 3-2-1 opens the
 next lesson, or the next song in the picker's order. «Повторити» sings it again, «Пропустити урок» moves on at once, × or
 the browser's Back button leaves. Details in [docs/LESSONS.md](docs/LESSONS.md#заняття-three-lessons-in-a-row).
+«Обери за мене» lets Studio pick the songs: a tile at the top of the song picker, or «Одразу пісні: обери за мене» on the
+«Заняття» card to skip the lessons. Studio rates each song's difficulty from its melody (range, time outside a comfortable
+A3–D5, notes per second, jumps, length), shifts it by how you actually sing that song, and walks the library in four steps
+from easy to hard: a result at or above your usual climbs a step, a lives rewind or a clearly worse one steps down, a
+repeat never moves it, and a new session starts one step below the last. The chain runs until × or «До пісень».
+Details in [docs/design/AUTOPICK.md](docs/design/AUTOPICK.md).
 
 **Hardware.** A 5-minute song takes about 4 minutes on an RTX 3060 (Demucs ≈ 50 s, pYIN ≈ 1 min, CREPE ≈ 30 s). CPU works
 and takes considerably longer. Python 3.11, FFmpeg and a few GB of RAM are required; `requirements.txt` pins PyTorch 2.10.
@@ -114,7 +120,9 @@ after the last note, is stored once and scores the same, the next pass and a Lis
 still run to the end. `session.mjs` drives «Заняття» in Studio at 390 px and 1440 px (the result card with and without
 history, the 3-2-1 and auto-start, «Повторити», skip and close during the countdown, the start button when sound is
 refused, songs in picker order, lives mode, the activity events, the real autoplay policy after one click, leaving,
-reduced motion) and checks covers against an ffmpeg-made fixture. Every suite requires a clean console. Set `LUMA_BROWSER=/path/to/chrome` to use a specific
+reduced motion) and checks covers against an ffmpeg-made fixture. `autopick.mjs` drives «Обери за мене» on its own fixtures at 390 px and 1440 px:
+difficulty in `/status`, the first pick, a step up, down and none, a repeat that does not climb, random picks without
+repeats, the history read without creating the base, the home button and the real autoplay policy after its click. Every suite requires a clean console. Set `LUMA_BROWSER=/path/to/chrome` to use a specific
 Chromium build.
 
 ## Layout
@@ -122,7 +130,7 @@ Chromium build.
 ```
 app/       head.html (styles + markup, {{TITLE}} / {{ARTIST}} placeholders), workers.html (AudioWorklet capture + YIN worker), app.js,
            activity.js (activity log, shared with Studio)
-studio/    prepare_song.py (pipeline), build_html.py (package → HTML, --rebuild), studio_server.py + studio.html, covers.py, luma-studio.sh,
+studio/    prepare_song.py (pipeline), build_html.py (package → HTML, --rebuild), studio_server.py + studio.html, covers.py, difficulty.py, luma-studio.sh,
            activity_report.py (digest of the activity log)
 examples/  make_demo.py (synthetic demo song)
 tests/e2e/ Playwright suites
