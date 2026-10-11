@@ -204,7 +204,7 @@ def digest(paths) -> str:
 def fingerprints() -> tuple[str, str]:
     """Lesson data (audio and map) and app code (the wrapper around the data) age independently."""
     return (digest([HERE / 'definitions.py', HERE / 'build_lessons.py']),
-            digest([ROOT / 'app' / 'head.html', ROOT / 'app' / 'workers.html', ROOT / 'app' / 'app.js', ROOT / 'studio' / 'build_html.py']))
+            digest([ROOT / 'app' / 'head.html', ROOT / 'app' / 'workers.html', ROOT / 'app' / 'app.js', ROOT / 'app' / 'activity.js', ROOT / 'studio' / 'build_html.py']))
 
 
 def read_index(songs: Path) -> dict | None:

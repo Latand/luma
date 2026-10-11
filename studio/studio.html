@@ -34,6 +34,7 @@ details{font-size:12px;color:var(--muted)}summary{cursor:pointer;padding:6px 0;c
 .empty{padding:18px;border:1px dashed #3a4760;border-radius:14px;color:var(--muted);font-size:13px;grid-column:1/-1}.st{color:var(--muted);font-size:13px}
 .library-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0 0}
 .note{font-size:12px;color:var(--dim);margin-top:26px;line-height:1.6}.note summary{padding:4px 0}
+.note .activity{margin:8px 0 0}.note .activity label{color:var(--muted);cursor:pointer}.note .activity input{accent-color:var(--mint);margin:0 6px 0 0;vertical-align:-2px}
 @keyframes blink{50%{opacity:.35}}@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 @media(max-width:560px){.bar{padding:10px 14px}.wrap{padding:18px 14px 40px}.row{flex-direction:column;align-items:stretch}.row label,.row .primary{width:100%}.card{padding:14px}.lib{grid-template-columns:1fr}.bar .status{display:none}}
 </style></head><body>
@@ -59,14 +60,20 @@ details{font-size:12px;color:var(--muted)}summary{cursor:pointer;padding:6px 0;c
 <div class="notice" id="uploadNotice" hidden role="alert"></div>
 </details>
 <div class="note">Відкривай пісні з бібліотеки: так працює запис голосу. Готові тренажери зберігаються в каталозі songs цього проєкту; HTML з іншого місця можна додати кнопкою вище.
+<p class="activity" id="activityLine" hidden><label><input type="checkbox" id="activityToggle">Записувати мої дії</label><span id="activityState"></span></p>
 <details><summary>Час підготовки та приватність</summary><p>Одна пісня потребує кількох хвилин на GPU; на CPU підготовка триває довше. Demucs, CREPE та pYIN працюють локально. Якщо налаштовано ключ Soniox, аудіо надсилається цьому сервісу для розпізнавання слів. Записи твого голосу залишаються у вкладці тренажера.</p></details></div>
 </main>
+<script src="/activity.js"></script>
 <script>
 const $=id=>document.getElementById(id);
 let file=null, requestId=null, busy=false, timer=null, refreshing=false, jobsKey='', songsKey='', lessonsKey='', lessons=null, lessonsFor=null;
 const fmt=t=>{t=Math.max(0,Math.round(t||0));return t>=3600?Math.floor(t/3600)+' год '+Math.floor(t%3600/60)+' хв':t>=60?Math.floor(t/60)+' хв '+String(t%60).padStart(2,'0')+' с':t+' с';};
 const clock=t=>{t=Math.max(0,Math.round(t||0));return Math.floor(t/60)+':'+String(t%60).padStart(2,'0');};
-function message(text){$('uploadNotice').textContent=text;$('uploadNotice').hidden=!text;}
+const activity=window.LumaActivity||{log(){},available:false};
+function message(text){if(text)activity.log('notice',{id:'uploadNotice',text:text.slice(0,200)});$('uploadNotice').textContent=text;$('uploadNotice').hidden=!text;}
+// Activity log: on unless switched off here; the switch is shared with every trainer of this Studio (docs/ACTIVITY_LOG.md).
+function syncActivity(){const on=activity.enabled();$('activityToggle').checked=on;$('activityState').textContent=on?' · кліки, перемикання й підсумки спроб пишуться лише на цей комп’ютер, у songs/logs/activity':' · журнал дій вимкнено';}
+if(activity.available){$('activityLine').hidden=false;syncActivity();$('activityToggle').onchange=()=>{activity.setEnabled($('activityToggle').checked);syncActivity();};}
 function syncForm(){for(const id of ['go','choose','title','artist','importTrainer'])$(id).disabled=busy||(id==='go'&&!file);$('go').textContent=busy?'Завантажуємо…':'Підготувати';}
 function pick(f){if(busy)return;if(f.size>1024*1024*1024){message('Файл завеликий. Вибери аудіо до 1 ГБ.');return;}file=f;requestId=crypto.randomUUID();const stem=f.name.replace(/\.[^.]+$/,''),m=stem.match(/^(.*?)\s+-\s+(.*)$/);$('title').value=m?m[1].trim():stem;$('artist').value=m?m[2].trim():'';$('fileName').textContent=f.name;message('');syncForm();}
 $('choose').onclick=()=>$('file').click();$('file').onchange=()=>{if($('file').files[0])pick($('file').files[0]);$('file').value='';};
@@ -133,7 +140,7 @@ async function refresh(){clearTimeout(timer);if(refreshing)return;refreshing=tru
   if(files&&files!==lessonsFor)await loadLessons(files);   // first poll, and again whenever a lesson is added, renamed or removed
   const built=new Set(d.songs.map(s=>s.name)),shown=(lessons||[]).filter(l=>built.has(l.html));
   renderLessons(shown);renderSongs(d.songs.filter(s=>!shown.some(l=>l.html===s.name)));const working=d.jobs.some(j=>['running','queued'].includes(j.state));setStatus(working?'busy':'live',working?'ГОТУЄМО ПІСНЮ':'STUDIO ПРАЦЮЄ');delay=working?2000:15000;}
- catch(e){$('connectionNotice').hidden=false;setStatus('','НЕМАЄ ЗВ’ЯЗКУ');}
+ catch(e){if($('connectionNotice').hidden)activity.log('notice',{id:'connectionNotice'});$('connectionNotice').hidden=false;setStatus('','НЕМАЄ ЗВ’ЯЗКУ');}
  finally{refreshing=false;timer=setTimeout(refresh,delay);}
 }
 $('refreshBtn').onclick=refresh;refresh();

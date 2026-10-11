@@ -20,7 +20,8 @@ END = '};</script>'
 
 def parts():
     head = (APP / 'head.html').read_text(encoding='utf-8'); workers = (APP / 'workers.html').read_text(encoding='utf-8')
-    script = '<script>' + (APP / 'app.js').read_text(encoding='utf-8') + '</script></body></html>'
+    # The activity logger runs first, so the app can hand it events; it stays silent outside Luma Studio.
+    script = '<script>' + (APP / 'activity.js').read_text(encoding='utf-8') + '</script><script>' + (APP / 'app.js').read_text(encoding='utf-8') + '</script></body></html>'
     return head, workers, script
 
 def wrap(song: dict, data_line: str) -> str:

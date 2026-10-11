@@ -33,9 +33,14 @@ function name(m){if(!Number.isFinite(m))return '—';const n=Math.round(m);retur
 function noteHTML(m){if(!Number.isFinite(m))return '—';const n=Math.round(m);return names[(n%12+12)%12]+'<small>'+String(Math.floor(n/12)-1)+'</small>';}
 function icon(id){return '<svg><use href="#i-'+id+'"/></svg>';}
 function say(text){$('srStatus').textContent=text;}
-function toast(text){$('toast').textContent=text;$('toast').classList.add('show');clearTimeout(s.toastTimer);s.toastTimer=setTimeout(()=>$('toast').classList.remove('show'),5000);}
+// Activity log (app/activity.js): present and enabled only in pages Luma Studio serves; it never throws.
+function act(type,data){if(window.LumaActivity)window.LumaActivity.log(type,data);}
+// A scrub or a run of arrow keys is one seek: from where it started to where it settled.
+let seekAct=null;
+function actSeek(from,to){if(!seekAct)seekAct={from:+from.toFixed(1),mode:s.mode};seekAct.to=+to.toFixed(1);clearTimeout(seekAct.timer);seekAct.timer=setTimeout(()=>{const {from,to,mode}=seekAct;seekAct=null;act('seek',{from,to,mode});},600);}
+function toast(text){act('toast',{text:String(text).slice(0,200)});$('toast').textContent=text;$('toast').classList.add('show');clearTimeout(s.toastTimer);s.toastTimer=setTimeout(()=>$('toast').classList.remove('show'),5000);}
 // kind 'mic': microphone trouble, so the banner offers the microphone settings (or the Studio link on file://). Other errors get no action.
-function error(text,kind=''){$('errorText').textContent=text;$('errorBanner').hidden=false;const file=location.protocol==='file:';$('studioLink').hidden=!(kind==='mic'&&file);$('errorSettings').hidden=!(kind==='mic'&&!file);if($('settingsDialog').open)$('settingsDialog').close();updateStatus();say(text);}
+function error(text,kind=''){act('error',{text:String(text).slice(0,200),kind});$('errorText').textContent=text;$('errorBanner').hidden=false;const file=location.protocol==='file:';$('studioLink').hidden=!(kind==='mic'&&file);$('errorSettings').hidden=!(kind==='mic'&&!file);if($('settingsDialog').open)$('settingsDialog').close();updateStatus();say(text);}
 function savePrefs(){try{localStorage.setItem('luma.trainer.settings',JSON.stringify(prefs));}catch(_){}}
 function saveEdits(){invalidateMap();try{localStorage.setItem('luma.target.'+song.id,JSON.stringify({notes:song.notes,verified:s.verified}));}catch(_){toast('Не вдалося зберегти правки у браузері. Завантаж JSON цілі.');}}
 function loadEdits(){s.verified=[];try{const d=JSON.parse(localStorage.getItem('luma.target.'+song.id)||'null');if(d&&validNotes(d.notes,song.duration)){song.notes=d.notes;s.verified=(d.verified||[]).filter(r=>Number.isFinite(r.a)&&Number.isFinite(r.b)&&r.a>=0&&r.b<=song.duration&&r.b>r.a);}}catch(_){}}
@@ -220,6 +225,7 @@ function populateSong(){
  baseNotes=structuredClone(song.notes);loadEdits();invalidateMap();setRangeScale();sync();
 }
 function sync(){
+ if(window.LumaActivity)window.LumaActivity.state({mode:s.mode,view:prefs.view,level:prefs.level,tolerance:levelOpt().tolerance,speed:prefs.speed,loop:prefs.loop,tab:prefs.tab,rangeId:s.rangeId,range:[+s.range.a.toFixed(1),+s.range.b.toFixed(1)],octave:prefs.octave,vocal:prefs.vocal,lyrics:prefs.lyrics,shadow:prefs.shadow,audio:prefs.audio,takesOpen:prefs.takesOpen,review:traceShown()?s.trace.take.runId:null});
  s.dirty=true;$('lyricBand').hidden=!prefs.lyrics||!song.lyrics.length;
  // nothing recorded and nothing running: one invitation instead of a readout with no reading and a meter with no level
  const intro=!s.takes.length&&s.mode!=='singing'&&!s.stream&&!s.trace;$('invite').hidden=!intro;$('chartWrap').dataset.intro=intro?'1':'0';
@@ -535,6 +541,19 @@ function runRecord(t,sum){
   strict:{targetTime:+(t.stats.targetTime||0).toFixed(3),compared:+(t.stats.compared||0).toFixed(3),inside:+((t.stats.compared||0)*(t.stats.accuracy||0)/100).toFixed(3),median:t.stats.median===null?-1:Math.round(t.stats.median)},
   phraseIds:Int32Array.from(sum.phrases.map(p=>p.id)),phraseStats:Int32Array.from(stat),hasTrace:true};
 }
+// A finished attempt for the activity log: the summary saveRun() just computed for the history, in seconds and percent.
+// Phrases are [id, target, hit, sung, median |Δ| cents], counted in GRID frames like the history's phraseStats.
+function attemptLog(t,replaced){
+ if(!t.summary)return {runId:t.runId,summarized:false};
+ try{const r=runRecord(t,t.summary),sec=f=>+(f*GRID).toFixed(2);
+ return {runId:r.id,songHash:r.songHash,mapVersion:r.mapVersion,lessonId:song.lesson?.id||null,replaced,rangeId:t.rangeId,a:r.a,b:r.b,duration:+t.duration.toFixed(2),
+  speed:r.speed,level:r.level,tolerance:r.tolerance,view:r.view,octave:r.octave,latency:r.latency,match:r.match===null?null:r.match/100,
+  targetSec:sec(r.target),hitSec:sec(r.hit),sungSec:sec(r.sung),draftSec:sec(r.draftFrames),songTargetSec:sec(r.songTarget),medianCents:r.medianCents,strict:r.strict,
+  punches:r.punches,hasAudio:r.hasAudio,clipped:r.clipped,startedAt:r.startedAt,endedAt:r.endedAt,
+  phrases:t.summary.phrases.map(p=>[p.id,p.target,p.hit,p.sung,p.median]),
+  exercises:song.lesson?Object.fromEntries(t.summary.phrases.map(p=>[p.id,exerciseOf((song.phrases||[]).find(q=>q.id===p.id)||{})])):undefined};
+ }catch(_){return {runId:t.runId,summarized:false};}
+}
 function songEntry(runs){
  const maps=new Map();
  for(const r of runs)if(!maps.has(r.mapVersion))maps.set(r.mapVersion,{mapVersion:r.mapVersion,firstSeen:r.startedAt,notes:null,draftShare:null});
@@ -843,7 +862,7 @@ function storeTake(meta,m){
  const a=analyzeTake(meta,m.points,m.duration);
  const take={...meta,...m,...a,hasAudio:!!m.blob,clipped:!!m.clipped,url:m.blob?URL.createObjectURL(m.blob):null,endSong:meta.a+m.duration*meta.speed,runId:replaced?.runId||newRunId()};
  if(replaced){clearUndoPunch();if(meta.keepUndo!==false)s.undoPunch={before:replaced,after:take};else if(replaced.url)URL.revokeObjectURL(replaced.url);s.takes[s.takes.indexOf(replaced)]=take;}else s.takes.unshift(take);
- s.trace={take,points:take.points,score:take.score};s.current=null;saveRun(take);markUnsaved();renderTakes();
+ s.trace={take,points:take.points,score:take.score};s.current=null;saveRun(take);markUnsaved();renderTakes();if(window.LumaActivity?.enabled())act('attempt',attemptLog(take,!!replaced));
  say(replaced?'Спробу '+String(take.id)+' перезаписано від '+fmt(meta.lastPunchAt)+'.':'Спробу '+String(take.id)+' записано: лінія й оцінка зберігаються самі.');return take;
 }
 function clearUndoPunch(){if(s.undoPunch){if(s.undoPunch.before.url)URL.revokeObjectURL(s.undoPunch.before.url);s.undoPunch=null;}}
@@ -1416,11 +1435,11 @@ function validateSong(d){return d&&d.schema==='luma.song.v1'&&typeof d.title==='
 async function importFile(file){if(!file)return;if(file.size>100*1024*1024){error('Пакет завеликий: максимум 100 МіБ.');return;}try{const d=JSON.parse(await file.text());const packed=d.schema==='luma.pack.v1',newSong=packed?d.song:d;if(!validateSong(newSong))throw Error('Непідтримуваний формат цілі. Потрібен target.json або готовий .luma.json, не сире аудіо.');if(s.unsaved&&!confirm('Сховище браузера не прийняло частину спроб, і їхні лінії є лише в цій вкладці. Відкрити іншу пісню й прибрати їх?'))return;
  if(!packed){if(Math.abs(newSong.duration-song.duration)>.1||newSong.title!==song.title||(newSong.sourceId&&song.sourceId&&newSong.sourceId!==song.sourceId))throw Error('Ціль належить іншому аудіо. Імпортуй повний підготовлений пакет.');if(!validLyrics(newSong.lyrics))newSong.lyrics=song.lyrics;}
  else{if(!d.assets?.['1']?.backing||!d.assets?.['1']?.foreground)throw Error('У пакеті відсутні аудіодоріжки.');assets=d.assets;s.bufs.clear();}
- stopTransport('import');await releaseMic();s.takes.forEach(t=>{if(t.url)URL.revokeObjectURL(t.url);});clearUndoPunch();s.takes=[];s.unsaved=false;s.trace=null;s.history=[];song=newSong;song.notes.sort((a,b)=>a.a-b.a);song.points.sort((a,b)=>a[0]-b[0]);resetHistory();populateSong();if(Array.isArray(newSong.verified)){s.verified=newSong.verified.filter(r=>Number.isFinite(r.a)&&Number.isFinite(r.b)&&r.a>=0&&r.b<=song.duration);saveEdits();}renderTakes();sync();await loadHistory();toast('Ціль імпортовано. Перевір мелодію перед тренуванням.');
+ stopTransport('import');await releaseMic();s.takes.forEach(t=>{if(t.url)URL.revokeObjectURL(t.url);});clearUndoPunch();s.takes=[];s.unsaved=false;s.trace=null;s.history=[];song=newSong;song.notes.sort((a,b)=>a.a-b.a);song.points.sort((a,b)=>a[0]-b[0]);resetHistory();populateSong();if(Array.isArray(newSong.verified)){s.verified=newSong.verified.filter(r=>Number.isFinite(r.a)&&Number.isFinite(r.b)&&r.a>=0&&r.b<=song.duration);saveEdits();}renderTakes();act('song_open',{source:packed?'pack':'target',songHash:songHash(),songId:song.id,lessonId:song.lesson?.id||null,duration:song.duration,notes:song.notes.length});sync();await loadHistory();toast('Ціль імпортовано. Перевір мелодію перед тренуванням.');
  }catch(e){error(e.message||'Не вдалося прочитати пакет.');}}
 function seekTo(t,keepRange){if(s.mode!=='idle'){applySeek(t);return;}clearTimeout(s.nextTimer);s.cancel++;s.pos=clamp(t,0,song.duration);s.history=[];s.current=null;setRangeScale();sync();}
 // One entry point for every seek gesture: idle → move the playhead; listen/review → rebuild audio live; singing → close the take and restart from there.
-function applySeek(t){t=clamp(t,0,song.duration);if(s.busy||s.awaitFinish)return;
+function applySeek(t){t=clamp(t,0,song.duration);if(s.busy||s.awaitFinish)return;actSeek(now(),t);
  if(s.mode==='idle'){seekTo(t,true);return;}
  if(s.mode==='singing'){s.resumeAt=t;stopTransport('seek');return;}
  seekLive(t);}
