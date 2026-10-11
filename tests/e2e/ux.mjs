@@ -173,7 +173,8 @@ const singFor=async ms=>{await p.locator('#singBtn').click();await p.waitForFunc
   await p.waitForFunction(()=>window.Luma.test.state().mode==='idle'&&!document.getElementById('singBtn').disabled,null,{timeout:9000});await p.waitForTimeout(400);return banner;};
 await setAudio(true);
 const long=await p.evaluate(()=>{
-  window.Luma.test.closeTrace();window.LUMA_SONG.duration=600;
+  // a 600 s song whose last sung line is at its very end, so a full pass really is 600 s long
+  window.Luma.test.closeTrace();window.LUMA_SONG.duration=600;window.LUMA_SONG.lyrics.push({a:598,b:599.6,words:[{a:598,b:599.6,w:'ла',c:1}]});
   const r=window.Luma.test.injectTake({a:0,b:600,points:[],audio:true});
   window.Luma.test.setRange(1,3);window.Luma.test.seek(1);return r.id;
 });

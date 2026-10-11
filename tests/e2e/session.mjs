@@ -1,8 +1,13 @@
-// «Заняття» and album covers in Studio: the lessons one after another in a session frame, finish and skip, the song
-// picker, leaving, reduced motion, and a cover extracted from a fixture original next to a song without one.
+// «Заняття» and album covers in Studio: the lessons one after another in a session frame, each sung pass ending at the
+// last note with a result card (today against the median, a chart per day), a 3-2-1 into the next step that starts
+// singing by itself, «Повторити», skip and close during the countdown, the browser refusing sound, songs one after
+// another in picker order, lives mode, the activity log, 390 px and desktop layouts, reduced motion, and a cover
+// extracted from a fixture original next to a song without one. docs/design/SESSION_FLOW_RESULTS.md
 import {execFileSync} from 'node:child_process';
-import {copyFileSync, existsSync, mkdirSync, rmSync, unlinkSync} from 'node:fs';
-import {launch, open, assert} from './lib.mjs';
+import {copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, unlinkSync, utimesSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {launch, assert} from './lib.mjs';
 
 const studio = process.env.LUMA_STUDIO_URL || 'http://127.0.0.1:8793/';
 const library = process.env.LUMA_TEST_LIBRARY;
@@ -15,7 +20,7 @@ const added = [`${library}/Luma_Cover_Fixture.html`, `${library}/Luma_No_Cover.h
 if (!existsSync(`${library}/Luma_Lesson_1_Novachok.html`)) execFileSync(py, ['lessons/build_lessons.py', '--songs', library], {maxBuffer: 64 << 20});
 const defs = JSON.parse(execFileSync(py, ['lessons/build_lessons.py', '--definitions'], {encoding: 'utf8', maxBuffer: 64 << 20}));
 const lessonFiles = defs.lessons.map(l => l.file);
-for (const f of added) copyFileSync(demo, f);
+added.forEach((f, k) => { copyFileSync(demo, f); const t = Date.now() / 1000 - 60 * k; utimesSync(f, t, t); });   // distinct mtimes: a stable picker order
 mkdirSync(pkg, {recursive: true});
 const ff = (...a) => execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...a]);
 ff('-f', 'lavfi', '-i', 'color=red:s=64x36', '-frames:v', '1', `${pkg}/wide.png`);
@@ -24,36 +29,103 @@ ff('-f', 'lavfi', '-i', 'sine=d=1', '-i', `${pkg}/wide.png`, '-i', `${pkg}/squar
 unlinkSync(`${pkg}/wide.png`); unlinkSync(`${pkg}/square.jpg`);
 const backfill = execFileSync(py, ['studio/covers.py', '--songs', library], {encoding: 'utf8'}).trim();
 assert(/extracted 1/.test(backfill) && !/Cover_Fixture/.test(backfill), 'covers.py extracts the fixture cover and prints counts only: ' + backfill);
-const cleanup = () => { for (const f of added) rmSync(f, {force: true}); rmSync(pkg, {recursive: true, force: true}); };
+// A silent fake microphone: the voice in these tests is pushed in by hand, and Chrome's beep must not sing along.
+const tmp = mkdtempSync(join(tmpdir(), 'luma-session-')), silence = join(tmp, 'silence.wav');
+{ const rate = 48000, n = rate * 60, wav = Buffer.alloc(44 + n * 2);
+  wav.write('RIFF', 0); wav.writeUInt32LE(36 + n * 2, 4); wav.write('WAVE', 8); wav.write('fmt ', 12); wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(rate, 24); wav.writeUInt32LE(rate * 2, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(n * 2, 40); writeFileSync(silence, wav); }
+const cleanup = () => { for (const f of added) rmSync(f, {force: true}); rmSync(pkg, {recursive: true, force: true}); rmSync(tmp, {recursive: true, force: true}); };
+const media = ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--use-file-for-fake-audio-capture=' + silence];
 
-const browser = await launch(['--autoplay-policy=no-user-gesture-required']);
+// Every luma:* message the Studio page receives, recorded by an init script: nothing here is evaluated in the page, so
+// it grants no user activation. The console line lets the real-policy check read them without page.evaluate either.
+const collector = () => { if (window !== window.top) return; window.__luma = [];
+  addEventListener('message', e => { const d = e.data; if (!d || typeof d !== 'object' || !String(d.type).startsWith('luma:')) return;
+    const m = {type: d.type, file: d.file, ok: d.ok, reason: d.reason, result: d.result, at: performance.now()}; window.__luma.push(m); console.log('luma-msg ' + JSON.stringify({type: d.type, file: d.file, ok: d.ok, reason: d.reason}));
+    setTimeout(() => { m.card = !!document.querySelector('#session .rcard'); }, 50); }); };
+async function openStudio(browser, viewport) {
+  const page = await browser.newPage({viewport}), logs = [];
+  page.on('console', m => { if (['error', 'warning'].includes(m.type())) logs.push(m.type() + ': ' + m.text()); });
+  page.on('pageerror', e => logs.push('PAGEERROR ' + e.message));
+  await page.addInitScript(collector); await page.goto(studio); return {page, logs};
+}
+// The last finish, once the collector has looked for the card 50 ms after it.
+const lastFinish = async page => { await page.waitForFunction(() => 'card' in (window.__luma.filter(m => m.type === 'luma:finished').at(-1) || {}), null, {timeout: 3000}); return (await msgs(page, 'luma:finished')).at(-1); };
+const msgs = (page, type) => page.evaluate(type => window.__luma.filter(m => m.type === type), type);
+const waitMsg = (page, type, n, ms = 15000) => page.waitForFunction(([type, n]) => window.__luma.filter(m => m.type === type).length > n, [type, n], {timeout: ms});
 const frameOf = async page => (await page.$('#session iframe.sframe.shown'))?.contentFrame();
 const frameSrc = page => page.evaluate(() => { const f = document.querySelector('#session iframe.sframe'); return f ? new URL(f.src).pathname : null; });
 const dots = page => page.evaluate(() => [...document.querySelectorAll('#sessionDots .dot')].map(d => d.className.replace('dot', '').trim() || '-'));
-const waitIntro = (page, n) => page.waitForFunction(n => document.querySelector('#session .sintro .eyebrow')?.textContent.startsWith('Урок ' + n + ' '), n, {timeout: 10000});
-const waitLesson = (page, file) => page.waitForFunction(file => { const f = document.querySelector('#session iframe.sframe.shown'); return f && f.src.endsWith('/song/' + file) && f.contentWindow.Luma; }, file, {timeout: 15000});
-const shot = (page, step, w) => page.screenshot({path: `tests/e2e/shot_session_${step}_${w}.png`});
+const cardNext = page => page.evaluate(() => document.querySelector('#session .sintro .card')?.dataset.next ?? null);
+const waitCard = (page, next, ms = 10000) => page.waitForFunction(next => document.querySelector('#session .sintro:not(.over) .card')?.dataset.next === next, next, {timeout: ms});
+const waitSinging = (page, file, ms = 15000) => page.waitForFunction(file => { const f = document.querySelector('#session iframe.sframe.shown'); return f && f.src.endsWith('/song/' + file) && f.contentWindow.Luma?.diagnostics().mode === 'singing'; }, file, {timeout: ms});
+const shot = async (page, step, w) => { await page.waitForTimeout(400); await page.screenshot({path: `tests/e2e/shot_session_${step}_${w}.png`}); };   // after the card's rise
 const fits = page => page.evaluate(() => document.documentElement.scrollWidth === document.documentElement.clientWidth);
-// Sing from the last phrase to the end at the exact target pitches (the lesson's end is reached), or a window that stops
-// short of the end.
-const sing = (frame, toEnd) => frame.evaluate(toEnd => {
-  const T = window.Luma.test, d = window.Luma.song().duration, last = window.LUMA_SONG.phrases.at(-1).a;
-  const a = toEnd ? Math.round(last / .02) * .02 : d - 10, b = toEnd ? d : d - 5;
-  T.closeTrace(); T.seek(a); const started = T.fakeSing({a, b}); if (!started) return {error: 'busy'};
-  for (let t = 0; t <= b - a + 1e-9; t += .02) { const ref = window.Luma.targetAt(a + t); T.livePush(ref ? {t: started.when + t, f: 440 * Math.pow(2, (ref.m - 69) / 12), confidence: .95, db: -20, rms: .1, peak: .3} : {t: started.when + t, f: null, confidence: 0, db: -60, rms: 0, peak: 0}); }
-  T.fakeTick(started.when + (b - a)); return T.fakeFinish();
-}, toEnd);
+// Stop whatever the trainer is doing, then sing a window at the exact target pitches through the driven clock. from/to
+// are song seconds, or 'end' for the trainer's singEnd; off: cents off the target for every frame.
+const sing = (frame, from, to, off = 0) => frame.evaluate(async ([from, to, off]) => {
+  const L = window.Luma, T = L.test, d = () => L.diagnostics();
+  if (d().mode !== 'idle' || d().busy) document.getElementById('stopBtn').click();
+  for (let i = 0; i < 100 && (d().mode !== 'idle' || d().busy || d().pending); i++) await new Promise(r => setTimeout(r, 50));
+  const end = L.song().singEnd, a = from === 'end' ? end : from, b = to === 'end' ? end : to;
+  T.closeTrace(); T.seek(a); const st = T.fakeSing({a, b}); if (!st) return {error: 'busy', d: d()};
+  for (let t = 0; t <= b - a + 1e-9; t += .02) { const ref = L.targetAt(a + t); T.livePush(ref ? {t: st.when + t, f: 440 * 2 ** ((ref.m + off / 100 - 69) / 12), confidence: .95, db: -20, rms: .1, peak: .3} : {t: st.when + t, f: null, confidence: 0, db: -60, rms: 0, peak: 0}); }
+  T.fakeTick(st.when + (b - a)); return {...T.fakeFinish(), a, b, end};
+}, [from, to, off]);
+// What a result card shows, and whether it fits: card inside the viewport, no sideways scroll, buttons tall enough and
+// unclipped, chart type no smaller than 11 px.
+const card = page => page.evaluate(() => {
+  const c = document.querySelector('#session .sintro:not(.over) .card'); if (!c) return null;
+  const q = s => c.querySelector(s), r = c.getBoundingClientRect(), H = innerHeight, W = innerWidth;
+  const buttons = [...c.querySelectorAll('button')].filter(b => b.offsetParent).map(b => { const x = b.getBoundingClientRect(); return {id: b.id, text: b.textContent, h: x.height, inside: x.top >= 0 && x.bottom <= H && x.left >= 0 && x.right <= W, cls: b.className}; });
+  return {next: c.dataset.next, eyebrow: q('.eyebrow')?.textContent, head: q('.rhead')?.textContent || null, line: q('.rline')?.textContent || null,
+    cells: Object.fromEntries([...c.querySelectorAll('.rnum')].map(n => [n.dataset.cell, n.querySelector('b').textContent])),
+    columns: [...c.querySelectorAll('.rchart svg path')].map(p => ({today: p.dataset.today === '1', title: p.querySelector('title')?.textContent})),
+    chartFont: Math.min(99, ...[...c.querySelectorAll('.rchart svg text')].map(t => parseFloat(getComputedStyle(t).fontSize))),
+    caption: q('.rchart .cap')?.textContent || null, ring: q('.ring b')?.textContent || null, nextTitle: q('.nwhat strong')?.textContent || null,
+    bottom: r.bottom, fits: r.bottom <= H + .5 && document.documentElement.scrollWidth === document.documentElement.clientWidth, buttons,
+    focus: document.activeElement?.id || document.activeElement?.textContent};
+});
+// The chart's median label against every column and the today value: true when it is clear of them all, or when it is
+// left out and the caption names the dashed line instead.
+const medianClear = page => page.evaluate(() => {
+  const g = document.querySelector('#session .rchart svg'); if (!g) return {clear: true, label: null};
+  const t = g.querySelector('text[data-median]'), box = n => { const b = n.getBBox(); return {x1: b.x, x2: b.x + b.width, y1: b.y, y2: b.y + b.height}; };
+  if (!t) return {clear: /пунктир — медіана/.test(document.querySelector('#session .rchart .cap')?.textContent || ''), label: null};
+  const m = box(t), hit = [...g.querySelectorAll('path'), g.querySelector('text[data-today]')].filter(Boolean).map(box).filter(b => m.x1 < b.x2 && m.x2 > b.x1 && m.y1 < b.y2 && m.y2 > b.y1);
+  return {clear: !hit.length, label: t.textContent, at: [Math.round(m.x1), Math.round(m.y1)], hit};
+});
+// Watches the trainer the card has preloaded: whether a visible frame ever shows its first-visit invitation or its own
+// count-in number between the session's request to sing and the first two seconds of singing.
+const watchHandover = async page => {
+  await page.waitForFunction(() => document.querySelector('#session iframe.sframe')?.contentWindow?.Luma);
+  const f = await (await page.$('#session iframe.sframe')).contentFrame();
+  await f.evaluate(() => { const w = window.__handover = {invite: 0, count: 0, done: false}; let sang = 0;
+    const look = () => { const el = frameElement, seen = el && el.classList.contains('shown') && parseFloat(getComputedStyle(el).opacity) > .1;
+      if (seen && !document.getElementById('invite').hidden) w.invite++;
+      if (seen && !document.getElementById('countdown').hidden) w.count++;
+      if (window.Luma.diagnostics().mode === 'singing' && !sang) sang = performance.now();
+      if (sang && performance.now() - sang > 2000) { w.done = true; return; } requestAnimationFrame(look); };
+    requestAnimationFrame(look); });
+  return f;
+};
+const handover = async f => { await f.waitForFunction(() => window.__handover.done, null, {timeout: 8000}); return f.evaluate(() => window.__handover); };
+const layoutOk = c => c && c.fits && c.buttons.length && c.buttons.every(b => b.h >= 36 && b.inside) && (c.chartFont >= 11);
+const layoutText = c => JSON.stringify(c && {bottom: Math.round(c.bottom), fits: c.fits, chartFont: c.chartFont, buttons: c.buttons.map(b => [b.id, Math.round(b.h), b.inside])});
 
+const browser = await launch([...media, '--autoplay-policy=no-user-gesture-required']);
+const sessions = [];
 try {
   for (const [width, height] of [[390, 844], [1440, 900]]) {
-    const {page, logs} = await open(browser, {width, height}, studio);
+    const {page, logs} = await openStudio(browser, {width, height});
     await page.waitForSelector('#lib .song .cover');
     await page.waitForFunction(() => !document.getElementById('sessionEntry').hidden);
+    sessions.push(await page.evaluate(() => window.LumaActivity.session));
 
     // ── 1 · library covers ────────────────────────────────────────────────────────────────────────────────────
     const cards = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('#lib .song')].map(c => {
       const img = c.querySelector('.cover img');
-      return [c.querySelector('details .meta').textContent.split(' · ').pop(), {src: img ? img.getAttribute('src') : null, natural: img ? img.naturalWidth : 0, ph: c.querySelector('.cover').classList.contains('ph'), letter: c.querySelector('.cover b')?.textContent || null}];
+      return [c.querySelector('details .meta').textContent.split(' · ').pop(), {src: img ? img.getAttribute('src') : null, ph: c.querySelector('.cover').classList.contains('ph'), letter: c.querySelector('.cover b')?.textContent || null}];
     })));
     await page.waitForFunction(() => [...document.querySelectorAll('#lib .cover img')].every(i => i.complete));
     const natural = await page.evaluate(() => document.querySelector('#lib .cover img')?.naturalWidth || 0);
@@ -71,103 +143,259 @@ try {
     assert(entry && entry.y + entry.height <= height && entry.height >= 44, `${width}: «Почати заняття» is in the first viewport ` + JSON.stringify(entry));
     assert((await page.locator('#sessionPath').textContent()).includes('Пісня'), `${width}: the entry shows the path to a song`);
 
-    // ── 3 · start → intro 1 ───────────────────────────────────────────────────────────────────────────────────
-    await page.locator('#sessionStart').click(); await waitIntro(page, 1);
+    // ── 3 · start → the card for lesson 1: no result yet, a 3-2-1 into it ───────────────────────────────────────
+    await page.locator('#sessionStart').click(); await waitCard(page, 'lesson:1');
     assert(await page.locator('#session').isVisible(), `${width}: the session overlay opens`);
     assert(JSON.stringify(await dots(page)) === JSON.stringify(['current', '-', '-', '-']), `${width}: four dots, the first current ` + JSON.stringify(await dots(page)));
-    assert((await page.locator('#session .sintro .title').textContent()) === defs.lessons[0].title, `${width}: intro 1 names lesson 1 from the catalogue`);
-    assert(await page.evaluate(() => document.activeElement.textContent === 'Почати урок'), `${width}: focus lands on «Почати урок»`);
-    assert(await fits(page), `${width}: the intro fits`);
+    let c = await card(page);
+    assert(c.eyebrow === 'Урок 1 з 3' && (await page.locator('#session .sintro .title').textContent()) === defs.lessons[0].title && !c.head && c.ring === '3', `${width}: card 1 names lesson 1, has no result and counts from 3 ` + JSON.stringify({eyebrow: c.eyebrow, ring: c.ring}));
+    assert(c.focus === 'resultNow' && c.buttons[0].text === 'Почати урок', `${width}: focus lands on «Почати урок»`);
+    assert(layoutOk(c), `${width}: card 1 fits ` + layoutText(c));
     await shot(page, 'intro1', width);
 
-    // ── 4 · «Почати урок» → lesson 1 in the frame ────────────────────────────────────────────────────────────
-    await page.locator('#session .sintro .primary').click(); await waitLesson(page, lessonFiles[0]);
-    assert((await frameSrc(page)) === '/song/' + lessonFiles[0], `${width}: the frame holds lesson 1`);
-    await page.waitForTimeout(400);
+    // ── 4 · «Почати урок» → lesson 1 in the frame, singing by itself ─────────────────────────────────────────────
+    let auto = (await msgs(page, 'luma:autostart')).length;
+    await page.locator('#resultNow').click(); await waitSinging(page, lessonFiles[0]);
+    await waitMsg(page, 'luma:autostart', auto);
+    let a = (await msgs(page, 'luma:autostart')).at(-1);
+    assert(a.ok === true && a.file === lessonFiles[0] && (await frameSrc(page)) === '/song/' + lessonFiles[0], `${width}: lesson 1 opens and starts singing with no click ` + JSON.stringify(a));
     await shot(page, 'lesson1', width);
 
-    // ── 5 · an attempt that stops short of the end does not finish the lesson ─────────────────────────────────
+    // ── 5 · passes that stop short of the last note do not finish the lesson ─────────────────────────────────
     let frame = await frameOf(page);
-    const short = await sing(frame, false);
-    await page.waitForTimeout(2000);
-    assert(short && short.id && (await frameSrc(page)) === '/song/' + lessonFiles[0] && !(await page.$('#session .sintro')), `${width}: a part of the lesson does not count as finishing it`);
-
-    // ── 6 · singing to the end finishes it → intro 2 with the result ─────────────────────────────────────────
-    const whole = await sing(frame, true);
-    await waitIntro(page, 2);
-    const result = await page.locator('#session .sintro .result').textContent();
-    assert(result.includes('Урок 1 пройдено') && /\d+ %/.test(result), `${width}: intro 2 reports lesson 1 (${result}; trainer said ${whole.pct} %)`);
-    assert((await dots(page))[0] === 'done' && (await dots(page))[1] === 'current', `${width}: dot 1 done, dot 2 current ` + JSON.stringify(await dots(page)));
-    assert(await page.locator('#session .sintro .secondary', {hasText: 'Ще раз'}).isVisible(), `${width}: «Ще раз» offers lesson 1 again`);
-    await shot(page, 'intro2', width);
-
-    // ── 6b · «Ще раз» then «Пропустити урок» keeps lesson 1 finished ───────────────────────────────────────────
-    await page.locator('#session .sintro .secondary', {hasText: 'Ще раз'}).click(); await waitLesson(page, lessonFiles[0]);
-    assert((await dots(page))[0] === 'current', `${width}: «Ще раз» reopens lesson 1 ` + JSON.stringify(await dots(page)));
-    await page.locator('#sessionSkip').click(); await waitIntro(page, 2);
-    const kept = await page.locator('#session .sintro .result').textContent();
-    assert((await dots(page))[0] === 'done' && kept === result, `${width}: skipping the repeat keeps lesson 1 done (${kept}) ` + JSON.stringify(await dots(page)));
-    assert((await page.locator('#sessionLive').textContent()).startsWith('Повтор уроку 1 пропущено'), `${width}: the live region does not call lesson 1 skipped`);
-
-    // ── 7 · a message that does not come from the lesson frame is ignored ───────────────────────────────────
-    await page.evaluate(file => window.postMessage({type: 'luma:finished', file, match: 99}, location.origin), lessonFiles[1]);
-
-    // ── 8 · the intro opens lesson 2 by itself ──────────────────────────────────────────────────────────────
-    const t0 = Date.now(); await waitLesson(page, lessonFiles[1]);
-    assert(Date.now() - t0 <= 7000, `${width}: lesson 2 opens by itself after the countdown (${Date.now() - t0} ms)`);
-    assert((await dots(page))[1] === 'current', `${width}: the spoofed message did not advance the session`);
-    await page.evaluate(file => window.postMessage({type: 'luma:finished', file, match: 99}, location.origin), lessonFiles[1]);
+    const end = await frame.evaluate(() => ({d: window.Luma.song().duration, e: window.Luma.song().singEnd}));
+    const short = await sing(frame, end.d - 10, end.d - 5);
+    const short2 = await sing(frame, end.e - 6, end.e - 1);
     await page.waitForTimeout(1500);
-    assert((await frameSrc(page)) === '/song/' + lessonFiles[1] && !(await page.$('#session .sintro')), `${width}: a message from Studio itself does not finish lesson 2`);
+    assert(short.id && short2.id && (await frameSrc(page)) === '/song/' + lessonFiles[0] && !(await page.$('#session .sintro')) && !(await msgs(page, 'luma:finished')).length,
+      `${width}: stopping at d − 5 s or 1 s before the last note does not count as finishing the lesson`);
 
-    // ── 9 · skip lesson 2, open lesson 3, skip it → the picker ───────────────────────────────────────────────
-    await page.locator('#sessionSkip').click(); await waitIntro(page, 3);
-    assert(JSON.stringify(await dots(page)) === JSON.stringify(['done', 'skipped', 'current', '-']), `${width}: dot 2 is skipped ` + JSON.stringify(await dots(page)));
-    await page.locator('#session .sintro .primary').click(); await waitLesson(page, lessonFiles[2]);
-    await page.locator('#sessionSkip').click();
-    await page.waitForSelector('#session .spicker');
+    // ── 6 · a spoofed finish from Studio itself is ignored ────────────────────────────────────────────────────
+    await page.evaluate(file => window.postMessage({type: 'luma:finished', file, match: 99}, location.origin), lessonFiles[0]);
+    await page.waitForTimeout(600);
+    assert(!(await page.$('#session .sintro')), `${width}: a message that does not come from the lesson frame is ignored`);
+
+    // ── 7 · the whole lesson to the last note → result without history ───────────────────────────────────────
+    const whole = await sing(frame, 0, 'end');
+    await waitCard(page, 'lesson:2');
+    const fin = await lastFinish(page);
+    c = await card(page);
+    assert(whole.b === end.e && fin.result && fin.result.full && fin.result.prev === 0 && fin.result.score === whole.pct, `${width}: singing to singEnd finishes the lesson, saved and scored as a full pass ` + JSON.stringify(fin.result));
+    assert(c.eyebrow === 'Урок 1 з 3 · Новачок · пройдено' && c.head === 'Перший прохід!' && /Історії ще немає/.test(c.line), `${width}: first attempt: «Перший прохід!» and no history yet ` + JSON.stringify({eyebrow: c.eyebrow, head: c.head, line: c.line}));
+    assert(c.cells.score === whole.pct + ' %' && !('median' in c.cells) && !('delta' in c.cells), `${width}: a score cell and no median or delta ` + JSON.stringify(c.cells));
+    assert(c.columns.length === 1 && c.columns[0].today && /з’являться/.test(c.caption), `${width}: a chart with one column, today ` + JSON.stringify({columns: c.columns, caption: c.caption}));
+    assert(c.focus === 'resultNow' && c.nextTitle === defs.lessons[1].title, `${width}: «Почати зараз» has the focus and «Далі» names lesson 2`);
+    assert(JSON.stringify(await dots(page)) === JSON.stringify(['done', 'current', '-', '-']), `${width}: dot 1 done, dot 2 current ` + JSON.stringify(await dots(page)));
+    assert(layoutOk(c), `${width}: the result card fits ` + layoutText(c));
+    assert(fin.card, `${width}: the card is there at once after the finish`);
+    await shot(page, 'result_first', width);
+
+    // ── 8 · «Повторити урок 1»: the same lesson, singing again ─────────────────────────────────────────────────
+    auto = (await msgs(page, 'luma:autostart')).length;
+    await page.evaluate(() => document.addEventListener('click', e => { if (e.target.id === 'resultRepeat') requestAnimationFrame(() => { window.__repeat = {now: document.getElementById('resultNow')?.textContent, again: document.getElementById('resultRepeat')?.textContent, next: !!document.querySelector('#session .nsec.off')}; }); }, {once: true}));
+    await page.locator('#resultRepeat').click(); await waitSinging(page, lessonFiles[0], 6000);
+    await waitMsg(page, 'luma:autostart', auto);
+    assert((await msgs(page, 'luma:autostart')).at(-1).ok && (await dots(page))[0] === 'current', `${width}: «Повторити урок 1» reopens lesson 1 and it sings within 6 s`);
+    const rep = await page.evaluate(() => window.__repeat);
+    assert(rep && rep.now === 'Почати зараз' && rep.again === 'Завантажуємо…' && rep.next, `${width}: the first frame after «Повторити» shows the loading state on that button and steps the «Далі» row back ` + JSON.stringify(rep));
+
+    // ── 9 · result with history: three earlier days plus the first pass; the median is theirs ──────────────────
+    frame = await frameOf(page);
+    const seeded = [60, 70, 90];
+    await frame.evaluate(async vals => {
+      const T = window.Luma.test, tot = T.history.totals().song, day = k => new Date(Date.now() - k * 86400e3).toISOString();
+      await T.history.seedMany(vals.map((m, k) => ({match: m * 100, target: tot, songTarget: tot, startedAt: day(vals.length - k)})));
+    }, seeded);
+    const again = await sing(frame, 0, 'end');
+    await waitCard(page, 'lesson:2');
+    const all = [...seeded, whole.pct].sort((x, y) => x - y), median = Math.round((all[1] + all[2]) / 2), d = again.pct - median;
+    c = await card(page);
+    assert(c.cells.median === median + ' %' && c.cells.delta === (d > 0 ? '+' + d : d < 0 ? '−' + -d : '0'), `${width}: the median is the true median of the earlier full passes (${median} %), delta ${d} ` + JSON.stringify(c.cells));
+    assert(c.head === (d >= 2 ? 'Чудово!' : d <= -2 ? 'Готово' : 'Готово!'), `${width}: the headline follows the delta: ${c.head}`);
+    assert(c.columns.length === 4 && c.columns.at(-1).today && c.columns.slice(0, 3).every(x => !x.today), `${width}: four columns, the last one today ` + JSON.stringify(c.columns));
+    assert(/^Збіг повних проходів по днях · (Легко|Звично|Точно) · Ноти · 1×( · пунктир — медіана)?$/.test(c.caption), `${width}: the caption names the ruler: ${c.caption}`);
+    const mc = await medianClear(page);
+    assert(mc.clear, `${width}: the median label is clear of the columns and today's value ` + JSON.stringify(mc));
+    // The same chart drawn at this card's width for the layouts that used to collide: five earlier days with a tall second
+    // column, today alone at the median, and every column crossing the line (no clear place: the caption names the line).
+    const charts = await page.evaluate(() => {
+      const host = document.querySelector('#session .rchart'), day = k => new Date(Date.now() - k * 86400e3).toISOString().slice(0, 10);
+      const cases = {five: {days: [70, 88, 75, 79, 82].map((value, k) => ({day: day(5 - k), value, n: 1})), score: 85, median: 79, prev: 5},
+        solo: {days: [], score: 100, median: 100, prev: 1}, crossed: {days: [95, 95, 95, 95, 95].map((value, k) => ({day: day(5 - k), value, n: 1})), score: 95, median: 60, prev: 5}};
+      return Object.fromEntries(Object.entries(cases).map(([k, r]) => {
+        const box = document.createElement('div'); box.className = 'rchart'; host.after(box);
+        const drawn = drawChart(box, {...r, full: true}), g = box.querySelector('svg'), t = g.querySelector('text[data-median]');
+        const bb = n => { const b = n.getBBox(); return {x1: b.x, x2: b.x + b.width, y1: b.y, y2: b.y + b.height}; };
+        const hit = t ? [...g.querySelectorAll('path'), g.querySelector('text[data-today]')].map(bb).filter(o => { const m = bb(t); return m.x1 < o.x2 && m.x2 > o.x1 && m.y1 < o.y2 && m.y2 > o.y1; }).length : 0;
+        box.remove(); return [k, {named: drawn.named, label: !!t, hit, inside: t ? bb(t).y1 >= 0 && bb(t).x2 <= +g.getAttribute('width') : true}];
+      }));
+    });
+    assert(charts.five.label && !charts.five.hit && charts.five.inside && charts.solo.label && !charts.solo.hit && charts.solo.inside && !charts.crossed.label && !charts.crossed.named,
+      `${width}: the median label finds a clear place or is left out ` + JSON.stringify(charts));
+    assert(layoutOk(c), `${width}: the card with history fits ` + layoutText(c));
+    await shot(page, 'result_history', width);
+
+    // ── 10 · skip during the countdown, then × during the next one ───────────────────────────────────────────
+    await page.locator('#sessionSkip').click(); await waitCard(page, 'lesson:3');
+    c = await card(page);
+    assert(!c.head && JSON.stringify(await dots(page)) === JSON.stringify(['done', 'skipped', 'current', '-']), `${width}: «Пропустити урок» on the result marks lesson 2 skipped and shows lesson 3 without a result ` + JSON.stringify(await dots(page)));
+    auto = (await msgs(page, 'luma:autostart')).length;
+    await page.locator('#sessionClose').click(); await page.waitForFunction(() => document.getElementById('session').hidden);
+    await page.waitForTimeout(4000);
+    assert(!(await page.$('#session iframe')) && (await msgs(page, 'luma:autostart')).length === auto, `${width}: × during the countdown leaves: no frame and no auto-start afterwards`);
+    assert(await page.evaluate(() => document.activeElement.id === 'sessionStart' && !document.body.classList.contains('locked')), `${width}: × returns focus to «Почати заняття»`);
+
+    // ── 11 · the countdown runs out: 3, 2, 1, and lesson 1 opens and sings by itself ───────────────────────────
+    await page.locator('#sessionStart').click(); await waitCard(page, 'lesson:1');
+    const ring = [await page.locator('#session .ring b').textContent()]; const r0 = Date.now();
+    let watch = await watchHandover(page);
+    await page.waitForTimeout(1100 - (Date.now() - r0)); ring.push(await page.locator('#session .ring b').textContent());
+    await page.waitForTimeout(2100 - (Date.now() - r0)); ring.push(await page.locator('#session .ring b').textContent());
+    auto = (await msgs(page, 'luma:autostart')).length;
+    await waitSinging(page, lessonFiles[0], 6000); await waitMsg(page, 'luma:autostart', auto);
+    assert(JSON.stringify(ring) === '["3","2","1"]' && Date.now() - r0 <= 6000, `${width}: the ring counts 3, 2, 1 and the lesson sings ${Date.now() - r0} ms after the card ` + JSON.stringify(ring));
+    let ho = await handover(watch);
+    assert(!ho.invite && !ho.count, `${width}: after the ring's «1» the lesson shows no invitation and no second count-in ` + JSON.stringify(ho));
+
+    // ── 12 · the browser refuses sound: a visible start button over the trainer, and a real click starts it ─────
+    await page.locator('#sessionSkip').click(); await waitCard(page, 'lesson:2');
+    await page.waitForFunction(() => document.querySelector('#session iframe.sframe')?.contentWindow?.Luma);
+    await page.evaluate(() => { document.querySelector('#session iframe.sframe').contentWindow.Luma.test.autostartBlock = 'audio'; });
+    auto = (await msgs(page, 'luma:autostart')).length;
+    await page.locator('#resultNow').click(); await waitMsg(page, 'luma:autostart', auto);
+    await page.waitForSelector('#autostartBtn');
+    const fb = await page.evaluate(() => { const b = document.getElementById('autostartBtn').getBoundingClientRect(); return {h: b.height, inside: b.top >= 0 && b.bottom <= innerHeight && b.left >= 0 && b.right <= innerWidth, title: document.querySelector('#autostartCard .title').textContent, text: document.querySelector('#autostartCard .goal').textContent}; });
+    assert(fb.h >= 44 && fb.inside && fb.title === 'Урок 2 готовий' && /Браузер не дав/.test(fb.text), `${width}: refused sound shows «Почати співати» inside the viewport ` + JSON.stringify(fb));
+    assert(await fits(page), `${width}: the start button card fits`);
+    await shot(page, 'result_fallback', width);
+    auto = (await msgs(page, 'luma:autostart')).length;
+    await page.locator('#autostartBtn').click(); await waitMsg(page, 'luma:autostart', auto); await waitSinging(page, lessonFiles[1], 6000);
+    assert((await msgs(page, 'luma:autostart')).at(-1).ok && !(await page.$('#autostartCard')), `${width}: a real click on it starts singing and the card goes`);
+
+    // ── 13 · the last lesson finished → the result leads to the picker ─────────────────────────────────────────
+    await page.locator('#sessionSkip').click(); await waitCard(page, 'lesson:3');
+    await page.locator('#resultNow').click(); await waitSinging(page, lessonFiles[2]);
+    await sing(await frameOf(page), 0, 'end'); await waitCard(page, 'picker');
+    c = await card(page);
+    assert(c.buttons[0].id === 'resultNow' && c.buttons[0].text === 'До пісень' && c.nextTitle === 'Вибір пісні' && c.head === 'Перший прохід!', `${width}: after lesson 3 the card leads to the song picker ` + JSON.stringify(c.buttons.map(b => b.text)));
+    assert(JSON.stringify(await dots(page)) === JSON.stringify(['skipped', 'skipped', 'done', 'current']) && await page.locator('#sessionSkip').isHidden(), `${width}: the bar stands on the song dot ` + JSON.stringify(await dots(page)));
+    assert(layoutOk(c), `${width}: the last-lesson card fits ` + layoutText(c));
+    await shot(page, 'result_lastlesson', width);
+    await page.waitForSelector('#session .spicker', {timeout: 6000});
     const picker = await page.evaluate(() => ({summary: [...document.querySelectorAll('#session .summary .chip')].map(c => c.textContent),
-      cards: [...document.querySelectorAll('#session .spicker .song')].map(c => c.querySelector('.title').textContent),
-      cover: document.querySelector('#session .spicker .cover img')?.getAttribute('src') || null, frame: !!document.querySelector('#session iframe'),
-      skip: document.getElementById('sessionSkip').hidden}));
-    assert(picker.summary.length === 3 && /✓ \d+ %/.test(picker.summary[0]) && /пропущено/.test(picker.summary[1]) && /пропущено/.test(picker.summary[2]), `${width}: the picker sums up the run ` + JSON.stringify(picker.summary));
-    assert(picker.cards.length === 2 && !picker.cards.some(t => defs.lessons.some(l => l.title === t)), `${width}: the picker lists songs only ` + JSON.stringify(picker.cards));
-    assert(/^\/cover\/Luma_Cover_Fixture\.html\?v=/.test(picker.cover || ''), `${width}: the picker shows the cover`);
-    assert(!picker.frame && picker.skip && JSON.stringify(await dots(page)) === JSON.stringify(['done', 'skipped', 'skipped', 'current']), `${width}: no frame and no skip button on the picker; the last dot is current`);
+      cards: [...document.querySelectorAll('#session .spicker .song')].length, frame: !!document.querySelector('#session iframe'), skip: document.getElementById('sessionSkip').hidden,
+      order: S.songs.map(s => s.name)}));
+    assert(/пропущено/.test(picker.summary[0]) && /пропущено/.test(picker.summary[1]) && /✓ \d+ %/.test(picker.summary[2]), `${width}: the picker sums up the run ` + JSON.stringify(picker.summary));
+    assert(picker.cards === 2 && JSON.stringify(picker.order) === JSON.stringify(['Luma_Cover_Fixture.html', 'Luma_No_Cover.html']) && !picker.frame && picker.skip, `${width}: the picker lists the two songs in library order, no frame ` + JSON.stringify(picker.order));
     assert(await fits(page), `${width}: the picker fits`);
-    await page.waitForTimeout(400);
     await shot(page, 'picker', width);
 
-    // ── 10 · a song from the picker opens in the frame; «До пісень» comes back ──────────────────────────────
-    const fixtureCard = page.locator('#session .spicker .song', {has: page.locator('img[src^="/cover/Luma_Cover_Fixture.html"]')});
-    await fixtureCard.locator('button.primary').click(); await waitLesson(page, 'Luma_Cover_Fixture.html');
-    assert((await page.locator('#sessionSkip').textContent()) === 'До пісень', `${width}: the bar offers «До пісень» while a song is open`);
+    // ── 14 · songs: the picker's «Співати» sings at once; the result counts into the next song ───────────────────
+    auto = (await msgs(page, 'luma:autostart')).length;
+    await page.locator('#session .spicker .song button.primary').first().click(); await waitSinging(page, picker.order[0]);
+    await waitMsg(page, 'luma:autostart', auto);
+    assert((await msgs(page, 'luma:autostart')).at(-1).ok && (await page.locator('#sessionSkip').textContent()) === 'До пісень', `${width}: a song picked in the list starts singing; the bar offers «До пісень»`);
     await shot(page, 'song', width);
-    await page.locator('#sessionSkip').click(); await page.waitForSelector('#session .spicker');
-    assert(!(await page.$('#session iframe')), `${width}: «До пісень» closes the song and returns to the picker`);
+    await sing(await frameOf(page), 0, 'end'); await waitCard(page, 'song');
+    c = await card(page);
+    assert(c.eyebrow === 'Пісня · «Demo» · завершено' && c.head === 'Перший прохід!' && c.ring === '3' && c.buttons.map(b => b.id).join() === 'resultNow,resultRepeat,resultSongs', `${width}: the song result counts into the next song, with «Повторити» and «До пісень» ` + JSON.stringify(c.buttons.map(b => b.id)));
+    assert(layoutOk(c), `${width}: the song card fits ` + layoutText(c));
+    assert(await page.locator('#sessionSkip').isHidden() && await page.locator('#session button:visible', {hasText: 'До пісень'}).count() === 1, `${width}: the song result offers «До пісень» once`);
+    await shot(page, 'result_song', width);
+    watch = await watchHandover(page);
+    auto = (await msgs(page, 'luma:autostart')).length;
+    await waitSinging(page, picker.order[1], 7000); await waitMsg(page, 'luma:autostart', auto);
+    assert((await frameSrc(page)) === '/song/' + picker.order[1], `${width}: after 3 s the next song in picker order is in the frame and singing`);
+    ho = await handover(watch);
+    assert(!ho.invite && !ho.count, `${width}: the next song starts with no invitation and no second count-in ` + JSON.stringify(ho));
+    await sing(await frameOf(page), 0, 'end'); await waitCard(page, 'none');
+    c = await card(page);
+    assert(!c.ring && c.buttons[0].id === 'resultSongs' && /primary/.test(c.buttons[0].cls) && !c.buttons.some(b => b.id === 'resultNow'), `${width}: the last song: no countdown, «До пісень» is the primary ` + JSON.stringify(c.buttons));
+    assert(layoutOk(c), `${width}: the last-song card fits ` + layoutText(c));
+    await shot(page, 'result_lastsong', width);
+    assert(await page.locator('#sessionSkip').isHidden() && await page.locator('#session button:visible', {hasText: 'До пісень'}).count() === 1, `${width}: the last-song result offers «До пісень» once`);
+    await page.waitForTimeout(3500);
+    assert((await cardNext(page)) === 'none' && !(await page.$('#session iframe')), `${width}: nothing starts by itself after the last song`);
+    // «Повторити» on it: a second pass the same day, so today is the only column and stands at the median
+    await page.locator('#resultRepeat').click(); await waitSinging(page, picker.order[1], 6000);
+    await sing(await frameOf(page), 0, 'end'); await waitCard(page, 'none');
+    c = await card(page);
+    const solo = await medianClear(page);
+    assert(c.columns.length === 1 && c.columns[0].today && c.cells.median && solo.clear, `${width}: today alone at the median: the median label is clear of today's value and column ` + JSON.stringify({cells: c.cells, solo}));
+    await shot(page, 'result_lastsong_repeat', width);
+    await page.locator('#resultSongs').click(); await page.waitForSelector('#session .spicker');
+    assert(!(await page.$('#session iframe')), `${width}: «До пісень» returns to the picker`);
 
-    // ── 11 · leaving: × and the browser's Back button ──────────────────────────────────────────────────────
-    await page.locator('#sessionClose').click();
-    await page.waitForFunction(() => document.getElementById('session').hidden);
-    assert(await page.evaluate(() => document.activeElement.id === 'sessionStart' && !document.body.classList.contains('locked')), `${width}: × closes the session and returns focus to «Почати заняття»`);
-    await page.locator('#sessionStart').click(); await waitIntro(page, 1);
+    // ── 15 · lives mode: a rewind is no finish ─────────────────────────────────────────────────────────────────
+    if (width > 1000) {
+      await page.evaluate(() => { const k = 'luma.trainer.settings', v = JSON.parse(localStorage.getItem(k) || '{}'); v.lives = true; v.livesCount = 3; localStorage.setItem(k, JSON.stringify(v)); });
+      const finished = (await msgs(page, 'luma:finished')).length;
+      await page.locator('#session .spicker .song button.primary').first().click(); await waitSinging(page, picker.order[0]);
+      frame = await frameOf(page);
+      await frame.evaluate(() => { const T = window.Luma.test; window.__voice = setInterval(() => { const s = T.state(); if (s.mode !== 'singing') return; const ref = window.Luma.targetAt(s.time);
+        T.livePush(ref ? {t: T.ctxTime(), f: 440 * 2 ** ((ref.m + 1.5 - 69) / 12), confidence: .95, db: -20, rms: .1, peak: .3} : {t: T.ctxTime(), f: null, confidence: 0, db: -70, rms: 0, peak: 0}); }, 20); });
+      await frame.waitForFunction(() => window.Luma.test.state().lives.last, null, {timeout: 20000});
+      await page.waitForTimeout(1500);
+      assert(!(await page.$('#session .sintro')) && (await msgs(page, 'luma:finished')).length === finished && (await frameSrc(page)) === '/song/' + picker.order[0], `${width}: losing the last life rewinds inside the trainer and shows no result card`);
+      await frame.evaluate(() => { clearInterval(window.__voice); document.getElementById('stopBtn').click(); });
+      await page.evaluate(() => { const k = 'luma.trainer.settings', v = JSON.parse(localStorage.getItem(k) || '{}'); v.lives = false; localStorage.setItem(k, JSON.stringify(v)); });
+      await page.locator('#sessionSkip').click(); await page.waitForSelector('#session .spicker');
+    }
+
+    // ── 16 · leaving: Back ─────────────────────────────────────────────────────────────────────────────────────
     await page.goBack(); await page.waitForFunction(() => document.getElementById('session').hidden);
     assert(page.url() === studio, `${width}: Back closes the session and stays on Studio (${page.url()})`);
 
-    // ── 12 · reduced motion: no animation, the next card at once ─────────────────────────────────────────────
+    // ── 17 · reduced motion: no animation, the card at once, and the countdown still takes 3 s ─────────────────
     await page.emulateMedia({reducedMotion: 'reduce'});
-    await page.locator('#sessionStart').click(); await waitIntro(page, 1);
-    assert((await page.evaluate(() => getComputedStyle(document.querySelector('#session .sintro .card')).animationName)) === 'none', `${width}: reduced motion: the intro card does not animate`);
-    const t1 = Date.now(); await page.locator('#sessionSkip').click(); await waitIntro(page, 2);
+    await page.locator('#sessionStart').click(); await waitCard(page, 'lesson:1');
+    assert((await page.evaluate(() => getComputedStyle(document.querySelector('#session .sintro .card')).animationName)) === 'none', `${width}: reduced motion: the card does not animate`);
+    const t1 = Date.now(); await page.locator('#sessionSkip').click(); await waitCard(page, 'lesson:2');
     assert(Date.now() - t1 <= 300, `${width}: reduced motion: the next card is there at once (${Date.now() - t1} ms)`);
+    const t2 = Date.now(); await waitSinging(page, lessonFiles[1], 8000);
+    const took = Date.now() - t2;
+    await sing(await frameOf(page), 0, 'end'); await waitCard(page, 'lesson:3');
+    const f2 = await lastFinish(page);
+    assert(took >= 2800 && f2.card, `${width}: reduced motion: the countdown still takes 3 s (${took} ms to singing) and the result card is there within 50 ms of the finish`);
     await page.locator('#sessionClose').click(); await page.waitForFunction(() => document.getElementById('session').hidden);
     await page.emulateMedia({reducedMotion: 'no-preference'});
 
-    // ── 13 · clean console in Studio and in every frame it opened (Playwright reports frame messages on the page) ───────────────────────────────────────────
+    // ── 18 · clean console in Studio and in every frame it opened (Playwright reports frame messages on the page) ─
+    await page.evaluate(() => window.LumaActivity.flush());
     assert(logs.length === 0, `${width}: console clean ` + JSON.stringify(logs.slice(0, 5)));
     await page.close();
   }
+
+  // ── 19 · activity: the session's result, next and auto-start events reach the log ─────────────────────────────
+  const folder = join(library, 'logs', 'activity');
+  let events = [];
+  for (let i = 0; i < 30; i++) {
+    events = existsSync(folder) ? readdirSync(folder).filter(f => f.endsWith('.jsonl')).flatMap(f => readFileSync(join(folder, f), 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l))).filter(e => sessions.includes(e.session)) : [];
+    if (['session_result', 'session_next', 'session_autostart'].every(t => events.some(e => e.type === t))) break;
+    await new Promise(r => setTimeout(r, 200));
+  }
+  const res = events.find(e => e.type === 'session_result' && e.data.kind === 'lesson' && e.data.prev > 0), nx = events.filter(e => e.type === 'session_next').map(e => e.data.how), au = events.find(e => e.type === 'session_autostart' && e.data.ok);
+  assert(res && res.page === 'studio' && typeof res.data.median === 'number' && typeof res.data.delta === 'number' && res.data.next === lessonFiles[1], 'the activity log has session_result with score, median, delta and the next step ' + JSON.stringify(res?.data));
+  assert(['countdown', 'now', 'repeat', 'skip', 'songs', 'picker'].every(h => nx.includes(h)), 'session_next records every way on ' + JSON.stringify([...new Set(nx)]));
+  assert(au && typeof au.data.ms === 'number' && events.some(e => e.type === 'session_autostart' && !e.data.ok && e.data.reason === 'audio'), 'session_autostart records the answer, the refusal and the time ' + JSON.stringify(au?.data));
+  assert(events.some(e => e.type === 'click' && e.data.id === 'autostartBtn') && events.some(e => e.type === 'click' && e.data.id === 'resultRepeat'), 'clicks on the new buttons are logged by id');
 } finally {
   await browser.close();
+}
+
+// ── 20 · the real autoplay policy: one real click on «Почати заняття», then no input at all ─────────────────────────
+// No autoplay flag. Nothing is evaluated in the page (Playwright marks page.evaluate as a user gesture); the answer comes
+// from the collector's console line. The countdown opens lesson 1 three seconds after the click, in a frame that did not
+// exist when it happened.
+try {
+  const strict = await launch(media), {page, logs} = await openStudio(strict, {width: 1440, height: 900});
+  const lines = []; page.on('console', m => { if (m.text().startsWith('luma-msg ')) lines.push(JSON.parse(m.text().slice(9))); });
+  await page.locator('#sessionStart:visible').click();
+  const deadline = Date.now() + 15000; while (Date.now() < deadline && !lines.some(l => l.type === 'luma:autostart')) await page.waitForTimeout(200);
+  const ans = lines.find(l => l.type === 'luma:autostart');
+  assert(ans && ans.ok === true && ans.file === lessonFiles[0], 'real policy: after one click on «Почати заняття» the lesson the countdown opens starts by itself ' + JSON.stringify(ans));
+  assert(!logs.length, 'real policy: console clean ' + JSON.stringify(logs.slice(0, 3)));
+  await strict.close();
+} finally {
   cleanup();
 }

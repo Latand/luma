@@ -37,7 +37,8 @@ of your voice, no server after the file is built.
   constants in [docs/SCORING.md](docs/SCORING.md#lives-mode-режим-життів).
 - **Built-in lessons.** Three warm-ups with exact synthetic targets; progress on them is kept per exercise, with one lamp
   per difficulty level, because one exercise is one skill sung through nine keys.
-- **Loop and seek.** Whole song by default; draw an A–B region under the waveform or press A / B while listening, loop it
+- **Loop and seek.** Whole song by default, and a sung pass of it stops half a second after the last note or lyric line
+  (listening still plays the outro); draw an A–B region under the waveform or press A / B while listening, loop it
   without gaps. Seek during playback and the music picks up from there.
 - **Vocal on/off.** One button (V) mutes the original vocal stem so you hear only the backing and yourself.
 - Two speeds (1× and 0.8× with pitch preserved), vocal octave shift, mix balance, note editor, fragment verification.
@@ -73,8 +74,10 @@ A song without a picture (and an imported trainer, which has no audio file) gets
 the ignored `songs/` directory.
 
 **«Заняття».** «Почати заняття» at the top of Studio plays the three built-in lessons one after another, then opens the song
-picker. Each lesson runs in a frame inside Studio: singing it through to the end moves on by itself, «Пропустити урок» moves
-on at once, × or the browser's Back button leaves. Details in [docs/LESSONS.md](docs/LESSONS.md#заняття-three-lessons-in-a-row).
+picker. Each lesson or song runs in a frame inside Studio and starts singing by itself. Sung to its last note, it shows a
+result card: today's score against the median of your earlier full passes, and a column per day. Then a 3-2-1 opens the
+next lesson, or the next song in the picker's order. «Повторити» sings it again, «Пропустити урок» moves on at once, × or
+the browser's Back button leaves. Details in [docs/LESSONS.md](docs/LESSONS.md#заняття-three-lessons-in-a-row).
 
 **Hardware.** A 5-minute song takes about 4 minutes on an RTX 3060 (Demucs ≈ 50 s, pYIN ≈ 1 min, CREPE ≈ 30 s). CPU works
 and takes considerably longer. Python 3.11, FFmpeg and a few GB of RAM are required; `requirements.txt` pins PyTorch 2.10.
@@ -105,8 +108,12 @@ seek, vocal toggle, an attempt with the recording switch off and the same with i
 `history.mjs` builds a practice history without a microphone and checks that it survives a reload and a rebuilt trainer,
 that a stored trace re-scores to the same numbers, that records stay inside one ruler, and that export and import
 round-trip. `lives.mjs` sings a synthetic voice through lives mode: a short miss costs nothing, a wrong passage loses lives at the cooldown's pace, and losing the last one rewinds, saves the attempt and refills. `progress.mjs` checks the Прогрес tab: trend, weak phrases, the record shadow, the day streak, lesson lamps,
-and the 390 px layout. `session.mjs` drives «Заняття» in Studio at 390 px and 1440 px (finish, skip, the song picker,
-leaving, reduced motion) and checks covers against an ffmpeg-made fixture. Every suite requires a clean console. Set `LUMA_BROWSER=/path/to/chrome` to use a specific
+and the 390 px layout. `finish.mjs` sings the demo and lesson 1 through the real transport: the pass stops half a second
+after the last note, is stored once and scores the same, the next pass and a Listen after it start from the top, and listening and a fragment
+still run to the end. `session.mjs` drives «Заняття» in Studio at 390 px and 1440 px (the result card with and without
+history, the 3-2-1 and auto-start, «Повторити», skip and close during the countdown, the start button when sound is
+refused, songs in picker order, lives mode, the activity events, the real autoplay policy after one click, leaving,
+reduced motion) and checks covers against an ffmpeg-made fixture. Every suite requires a clean console. Set `LUMA_BROWSER=/path/to/chrome` to use a specific
 Chromium build.
 
 ## Layout

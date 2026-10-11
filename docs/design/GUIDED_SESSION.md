@@ -1,5 +1,8 @@
 # Guided session (three lessons in a row) and album covers — design
 
+> Superseded in part (2026-10-11): the finish rule, the intro card timing and the song step are now in
+> [SESSION_FLOW_RESULTS.md](SESSION_FLOW_RESULTS.md).
+
 ## Originating requirement
 
 Operator requirement, 2026-10-07, spoken in Russian, quoted verbatim from the pinned task:

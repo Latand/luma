@@ -74,33 +74,47 @@ simply lists the lessons as ordinary library entries.
 ## Заняття: three lessons in a row
 
 «Почати заняття» at the top of Studio starts a session: lesson 1 → lesson 2 → lesson 3, in catalogue order, then the song
-picker. The design and the alternatives it was chosen over are in [design/GUIDED_SESSION.md](design/GUIDED_SESSION.md).
+picker and songs one after another. The design is in [design/GUIDED_SESSION.md](design/GUIDED_SESSION.md); the finish
+rule, the result card, the 3-2-1 and the songs step are in [design/SESSION_FLOW_RESULTS.md](design/SESSION_FLOW_RESULTS.md).
 
-- **Where it runs.** Studio opens a full-screen overlay and loads each lesson trainer in a same-origin frame, so the
-  microphone permission and the practice history are the same as when the trainer opens in its own tab.
-- **Intro cards.** Before each lesson a card names it, its level and length, and after a finished lesson the result
-  («✓ Урок 1 пройдено · збіг 78 %») with «Ще раз». The next trainer loads behind the card and opens by itself after 5 s;
-  «Почати урок» opens it at once. Singing still starts with the trainer's own «Співати».
-- **Finished.** A lesson counts as finished when a sung attempt runs to the end of the lesson: the attempt ends on its own
-  (not stopped) within 0.25 s of the lesson's length. A stopped attempt, a loop pass, listening or a selected fragment
-  that ends before the lesson's end does not count; an attempt started midway, or a fragment that ends where the lesson
-  ends, does. The trainer reports it with
-  `postMessage({type:'luma:finished', file, match})` to the Studio page that embeds it (`tellHost` in `app/app.js`); a
-  trainer opened on its own posts nothing. Studio accepts the message only from the current lesson's frame.
-- **Skip and leave.** «Пропустити урок» works on an intro and during a lesson; it removes the frame, which stops sound and
-  frees the microphone (an attempt in progress is dropped; finished ones are already in the history). Skipping a lesson
-  reopened with «Ще раз» keeps its earlier result. × «Завершити» and
-  the browser's Back button leave the session from any step.
-- **Song picker.** After the last lesson: the run summary («✓ 78 %» or «пропущено» per lesson) and the library with
-  covers. «Співати» opens a song in the same frame; «До пісень» in the bar returns to the picker.
-- **Motion.** The overlay fades in, cards rise in, the trainer fades in over the card, the current dot slides along.
-  With `prefers-reduced-motion: reduce` the screens swap at once; the 5 s countdown and the 1.2 s hold after a finish
-  (so the trainer's own result shows first) are timings and stay.
+- **Where it runs.** Studio opens a full-screen overlay and loads each trainer in a same-origin frame, so the microphone
+  permission and the practice history are the same as when the trainer opens in its own tab.
+- **Finished.** Every trainer, standalone too, ends a sung pass over the whole song 0.5 s after the last thing to sing
+  (the latest note or lyric line, `singEnd()` in `app/app.js`); the outro and the silence after it are not recorded.
+  Before, a pass ran to the end of the audio: 3–5 s of closing rest and silence on a lesson, up to 52 s of outro on a
+  song. Nothing is scored after the last note, so the score and the history are the same. A lesson or song counts as
+  finished when a sung attempt runs to that end on its own (not stopped), within 0.25 s. A stopped attempt, a lives-mode
+  rewind, listening, or a fragment that ends earlier does not count; an attempt started midway does.
+- **Result card.** After a finish the trainer posts
+  `{type:'luma:finished', file, match, result}` once the attempt is saved (`tellHost`); `result` holds today's score, the
+  median of the earlier full passes under the same level, view and speed, how many there were, and up to six earlier
+  days. Studio shows «Чудово!» (two points or more above the median), «Готово!» (level with it), «Готово» (below, with
+  the reason the median is fair), or «Перший прохід!»; today, the median and the difference; and a column per day with
+  today highlighted and the median as a dashed line. A trainer opened on its own posts nothing.
+- **3-2-1.** Under the result, «Далі» names the next lesson, the next song, or the picker, and counts 3-2-1 on a ring.
+  The next trainer loads behind the card; at 0 (or on «Почати зараз») it opens and starts singing by itself, after a
+  0.6 s lead-in with no number of its own: the ring was the count-in. «Повторити» runs the same lesson or song again, only when pressed. Lesson 1 gets the same card without
+  a result.
+- **Auto-start.** Studio posts `{type:'luma:sing', counted}` to the frame (`counted` when a card's 3-2-1 led there), and the trainer answers
+  `{type:'luma:autostart', ok, reason}`. The click on «Почати заняття» lets later frames of the tab play sound in Chromium
+  and Chrome. If the browser still refuses sound (`audio`) or the microphone (`mic`), a card over the trainer offers
+  «Почати співати»; its click starts the attempt.
+- **Skip and leave.** «Пропустити урок» works on a card and during a lesson; it removes the frame, which stops sound and
+  frees the microphone (an attempt in progress is dropped; finished ones are already in the history). Skipping a repeat
+  keeps the lesson's earlier result. × «Завершити» and the browser's Back button leave the session from any step, the
+  countdown included.
+- **Songs.** After the last lesson the card leads to the picker: the run summary and the library with covers. «Співати»
+  on a card opens the song and starts singing. After a song the result card counts into the next song in the picker's
+  order (taken when the picker opened); after the last one there is no countdown and «До пісень» is the primary.
+  «До пісень» in the bar or on the card returns to the picker.
+- **Motion.** The overlay fades in, cards rise in, the trainer fades in over the card, the ring empties, the current dot
+  slides along. With `prefers-reduced-motion: reduce` the screens swap at once; the 3 s countdown is a timing and stays.
 - **Memory.** The session lives in the page only; a reload returns to the library.
 
-A Studio started before this change serves lesson trainers that predate `tellHost`; `studio/luma-studio.sh` re-wraps them
-with the current app on its next start. Until then a lesson in a session can still be skipped, it just never reports a
-finish.
+A Studio started before this change serves trainers built with the old app: `studio/luma-studio.sh` re-wraps the lessons
+on its next start, and song trainers are rebuilt with `studio/build_html.py --rebuild songs/Luma_*.html`. An old trainer
+runs to the end of its audio, does not answer `luma:sing` (it opens and waits for its own «Співати», as before), and
+reports only its match, which the card shows alone.
 
 ## Known gaps
 
