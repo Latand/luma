@@ -185,13 +185,18 @@ try {
     assert(await page.isHidden('#latencyHint'), 'hint: not again the same day after another attempt');
     assert(logs.length === 0, 'hint: clean console ' + logs.join(' | '));
     await page.context().close(); }
-  { const {page} = await fresh();
+  // «Перевірити» lands on the whole result with its Apply button in sight, at every width.
+  for (const vp of [phone, {width: 1000, height: 700}, desk]) { const {page} = await fresh(mainUrl, vp), w = vp.width;
     await seed(page, takes(15, {lag: 60}, {latency: 0}));
     await inject(page); await page.waitForSelector('#latencyHint:not([hidden])', {timeout: 15000});
     await page.click('#latencyHintCheck');
-    assert(await page.evaluate(() => document.getElementById('settingsDialog').open) && await page.isVisible('#latencyResult') && await page.isHidden('#latencyHint'), '«Перевірити» opens the settings on the result');
+    assert(await page.evaluate(() => document.getElementById('settingsDialog').open) && await page.isVisible('#latencyResult') && await page.isHidden('#latencyHint'), `«Перевірити» opens the settings on the result (${w})`);
     const v = round5((await state(page)).result.latency);
-    assert(near(v, 60, 10) && (await page.textContent('#latencyResult')).includes(`Пропоную зсув ${v} мс`) && await page.textContent('#latencyApply') === `Застосувати ${v} мс`, `«Перевірити»: the result offers ${v} ms`);
+    assert(near(v, 60, 10) && (await page.textContent('#latencyResult')).includes(`Пропоную зсув ${v} мс`) && await page.textContent('#latencyApply') === `Застосувати ${v} мс`, `«Перевірити»: the result offers ${v} ms (${w})`);
+    const seen = await page.evaluate(() => { const d = document.getElementById('settingsDialog').getBoundingClientRect(), r = q => document.getElementById(q).getBoundingClientRect(), inside = b => b.top >= d.top - .5 && b.bottom <= d.bottom + .5 && b.left >= d.left - .5 && b.right <= d.right + .5;
+      return {apply: inside(r('latencyApply')), result: inside(r('latencyResult'))}; });
+    assert(seen.apply && seen.result, `«Перевірити»: the result and «Застосувати ${v} мс» lie inside the dialog's visible area at ${w} px ` + JSON.stringify(seen));
+    await page.screenshot({path: `tests/e2e/shot_latency_hintcheck_${w}.png`});
     await page.context().close(); }
   { const {page} = await fresh();
     await seed(page, takes(15, {lag: 15}, {latency: 0}));
