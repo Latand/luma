@@ -1,8 +1,13 @@
 """HTTP contracts with the preparation worker disabled; no audio processing or paid APIs."""
+import contextlib
+import io
 import json
+import os
 from pathlib import Path
 import runpy
+import shutil
 import socket
+import subprocess
 import sys
 import tempfile
 import threading
@@ -13,6 +18,79 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'studio'))
+import covers  # noqa: E402
+HAS_FFMPEG = bool(shutil.which('ffmpeg') and shutil.which('ffprobe'))
+
+
+def make_original(package: Path, pictures: bool) -> Path:
+    """A 1 s m4a like the real library's: a letterboxed 64×36 PNG attached first, the square 48×48 JPEG after it."""
+    package.mkdir(parents=True, exist_ok=True); ff = ['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y']
+    original = package / 'original.m4a'
+    if not pictures:
+        subprocess.run([*ff, '-f', 'lavfi', '-i', 'sine=d=1', '-c:a', 'aac', str(original)], check=True); return original
+    wide, square = package / 'wide.png', package / 'square.jpg'
+    subprocess.run([*ff, '-f', 'lavfi', '-i', 'color=red:s=64x36', '-frames:v', '1', str(wide)], check=True)
+    subprocess.run([*ff, '-f', 'lavfi', '-i', 'color=blue:s=48x48', '-frames:v', '1', str(square)], check=True)
+    subprocess.run([*ff, '-f', 'lavfi', '-i', 'sine=d=1', '-i', str(wide), '-i', str(square), '-map', '0', '-map', '1', '-map', '2', '-c:a', 'aac', '-c:v:0', 'png', '-c:v:1', 'mjpeg', '-disposition:v', 'attached_pic', str(original)], check=True)
+    wide.unlink(); square.unlink(); return original
+
+
+def image_size(path: Path) -> tuple[int, int]:
+    out = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', str(path)], capture_output=True, text=True, check=True).stdout
+    w, h = out.strip().split(','); return int(w), int(h)
+
+
+@unittest.skipUnless(HAS_FFMPEG, 'ffmpeg/ffprobe are not installed')
+class CoverTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory(prefix='luma-covers-'); self.songs = Path(self.directory.name)
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def test_cover_prefers_square_attached_picture(self):
+        make_original(self.songs / 'Fixture', True)
+        cover = covers.extract(self.songs / 'Fixture')
+        self.assertEqual(cover, self.songs / 'Fixture' / 'cover.jpg')
+        self.assertEqual(cover.read_bytes()[:2], b'\xff\xd8', 'a JPEG')
+        self.assertEqual(image_size(cover), (48, 48), 'the square album art, not the letterboxed thumbnail before it')
+        self.assertEqual(list((self.songs / 'Fixture').glob('*.part')), [])
+
+    def test_cover_is_cached_and_refreshed_by_mtime(self):
+        original = make_original(self.songs / 'Fixture', True)
+        cover = covers.extract(self.songs / 'Fixture')
+        with patch.object(covers.subprocess, 'run', side_effect=AssertionError('probed a cached cover')):
+            self.assertEqual(covers.extract(self.songs / 'Fixture'), cover)
+        later = cover.stat().st_mtime + 10; os.utime(original, (later, later))
+        with patch.object(covers.subprocess, 'run', wraps=subprocess.run) as run:
+            self.assertEqual(covers.extract(self.songs / 'Fixture'), cover)
+        self.assertEqual(run.call_count, 2, 'a newer original is probed and extracted again')
+        self.assertGreaterEqual(cover.stat().st_mtime, later)
+
+    def test_song_without_picture_gets_a_marker(self):
+        make_original(self.songs / 'Plain', False)
+        self.assertIsNone(covers.extract(self.songs / 'Plain'))
+        self.assertTrue((self.songs / 'Plain' / 'cover.none').exists())
+        self.assertFalse((self.songs / 'Plain' / 'cover.jpg').exists())
+        with patch.object(covers.subprocess, 'run', side_effect=AssertionError('probed a song known to have no picture')):
+            self.assertIsNone(covers.extract(self.songs / 'Plain'))
+
+    def test_backfill_counts_without_names(self):
+        make_original(self.songs / 'Secret_Title_One', True); make_original(self.songs / 'Secret_Title_Two', False)
+        (self.songs / 'inbox').mkdir(); (self.songs / 'Luma_Secret_Title_One.html').write_text('<html>')
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out): counts = covers.backfill(self.songs)
+        self.assertEqual(counts, {'extracted': 1, 'cached': 0, 'none': 1, 'failed': 0})
+        self.assertNotIn('Secret', out.getvalue())
+        with contextlib.redirect_stdout(io.StringIO()): self.assertEqual(covers.backfill(self.songs)['cached'], 1)
+
+    def test_missing_ffmpeg_leaves_no_marker(self):
+        make_original(self.songs / 'Fixture', True)
+        with patch.object(covers.subprocess, 'run', side_effect=FileNotFoundError('ffprobe')):
+            self.assertIsNone(covers.extract(self.songs / 'Fixture'))
+        self.assertEqual(sorted(p.name for p in (self.songs / 'Fixture').iterdir()), ['original.m4a'], 'retried on the next start')
+
 
 
 class StudioHTTPTests(unittest.TestCase):
@@ -107,6 +185,22 @@ class StudioHTTPTests(unittest.TestCase):
         self.assertTrue(0 < info['progress'] < 1)
         self.assertGreater(info['eta'], 0)
         self.assertIsNone(self.module['stage_info']({'log': str(log) + '.missing'}, now))
+
+    def test_status_and_cover_route(self):
+        songs = Path(self.directory.name); (songs / 'Fixture').mkdir(); jpeg = b'\xff\xd8fake jpeg\xff\xd9'
+        (songs / 'Fixture' / 'cover.jpg').write_bytes(jpeg)
+        for name in ('Luma_Fixture.html', 'Luma_Lesson_1_Novachok.html', 'Luma_Imported_0123abcd.html'): (songs / name).write_text('<html>')
+        (songs / 'Lesson_1_Novachok').mkdir()
+        status, body = self.request('/status')
+        listed = {s['name']: s['cover'] for s in json.loads(body)['songs']}
+        self.assertIsInstance(listed['Luma_Fixture.html'], int)
+        self.assertEqual((listed['Luma_Lesson_1_Novachok.html'], listed['Luma_Imported_0123abcd.html']), (None, None))
+        with urlopen(self.url + '/cover/Luma_Fixture.html?v=1', timeout=3) as response:
+            self.assertEqual((response.status, response.headers['Content-Type'], response.read()), (200, 'image/jpeg', jpeg))
+            self.assertIn('max-age', response.headers['Cache-Control'])
+        (songs / 'secret.jpg').write_bytes(b'private')
+        for path in ('Luma_Missing.html', 'Luma_Lesson_1_Novachok.html', 'Luma_Imported_0123abcd.html', '..%2F..%2Fetc%2Fpasswd', '%2e%2e/cover.jpg', 'Fixture/cover.jpg', 'Luma_..html', 'Luma_Fixture%2F..%2F.html', '..%2Fsecret.jpg'):
+            self.assertEqual(self.request('/cover/' + path)[0], 404, path)
 
     def test_status_lists_library_metadata(self):
         trainer = Path(self.directory.name) / 'Luma_Test.html'
