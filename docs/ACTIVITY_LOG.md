@@ -91,6 +91,9 @@ Lines from one session can land in different batches and, past midnight, in two 
 | type | data |
 |---|---|
 | `notice` | the upload notice shown (`id: uploadNotice`, `text`), or the connection lost (`id: connectionNotice`) |
+| `session_result` | «Заняття» showed a result card: `kind` (`lesson` / `song`), `file`, `score` %, `median` % of the earlier full passes, `prev` (how many; `null` when the trainer could not read its history), `delta`, `full` (a full pass), `saved` (in the trainer's history), `next` (the file that comes next, `picker`, or `null` after the last song) |
+| `session_next` | the session moved on: `from`, `to` (files, `picker`), `how` (`countdown`, `now` = «Почати зараз» / «Почати урок», `repeat`, `skip`, `songs` = «До пісень», `picker` = a song picked in the list) |
+| `session_autostart` | a trainer answered Studio's request to start singing: `file`, `ok`, `reason` (`audio` sound refused, `mic`, `busy`, `other`), `ms` from the request to the answer |
 
 Opening a song or a lesson from Studio is a `click` whose `href` is `song:<file>`; the trainer then logs its own
 `page_open` with `from: "studio"` in a new session.

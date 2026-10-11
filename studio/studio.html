@@ -54,15 +54,26 @@ body.locked{overflow:hidden}
 .sbody{flex:1;position:relative;overflow:hidden;min-height:0}.sbody.scroll{overflow:auto}
 .sframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:var(--bg);opacity:0;pointer-events:none;transition:opacity .25s}.sframe.shown{opacity:1;pointer-events:auto}
 .sintro{position:absolute;inset:0;z-index:2;display:flex;align-items:center;justify-content:center;padding:20px;background:var(--bg);overflow:auto}.sintro.out{opacity:0;transition:opacity .18s;pointer-events:none}
-.sintro .card{width:100%;max-width:460px;display:flex;flex-direction:column;gap:12px;padding:22px;animation:rise .32s ease-out}.sintro .eyebrow{font-size:12px;color:var(--muted)}.sintro .result{font-size:13px;color:var(--mint)}.sintro .title{font-size:22px;font-weight:600;letter-spacing:-.3px}
+.sintro .card{width:100%;max-width:520px;display:flex;flex-direction:column;gap:12px;padding:22px;animation:rise .32s ease-out}.sintro .eyebrow{font-size:12px;color:var(--muted)}.sintro .result{font-size:13px;color:var(--mint)}.sintro .title{font-size:22px;font-weight:600;letter-spacing:-.3px}
 .sintro .head{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}.sintro .goal{color:#cbd6e6;font-size:14px;line-height:1.6;margin:0}.sintro .facts{font-size:13px;color:#c7d2e2}.sintro .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}.sintro .primary{height:46px;font-size:14px;padding:0 24px}.sintro .secondary{height:46px}.sintro .auto{font-size:12px;color:var(--dim);margin:0}
+/* The result card: what was just sung against its median, then «Далі» with the 3-2-1 ring (docs/design/SESSION_FLOW_RESULTS.md). */
+.rsec{display:flex;flex-direction:column;gap:10px}.rhead{font-size:26px;font-weight:600;letter-spacing:-.4px;line-height:1.2}.rline{margin:0;color:#cbd6e6;font-size:14px;line-height:1.55}
+.rnums{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:2px}.rnum{display:flex;flex-direction:column;gap:2px;min-width:0}.rnum b{display:flex;align-items:center;gap:7px;font-size:24px;font-weight:600;letter-spacing:-.4px;font-variant-numeric:tabular-nums;line-height:1.2}.rnum span{font-size:12px;color:var(--muted);line-height:1.35}
+.rnum i{width:7px;height:7px;flex:none;border-radius:50%;background:var(--dim)}.rnum i.up{background:var(--mint)}.rnum i.down{background:var(--amber)}
+.rchart{min-width:0}.rchart svg{display:block;font-family:var(--sans);overflow:visible}.rchart .cap{margin:4px 0 0;font-size:12px;color:var(--dim)}
+.nsec{border-top:1px solid var(--border);padding-top:14px;display:flex;flex-direction:column;gap:12px}.rcard .nsec{margin-top:4px}.nrow{display:flex;gap:14px;align-items:center;min-width:0}
+@property --p{syntax:'<percentage>';inherits:false;initial-value:100%}
+.ring{width:56px;height:56px;flex:none;border-radius:50%;display:grid;place-items:center;background:conic-gradient(var(--mint) var(--p),#ffffff14 0);transition:--p 1s linear}.ring b{width:48px;height:48px;border-radius:50%;background:var(--panel);display:grid;place-items:center;font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
+.nwhat{min-width:0;display:flex;flex-direction:column;gap:2px}.nwhat strong{font-size:16px;font-weight:600;overflow-wrap:anywhere}.nwhat small{color:var(--muted);font-size:13px}.nrow .auto{margin:0}
+.nsong{display:flex;gap:10px;align-items:center;min-width:0}.nsong>div:last-child{min-width:0;display:flex;flex-direction:column}.nsong .cover{width:44px;flex:none;margin:0;border-radius:8px}.nsong .cover.ph b{font-size:20px}.nsong .cover.ph svg{display:none}
+.sintro.over{background:#0b0e15d9}.sintro.over .primary{height:52px}
 .spicker{max-width:960px;margin:0 auto;padding:22px 24px 40px;animation:rise .32s ease-out}.spicker .hero-title{margin-bottom:10px}.spicker h2{margin-top:24px}.summary{display:flex;flex-wrap:wrap;gap:8px}.summary .chip{text-transform:none;letter-spacing:0}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;margin:0}
 @keyframes rise{from{opacity:0;transform:translateY(10px)}}@keyframes fade{from{opacity:0}}
 @keyframes blink{50%{opacity:.35}}@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 @media(max-width:560px){.bar{padding:10px 14px}.wrap{padding:18px 14px 40px}.row{flex-direction:column;align-items:stretch}.row label,.row .primary{width:100%}.card{padding:14px}.lib{grid-template-columns:1fr}.bar .status{display:none}
  .lib.songs{grid-template-columns:repeat(2,minmax(0,1fr))}.songs .song{padding:10px}.songs .song .title{font-size:14.5px}.songs .song .primary{padding:0 8px;font-size:12.5px}.hero .primary{width:100%}
- .sbar{padding:0 10px;gap:8px}.sbar .sclose{width:40px;padding:0;justify-content:center}.sbar .sclose span,.sstep{display:none}.sbar .sskip{font-size:12.5px;padding:0 10px}.spicker{padding:18px 14px 32px}.sintro{padding:14px}.sintro .card{padding:18px}.sintro .primary{flex:1}}
+ .sbar{padding:0 10px;gap:8px}.sbar .sclose{width:40px;padding:0;justify-content:center}.sbar .sclose span,.sstep{display:none}.sbar .sskip{font-size:12.5px;padding:0 10px}.spicker{padding:18px 14px 32px}.sintro{padding:12px;align-items:flex-start}.sintro .card{padding:18px}.sintro .primary{flex:1 1 100%}.sintro .secondary{flex:1;justify-content:center}.rnum b{font-size:20px}.rhead{font-size:24px}}
 </style></head><body>
 <header class="bar"><div class="brand"><svg viewBox="0 0 34 34" fill="none" aria-hidden="true"><path d="M3 22c5 0 4-14 8-14s3 19 7 19 3-13 7-13 3 5 5 5" stroke="currentColor" stroke-width="1.8"/></svg>luma<span>studio</span></div><button class="secondary add" id="addSong" type="button">Додати пісню</button><div class="status" id="serverStatus"><i></i><span id="serverStatusText">ПІДКЛЮЧАЮСЬ</span></div></header>
 <main class="wrap">
@@ -191,9 +202,11 @@ async function refresh(){clearTimeout(timer);if(refreshing)return;refreshing=tru
  catch(e){if($('connectionNotice').hidden)activity.log('notice',{id:'connectionNotice'});$('connectionNotice').hidden=false;setStatus('','НЕМАЄ ЗВ’ЯЗКУ');}
  finally{refreshing=false;timer=setTimeout(refresh,delay);}
 }
-// ── «Заняття»: the built-in lessons one after another, then a song. Studio hosts the session; each trainer runs in a
-// same-origin frame and posts {type:'luma:finished'} when a whole lesson has been sung (tellHost in app/app.js).
-// Held in memory only: a reload returns to the library.
+// ── «Заняття»: the built-in lessons one after another, then songs. Studio hosts the session; each trainer runs in a
+// same-origin frame. Studio asks it to start singing ({type:'luma:sing'}, answered by 'luma:autostart'), and the trainer
+// posts {type:'luma:finished'} with its result once the attempt has been sung to the last note and saved (tellHost and
+// autoSing in app/app.js). Each finish shows a result card with a 3-2-1 into the next step:
+// docs/design/SESSION_FLOW_RESULTS.md. Held in memory only: a reload returns to the library.
 const NUMBERS=['','Один урок','Два уроки','Три уроки','Чотири уроки'];
 function renderEntry(list){$('sessionEntry').hidden=!list.length;$('lead').hidden=!!list.length;shownLessons=list;if(!list.length)return;
  $('sessionPitch').textContent=(NUMBERS[list.length]||list.length+' уроків')+' поспіль, потім пісня з бібліотеки. Будь-який урок можна пропустити.';
@@ -201,21 +214,26 @@ function renderEntry(list){$('sessionEntry').hidden=!list.length;$('lead').hidde
  const song=el('span',null,'chip');song.append(el('i'),el('span','Пісня'));parts.push(song);
  const key=parts.map(p=>p.textContent).join('|');if(path.dataset.key===key)return;path.dataset.key=key;path.replaceChildren();
  parts.forEach((p,i)=>{if(i)path.append(el('span','→'));path.append(p);});}
-const S={open:false,steps:[],results:[],i:0,phase:'',frame:null,loaded:false,wantOpen:false,gen:0,timers:[]};
+const S={open:false,steps:[],results:[],i:0,phase:'',frame:null,loaded:false,wantOpen:false,wantSing:false,asked:0,card:null,drawLater:null,songs:[],song:null,gen:0,timers:[]};
+const COUNT=3;
 const REDUCED=matchMedia('(prefers-reduced-motion: reduce)');
 const ms=t=>REDUCED.matches?0:t;   // the reduced-motion rule above zeroes every transition, so nothing here waits for transitionend
 function later(fn,t){const gen=S.gen;S.timers.push(setTimeout(()=>{if(gen===S.gen&&S.open)fn();},t));}
 function nextPhase(phase){S.gen++;S.timers.forEach(clearTimeout);S.timers=[];S.phase=phase;}
 function announce(text){$('sessionLive').textContent=text;}
 function lessonLabel(i){return 'Урок '+(i+1)+' з '+S.steps.length;}
-function matchText(m){return 'збіг '+(m===null||m===undefined?'—':m+' %');}
-function renderBar(){const dots=$('sessionDots'),n=S.steps.length,at=S.phase==='picker'||S.phase==='song'?n:S.i;
+function plural(n,a,b,c){const m=n%10,h=n%100;return m===1&&h!==11?a:m>=2&&m<=4&&(h<10||h>=20)?b:c;}
+const stepFile=x=>!x?null:x.kind==='lesson'?S.steps[x.i].html:x.kind==='song'?x.s.name:'picker';
+// The dot the bar stands on: the lesson being sung or coming next; after the lessons, the song dot.
+function barAt(){const n=S.steps.length;if(S.phase==='lesson')return S.i;if(S.phase==='card'&&S.card.next?.kind==='lesson')return S.card.next.i;return n;}
+function songish(){return S.phase==='song'||S.phase==='card'&&(S.card.from?.kind==='song'||S.card.next?.kind==='song');}
+function renderBar(){const dots=$('sessionDots'),n=S.steps.length,at=barAt();
  if(dots.children.length!==n+1)dots.replaceChildren(...Array.from({length:n+1},()=>el('span',null,'dot')));
  [...dots.children].forEach((d,k)=>{const r=S.results[k];d.className='dot'+(k===at?' current':r?.done?' done':r?.skipped?' skipped':'');});
- const label=at<n?lessonLabel(at):S.phase==='song'?'Пісня':'Вибір пісні';
+ const label=at<n?lessonLabel(at):songish()?'Пісня':'Вибір пісні';
  dots.setAttribute('aria-valuemin','1');dots.setAttribute('aria-valuemax',String(n+1));dots.setAttribute('aria-valuenow',String(at+1));dots.setAttribute('aria-valuetext',label);$('sessionStep').textContent=label;
- const skip=$('sessionSkip');skip.hidden=S.phase==='picker';skip.textContent=S.phase==='song'?'До пісень':'Пропустити урок';}
-function dropFrame(){const f=S.frame;S.frame=null;S.loaded=false;S.wantOpen=false;if(!f)return;f.classList.remove('shown');
+ const skip=$('sessionSkip');skip.hidden=S.phase==='picker'||!songish()&&at>=n;skip.textContent=songish()?'До пісень':'Пропустити урок';}
+function dropFrame(){const f=S.frame;S.frame=null;S.loaded=false;S.wantOpen=false;S.wantSing=false;hideAutostart();if(!f)return;f.classList.remove('shown');
  // Removing the document stops its audio and frees the microphone without a beforeunload prompt; an attempt still in
  // progress is dropped, a finished one is already in the history.
  setTimeout(()=>f.remove(),ms(200));}
@@ -223,51 +241,149 @@ function makeFrame(src){dropFrame();const f=el('iframe',null,'sframe');f.src=src
  f.addEventListener('load',()=>{if(S.frame!==f)return;S.loaded=true;if(S.wantOpen)showFrame();});S.frame=f;$('sessionBody').append(f);return f;}
 function showFrame(){const f=S.frame;if(!f)return;S.wantOpen=false;
  const card=$('sessionBody').querySelector('.sintro');if(card){card.classList.add('out');setTimeout(()=>card.remove(),ms(180));}
- f.inert=false;f.removeAttribute('tabindex');f.classList.add('shown');f.focus();}
+ f.inert=false;f.removeAttribute('tabindex');f.classList.add('shown');f.focus();if(S.wantSing)askSing();}
+// The step opened by the session sings by itself: the click that started the session lets later frames of this tab play
+// sound. If the browser still refuses, the trainer says so and a start button appears over it.
+function askSing(){const f=S.frame;S.wantSing=false;if(!f?.contentWindow)return;S.asked=performance.now();f.contentWindow.postMessage({type:'luma:sing'},location.origin);}
+function openStep(phase,src,loading){nextPhase(phase);renderBar();
+ if(src)makeFrame(src);S.wantSing=true;if(S.loaded){showFrame();return;}
+ S.wantOpen=true;const go=$('sessionBody').querySelector('.sintro .primary');if(go&&loading){go.textContent=loading;go.disabled=true;}}
 function clearBody(){const body=$('sessionBody');body.classList.remove('scroll');for(const n of [...body.children])if(n!==S.frame)n.remove();}
 function startSession(){if(S.open||!shownLessons.length)return;
- Object.assign(S,{open:true,steps:shownLessons.slice(),results:shownLessons.map(()=>null),i:0});
+ Object.assign(S,{open:true,steps:shownLessons.slice(),results:shownLessons.map(()=>null),i:0,song:null,songs:[]});
  history.pushState({lumaSession:1},'');
  const box=$('session');box.classList.remove('closing');box.hidden=false;document.body.classList.add('locked');document.querySelector('header').inert=document.querySelector('main').inert=true;
- $('sessionDots').replaceChildren();showIntro(0);}
-function showIntro(i){nextPhase('intro');S.i=i;clearBody();renderBar();
- const l=S.steps[i],prev=i>0?S.results[i-1]:null,wrap=el('div',null,'sintro'),card=el('article',null,'card');
- card.append(el('div',lessonLabel(i),'eyebrow'));
- if(prev?.done)card.append(el('div','✓ Урок '+i+' пройдено · '+matchText(prev.match),'result'));
- const head=el('div',null,'head'),chip=el('span',null,'chip '+(LEVELS[l.level]||''));chip.title='Рекомендований рівень оцінювання';chip.append(el('i'),el('span',l.level));head.append(el('div',l.title,'title'),chip);
- const facts=el('div',null,'facts');facts.textContent=[l.duration?clock(l.duration):null,l.repetitions?l.repetitions+' повторів':null].filter(Boolean).join(' · ');
- const acts=el('div',null,'actions'),go=el('button','Почати урок','primary');go.type='button';go.onclick=()=>openStep();acts.append(go);
- if(prev?.done){const again=el('button','Ще раз','secondary');again.type='button';again.onclick=()=>repeatLesson(i-1);acts.append(again);}
- const auto=el('p',null,'auto');card.append(head,el('p',l.summary,'goal'),facts,acts,auto);wrap.append(card);$('sessionBody').append(wrap);
- makeFrame('/song/'+encodeURIComponent(l.html));   // preloads behind the card, so the countdown hides the 6–9 MB load
- go.focus();
- let left=5;const tick=()=>{if(left<=0){openStep();return;}auto.textContent='Урок відкриється сам через '+left+' с';left--;later(tick,1000);};tick();}
-function openStep(){if(S.phase!=='intro')return;nextPhase('lesson');
- if(S.loaded){showFrame();return;}
- S.wantOpen=true;const go=$('sessionBody').querySelector('.sintro .primary'),auto=$('sessionBody').querySelector('.sintro .auto');if(go)go.textContent='Завантажуємо урок…';if(auto)auto.textContent='';}
-function repeatLesson(i){nextPhase('lesson');S.i=i;renderBar();makeFrame('/song/'+encodeURIComponent(S.steps[i].html));S.wantOpen=true;
- const go=$('sessionBody').querySelector('.sintro .primary');if(go)go.textContent='Завантажуємо урок…';}
-function advance(){if(S.i+1<S.steps.length)showIntro(S.i+1);else showPicker();}
-function finishStep(match){nextPhase('finishing');S.results[S.i]={done:true,match};renderBar();
- const more=S.i+1<S.steps.length;announce('Урок '+(S.i+1)+' пройдено, '+matchText(match)+'. '+(more?'Далі урок '+(S.i+2)+'.':'Розспівку завершено, обери пісню.'));
- later(()=>{dropFrame();later(advance,ms(200));},1200);}   // the hold lets the trainer's own result show first
-function skipStep(){if(S.phase==='song'){showPicker();return;}
- if(!['intro','lesson','finishing'].includes(S.phase))return;
- // Skipping a repeat («Ще раз») keeps the result the lesson already has.
- if(S.phase!=='finishing'){const done=S.results[S.i]?.done;if(!done)S.results[S.i]={skipped:true};
-  announce((done?'Повтор уроку '+(S.i+1)+' пропущено, результат збережено.':'Урок '+(S.i+1)+' пропущено.')+(S.i+1<S.steps.length?'':' Обери пісню.'));}
- nextPhase('leaving');dropFrame();advance();}
+ $('sessionDots').replaceChildren();showCard({next:{kind:'lesson',i:0}});}
+
+// ── the result card: what was just sung against its median, then «Далі» with a 3-2-1 into the next step ───────────
+const svg=(tag,attrs={})=>{const n=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const k in attrs)n.setAttribute(k,attrs[k]);return n;};
+const dayLabel=day=>{const [,m,d]=String(day).split('-').map(Number);return d+'.'+String(m).padStart(2,'0');};
+const signed=n=>n>0?'+'+n:n<0?'−'+(-n):'0';
+function delta(r){return r&&r.full&&r.prev>0&&r.median!==null&&r.score!==null?r.score-r.median:null;}
+// Headline and the one line under it. Honest when worse: no «!», and the reason the median is fair.
+function verdict(r){
+ const notSaved=r.saved===false?' Спробу не записано в історію — вона лишилась у тренажері.':'';
+ if(r.prev===null)return {head:'Готово!',line:(r.legacy?'':'Історія зараз недоступна, тож порівняння не буде.')+notSaved};
+ if(!r.full)return {head:'Готово!',line:'Спроба почалася з '+clock(r.from)+' — з повними проходами не порівнюємо.'+notSaved};
+ if(!r.prev)return {head:'Перший прохід!',line:'Історії ще немає — цей результат стане точкою відліку.'+notSaved};
+ const d=delta(r),n=Math.abs(d),pts=n+' '+plural(n,'пункт','пункти','пунктів');
+ if(d>=2)return {head:'Чудово!',line:'Сьогодні краще за твою звичну спробу на '+pts+'.'+notSaved};
+ if(d<=-2)return {head:'Готово',line:'Цього разу на '+pts+' нижче за медіану. Буває — рахуються всі твої дні.'+notSaved};
+ return {head:'Готово!',line:'Рівно на рівні твоєї медіани.'+notSaved};}
+// Columns per day (the day's median of full passes), today highlighted, the median as a dashed line. Drawn at the
+// measured width so the labels keep their size on a phone.
+function drawChart(box,r){const bars=r.days.map(d=>({label:dayLabel(d.day),value:d.value,title:dayLabel(d.day)+': '+d.value+' %'+(d.n>1?' (медіана '+d.n+' '+plural(d.n,'спроби','спроб','спроб')+')':'')}));
+ if(r.full&&r.score!==null)bars.push({label:'сьогодні',value:r.score,title:'сьогодні: '+r.score+' %',today:true});
+ if(!bars.length)return false;
+ const W=Math.max(220,Math.round(box.clientWidth||300)),H=136,L=30,T=20,B=22,ph=H-T-B,y=v=>T+ph*(1-Math.max(0,Math.min(100,v))/100),slot=(W-L)/Math.max(bars.length,4),bw=Math.min(24,slot*.6);
+ const g=svg('svg',{width:W,height:H,viewBox:'0 0 '+W+' '+H,role:'img','aria-label':'Збіг по днях: '+bars.map(b=>b.label+' '+b.value+' %').join(', ')+(r.median!==null&&r.prev>0?'; медіана '+r.median+' %':'')});
+ for(const v of [0,50,100]){g.append(svg('line',{x1:L,x2:W,y1:y(v),y2:y(v),stroke:'#ffffff1a','stroke-width':1}));const t=svg('text',{x:L-6,y:y(v)+4,'text-anchor':'end',fill:'#95a3b8','font-size':11});t.textContent=String(v);g.append(t);}
+ const med=r.median!==null&&r.prev>0?y(r.median):null;
+ bars.forEach((b,k)=>{const cx=L+slot*(k+.5),top=y(b.value),bottom=y(0),h=Math.max(0,bottom-top),rr=Math.min(4,h,bw/2),x=cx-bw/2;
+  const col=svg('path',{d:'M'+x+','+bottom+'V'+(top+rr)+'Q'+x+','+top+' '+(x+rr)+','+top+'H'+(x+bw-rr)+'Q'+(x+bw)+','+top+' '+(x+bw)+','+(top+rr)+'V'+bottom+'Z',fill:b.today?'#a1eed8':'#5d6a80'});
+  const tip=svg('title');tip.textContent=b.title;col.append(tip);if(b.today)col.dataset.today='1';g.append(col);
+  const day=svg('text',{x:cx,y:H-6,'text-anchor':'middle',fill:b.today?'#e9edf5':'#95a3b8','font-size':11});day.textContent=b.label;g.append(day);
+  if(b.today){let ly=top-6;if(med!==null&&Math.abs(ly-med)<16)ly=Math.min(ly,med-6);const v=svg('text',{x:cx,y:Math.max(12,ly),'text-anchor':'middle',fill:'#a1eed8','font-size':12,'font-weight':600,stroke:'#111722','stroke-width':3,'paint-order':'stroke'});v.textContent=b.value+' %';g.append(v);}});
+ if(med!==null){g.append(svg('line',{x1:L,x2:W,y1:med,y2:med,stroke:'#d3b88f','stroke-width':1.5,'stroke-dasharray':'5 4'}));
+  const t=svg('text',{x:L+4,y:med-5,fill:'#d3b88f','font-size':11,stroke:'#111722','stroke-width':3,'paint-order':'stroke'});t.textContent='медіана '+r.median+' %';g.append(t);}
+ box.append(g);return true;}
+function resultSection(r,from){const sec=el('section',null,'rsec');sec.setAttribute('aria-label','Результат');
+ const what=from.kind==='lesson'?lessonLabel(from.i)+' · '+S.steps[from.i].title.split(' · ').pop()+' · пройдено':'Пісня · «'+songTitle(from.s)+'» · завершено';
+ const v=verdict(r),d=delta(r);sec.append(el('div',what,'eyebrow'),el('div',v.head,'rhead'));if(v.line)sec.append(el('p',v.line.trim(),'rline'));
+ const nums=el('div',null,'rnums'),cell=(value,label,dot)=>{const c=el('div',null,'rnum'),b=el('b');if(dot)b.append(el('i',null,dot));b.append(document.createTextNode(value));c.append(b,el('span',label));nums.append(c);return c;};
+ cell(r.score===null?'—':r.score+' %','сьогодні').dataset.cell='score';
+ if(r.prev>0&&r.median!==null)cell(r.median+' %','медіана · '+r.prev+' '+plural(r.prev,'спроба','спроби','спроб')).dataset.cell='median';
+ if(d!==null)cell(signed(d),d<0?'від медіани':'до медіани',d>=2?'up':d<=-2?'down':'even').dataset.cell='delta';
+ sec.append(nums);
+ if(r.prev!==null&&!r.legacy){const chart=el('div',null,'rchart');sec.append(chart);chart.dataset.days=String(r.days.length);
+  S.drawLater=()=>{if(drawChart(chart,r))chart.append(el('p',r.prev?'Збіг повних проходів по днях · '+r.ruler:'Наступні дні з’являться тут поруч','cap'));else chart.remove();};}
+ return sec;}
+function nextLine(next){const box=el('div',null,'nwhat'),auto=el('p',null,'auto');box.append(auto);
+ if(next.kind==='lesson'){const l=S.steps[next.i];box.append(el('strong',l.title),el('small',[l.duration?clock(l.duration):null,l.level].filter(Boolean).join(' · ')));}
+ else if(next.kind==='song'){const row=el('div',null,'nsong'),name=songTitle(next.s),txt=el('div');txt.append(el('strong',name),el('small',[next.s.artist,next.s.duration?clock(next.s.duration):null].filter(Boolean).join(' · ')));row.append(coverBox(next.s,name),txt);box.append(row);}
+ else box.append(el('strong','Вибір пісні'));
+ return {box,auto};}
+// One card for every step between two trainers. from: what was just sung (with its result), next: lesson, song, the
+// picker, or nothing after the last song.
+function showCard({result,from,next}){nextPhase('card');S.card={from,next};if(next?.kind==='lesson')S.i=next.i;clearBody();renderBar();
+ const wrap=el('div',null,'sintro'),card=el('article',null,'card');card.dataset.next=next?next.kind+(next.kind==='lesson'?':'+(next.i+1):''):'none';
+ S.drawLater=null;
+ if(result){card.classList.add('rcard');card.append(resultSection(result,from));}
+ else{const l=S.steps[next.i],head=el('div',null,'head'),chip=el('span',null,'chip '+(LEVELS[l.level]||''));chip.title='Рекомендований рівень оцінювання';chip.append(el('i'),el('span',l.level));head.append(el('div',l.title,'title'),chip);
+  const facts=el('div',null,'facts');facts.textContent=[l.duration?clock(l.duration):null,l.repetitions?l.repetitions+' повторів':null].filter(Boolean).join(' · ');
+  card.append(el('div',lessonLabel(next.i),'eyebrow'),head,el('p',l.summary,'goal'),facts);}
+ const acts=el('div',null,'actions'),button=(text,id,cls,fn)=>{const b=el('button',text,cls);b.type='button';b.id=id;b.onclick=fn;acts.append(b);return b;};
+ let go=null,ring=null,auto=null;
+ if(next){const sec=el('section',null,'nsec');sec.setAttribute('aria-label','Далі');
+  ring=el('div',null,'ring');ring.setAttribute('aria-hidden','true');ring.append(el('b',String(COUNT)));
+  const row=el('div',null,'nrow');if(result){const what=nextLine(next);auto=what.auto;row.append(ring,what.box);}else{auto=el('p',null,'auto');row.append(ring,auto);}
+  sec.append(row);card.append(sec);
+  go=button(result?(next.kind==='picker'?'До пісень':'Почати зараз'):'Почати урок','resultNow','primary',()=>advanceTo('now'));}
+ if(result&&from){const again=button(from.kind==='lesson'?'Повторити урок '+(from.i+1):'Повторити','resultRepeat','secondary',repeatStep);if(!next)acts.prepend(again);}
+ if(from?.kind==='song'){const songs=button('До пісень','resultSongs',next?'secondary':'primary',()=>toPicker('songs'));if(!next){acts.prepend(songs);go=songs;}}
+ card.append(acts);wrap.append(card);$('sessionBody').append(wrap);
+ if(S.drawLater){S.drawLater();S.drawLater=null;}
+ if(next&&next.kind!=='picker')makeFrame('/song/'+encodeURIComponent(stepFile(next)));   // preloads behind the card, so the countdown hides the load
+ else dropFrame();
+ (go||acts.querySelector('button'))?.focus();
+ if(result){const v=verdict(result);
+  announce(v.head+' '+(from.kind==='lesson'?'Урок '+(from.i+1):'Пісня')+': '+(result.score===null?'без оцінки':result.score+' %')+(delta(result)!==null?', '+signed(delta(result))+' до медіани':'')+'. '
+   +(next?'Далі '+(next.kind==='lesson'?'урок '+(next.i+1):next.kind==='song'?'наступна пісня':'вибір пісні')+' за '+COUNT+' секунди.':'Це остання пісня бібліотеки.'));
+  activity.log('session_result',{kind:from.kind,file:stepFile(from),score:result.score,median:result.median,prev:result.prev,delta:delta(result),full:!!result.full,saved:result.saved!==false,next:next?stepFile(next):null});}
+ if(!next)return;
+ let left=COUNT;const tick=()=>{if(left<=0){advanceTo('countdown');return;}
+  ring.firstChild.textContent=String(left);ring.style.setProperty('--p',Math.round(100*(left-1)/COUNT)+'%');
+  auto.textContent=(result?'Далі · почнеться сам за ':next.kind==='lesson'?'Урок почнеться сам за ':'Почнеться сам за ')+left+' с';left--;later(tick,1000);};
+ getComputedStyle(ring).getPropertyValue('--p');tick();}   // the read settles the full ring first, so the first step animates
+// The card's way on: the countdown ran out or «Почати зараз» was pressed.
+function advanceTo(how){if(S.phase!=='card')return;const {from,next}=S.card;if(!next)return;
+ activity.log('session_next',{from:stepFile(from),to:stepFile(next),how});
+ if(next.kind==='picker'){showPicker();return;}
+ if(next.kind==='lesson'){S.i=next.i;openStep('lesson',null,'Завантажуємо…');return;}
+ S.song=next.s;openStep('song',null,'Завантажуємо…');}
+function repeatStep(){if(S.phase!=='card')return;const {from}=S.card;if(!from)return;
+ activity.log('session_next',{from:stepFile(from),to:stepFile(from),how:'repeat'});
+ if(from.kind==='lesson'){S.i=from.i;openStep('lesson','/song/'+encodeURIComponent(stepFile(from)),'Завантажуємо…');}
+ else{S.song=from.s;openStep('song','/song/'+encodeURIComponent(stepFile(from)),'Завантажуємо…');}}
+function toPicker(how){activity.log('session_next',{from:S.phase==='card'?stepFile(S.card.from):S.song?S.song.name:null,to:'picker',how});showPicker();}
+function advance(i){if(i+1<S.steps.length)showCard({next:{kind:'lesson',i:i+1}});else showPicker();}
+function finishLesson(d){const i=S.i,r=resultOf(d);S.results[i]={done:true,match:r.score};
+ showCard({result:r,from:{kind:'lesson',i},next:i+1<S.steps.length?{kind:'lesson',i:i+1}:{kind:'picker'}});}
+function finishSong(d){const s=S.song,k=S.songs.findIndex(x=>x.name===s.name),after=k>=0?S.songs[k+1]:null;
+ showCard({result:resultOf(d),from:{kind:'song',s},next:after?{kind:'song',s:after}:null});}
+// A trainer built before the result existed sends only its match: the card then shows that number and nothing else.
+function resultOf(d){const r=d.result;if(r&&typeof r==='object')return {score:typeof r.score==='number'?r.score:null,full:!!r.full,from:+r.from||0,median:typeof r.median==='number'?r.median:null,prev:typeof r.prev==='number'?r.prev:null,days:Array.isArray(r.days)?r.days.filter(x=>x&&typeof x.value==='number').slice(-6):[],ruler:String(r.ruler||''),saved:r.saved!==false};
+ return {score:typeof d.match==='number'?d.match:null,full:false,from:0,median:null,prev:null,days:[],ruler:'',saved:true,legacy:true};}
+function skipStep(){
+ if(songish()){toPicker('songs');return;}
+ if(!['card','lesson'].includes(S.phase))return;
+ const i=barAt();if(i>=S.steps.length)return;
+ // Skipping a repeat keeps the result the lesson already has.
+ const done=S.results[i]?.done;if(!done)S.results[i]={skipped:true};
+ announce((done?'Повтор уроку '+(i+1)+' пропущено, результат збережено.':'Урок '+(i+1)+' пропущено.')+(i+1<S.steps.length?'':' Обери пісню.'));
+ activity.log('session_next',{from:S.steps[i].html,to:i+1<S.steps.length?S.steps[i+1].html:'picker',how:'skip'});
+ nextPhase('leaving');dropFrame();advance(i);}
 function showPicker(){nextPhase('picker');dropFrame();clearBody();renderBar();
+ // The queue for «next song» is the order the singer sees here; a library poll later in the session does not reshuffle it.
+ S.songs=librarySongs.slice();
  const body=$('sessionBody'),box=el('div',null,'spicker');body.classList.add('scroll');
  box.append(el('div','Розспівку завершено','hero-title'));
  const sum=el('div',null,'summary');S.steps.forEach((l,k)=>{const r=S.results[k],chip=el('span',null,'chip'+(r?.done?' done':''));chip.append(el('i'),el('span',l.title+' · '+(r?.done?'✓ '+(r.match===null||r.match===undefined?'—':r.match+' %'):'пропущено')));sum.append(chip);});
- const h=el('h2','Обери пісню');h.append(el('span',librarySongs.length?String(librarySongs.length):'','count'));
+ const h=el('h2','Обери пісню');h.append(el('span',S.songs.length?String(S.songs.length):'','count'));
  const grid=el('div',null,'lib songs');
- if(librarySongs.length)for(const s of librarySongs)grid.append(songCard(s,true));
+ if(S.songs.length)for(const s of S.songs)grid.append(songCard(s,true));
  else grid.append(el('p','У бібліотеці поки немає пісень. Заверши заняття й додай свою пісню на головній сторінці Studio.','empty'));
  box.append(sum,h,grid);body.append(box);body.scrollTop=0;
  const first=grid.querySelector('button');(first||$('sessionClose')).focus({preventScroll:true});}
-function openSong(s){nextPhase('song');clearBody();renderBar();makeFrame('/song/'+encodeURIComponent(s.name));S.wantOpen=true;}
+function openSong(s){activity.log('session_next',{from:'picker',to:s.name,how:'picker'});S.song=s;clearBody();openStep('song','/song/'+encodeURIComponent(s.name));}
+// The browser kept the sound or the microphone off: a card over the trainer, with a real button to start.
+function showAutostart(reason){hideAutostart();$('sessionBody').querySelectorAll('.sintro').forEach(n=>n.remove());   // the card that led here may still be fading out
+ const lesson=S.phase==='lesson',wrap=el('div',null,'sintro over'),card=el('article',null,'card');wrap.id='autostartCard';
+ card.append(el('div',lesson?'Урок '+(S.i+1)+' готовий':'Пісня готова','title'),el('p',reason==='mic'?'Мікрофон недоступний: дозволь доступ (значок біля адреси) і натисни ще раз.':reason==='audio'?'Браузер не дав увімкнути звук сам. Натисни — і запис почнеться після короткого відліку.':'Запис не почався сам — причину показано в тренажері. Натисни, щоб спробувати ще раз.','goal'));
+ const acts=el('div',null,'actions'),go=el('button','Почати співати','primary'),own=el('button','Сам натисну «Співати»','secondary');go.type=own.type='button';go.id='autostartBtn';own.id='autostartDismiss';
+ go.onclick=()=>{hideAutostart();askSing();};own.onclick=()=>{hideAutostart();S.frame?.focus();};acts.append(go,own);card.append(acts);wrap.append(card);$('sessionBody').append(wrap);go.focus();
+ announce(card.firstChild.textContent+'. Натисни «Почати співати».');}
+function hideAutostart(){$('autostartCard')?.remove();}
 function closeSession(){if(!S.open)return;nextPhase('');S.open=false;dropFrame();
  const box=$('session');box.classList.add('closing');document.body.classList.remove('locked');document.querySelector('header').inert=document.querySelector('main').inert=false;
  setTimeout(()=>{if(!S.open){box.hidden=true;box.classList.remove('closing');clearBody();announce('');}},ms(200));
@@ -275,8 +391,12 @@ function closeSession(){if(!S.open)return;nextPhase('');S.open=false;dropFrame()
 function leaveSession(){if(history.state&&history.state.lumaSession)history.back();else closeSession();}   // Back and × end the same way
 addEventListener('popstate',()=>{if(S.open)closeSession();});
 addEventListener('message',e=>{const d=e.data;
- if(e.origin!==location.origin||!S.frame||e.source!==S.frame.contentWindow||!d||d.type!=='luma:finished'||S.phase!=='lesson')return;
- if(d.file!==S.steps[S.i].html)return;finishStep(typeof d.match==='number'?d.match:null);});
+ if(e.origin!==location.origin||!S.frame||e.source!==S.frame.contentWindow||!d||typeof d!=='object')return;
+ if(d.type==='luma:autostart'){activity.log('session_autostart',{file:d.file,ok:!!d.ok,reason:d.reason||null,ms:S.asked?Math.round(performance.now()-S.asked):null});
+  if(d.ok)hideAutostart();else if(d.reason!=='busy'&&['lesson','song'].includes(S.phase))showAutostart(d.reason);return;}
+ if(d.type!=='luma:finished')return;
+ if(S.phase==='lesson'&&d.file===S.steps[S.i].html)finishLesson(d);
+ else if(S.phase==='song'&&S.song&&d.file===S.song.name)finishSong(d);});
 $('sessionStart').onclick=startSession;$('sessionClose').onclick=leaveSession;$('sessionSkip').onclick=skipStep;
 $('refreshBtn').onclick=refresh;refresh();
 </script></body></html>

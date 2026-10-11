@@ -62,8 +62,39 @@ In a session the wait grows further. `finishStep()` holds for 1.2 s. The next in
 singer clicks «Співати», and the trainer counts in for 2.1 s. That is about 8 s plus a click on top of the tail.
 
 Prior work: a superseded brief stage on this task (`docs/design/LESSON_AUTOADVANCE.md`, never landed) measured the same
-lesson numbers. Its operator review (`pr_eef12277…`) chose **variant 1: the countdown lives on the card of the next
-step**, which this design keeps. Memory searches found nothing else relevant.
+lesson numbers. Its prototype review is the source of the pinned layout below. Memory searches found nothing else
+relevant.
+
+## Pinned: the card layout (operator decision, 2026-10-11)
+
+On the review «Відлік 3-2-1 між уроками в «Занятті»» (`pr_eef12277424a05d993fb0ca0a25cfdf6`), published by the
+superseded brief, the operator chose **variant 1 — «Відлік на картці наступного уроку»**, with no comment. Variant 2
+(a panel sliding over the finished trainer) was rejected. That choice binds this design:
+
+- The countdown sits **on the next step's intro card**, with primary «Почати зараз» and secondary «Повторити урок N».
+  After the last lesson the same card leads to the song picker, and its primary reads «До пісень».
+- The **result block** (headline, today vs median, delta, small chart) goes **on that same card, above the 3-2-1**.
+  There is no separate result screen, overlay or second frame.
+- **After a song** the same card pattern is used: the result block above a 3-2-1 into the next song, with «Почати
+  зараз», «Повторити» and «До пісень».
+- The prototype published by this stage (`pr_4d44e715…`, see [Prototype review](#prototype-review)) keeps this layout
+  on every frame. Its two variants differ only in the chart form inside the card, and it offers no layout choice.
+
+## Pinned: answers to this stage's review (operator decision, 2026-10-11)
+
+On «Результат після уроку чи пісні, медіана і відлік 3-2-1» (`pr_4d44e715e7d3990c827276c494a45a17`) the operator
+took every recommended option, with no comment:
+
+| Question | Pinned answer | Where it applies |
+|---|---|---|
+| Chart | **Variant 1 — «Стовпчики по днях + лінія медіани»**: one column per day, today highlighted, a dashed median line | [The card, copy and chart](#the-card-copy-and-chart-pinned-layout-chart-variant-1) |
+| After the last song in the library | **Stop**: the result and «До пісень», with no countdown and no wrap to the first song | Decision 3, next-song order |
+| A song picked with «Співати» in the picker | **Starts recording right away** after the trainer's short count-in (0.6 s) | Decision 4 |
+| Countdown on the result card | **3 seconds (3-2-1)**, with no pause on hover and no stop button | Decision 3, «Далі» section |
+| What today is compared with | **The median of all earlier full passes on the same settings** (same `cmpKey`: song · note map · level · view · speed), earlier attempts today included | Decision 2 |
+
+The variant-2 line chart is dropped. These answers and the card layout above are settled; the implementer builds them
+as written.
 
 ## Decision 1 — the finish rule (every trainer, standalone too)
 
@@ -137,15 +168,15 @@ parent.postMessage({type:'luma:finished', file, match /* as today */, result:{
 HOME ─«Почати заняття»→ NEXT(lesson 1) ─3-2-1 or «Почати урок»→ LESSON(1, auto-sing)
 LESSON(n) ─finished→ **RESULT(n) + NEXT(n+1)** ─3-2-1 / «Почати зараз»→ LESSON(n+1, auto-sing)
           ─«Пропустити урок»→ NEXT(n+1) (no result section)            «Повторити урок n»→ LESSON(n, auto-sing)
-LESSON(last) ─finished→ **RESULT + NEXT(picker)** ─3-2-1 / «До пісень зараз»→ PICKER
+LESSON(last) ─finished→ **RESULT + NEXT(picker)** ─3-2-1 / «До пісень»→ PICKER
 PICKER ─card «Співати»→ **SONG(s, auto-sing)**
 SONG(s) ─finished→ **RESULT(s) + NEXT(next song)** ─3-2-1 / «Почати зараз»→ SONG(next, auto-sing)
         «Повторити»→ SONG(s, auto-sing) · «До пісень»→ PICKER · last song: RESULT(s) only, no countdown
 × / Back from any state → HOME
 ```
 
-- One card component replaces today's intro card: an optional **result section** above a **«Далі» section** with the
-  countdown. A skipped lesson and lesson 1 get the «Далі» section only. That is today's intro card, with the 5 s wait
+- One card component (the [pinned layout](#pinned-the-card-layout-operator-decision-2026-10-11)) replaces today's
+  intro card: an optional **result section** above a **«Далі» section** with the countdown. A skipped lesson and lesson 1 get the «Далі» section only. That is today's intro card, with the 5 s wait
   becoming 3-2-1 and auto-sing.
 - `finishStep()` loses the 1.2 s hold: Studio shows its own result now, and the trainer's in-frame result is not needed.
   On `luma:finished` the frame is dropped and the card appears at once.
@@ -154,7 +185,7 @@ SONG(s) ─finished→ **RESULT(s) + NEXT(next song)** ─3-2-1 / «Почати
 - **Next-song order** = the picker's order. Take a snapshot `S.songs = librarySongs.slice()` when the picker opens, so a
   15 s `/status` poll cannot reorder the queue mid-session. That order is the server's mtime-newest-first. The next song
   is `S.songs[index(S.song)+1]`. After the last one there is no countdown, and the primary is «До пісень»
-  (review question `after-last-song`, recommended).
+  (pinned: stop, no wrap).
 - **After the last lesson** the countdown leads to the picker as today. It does not jump into a song: nothing is
   "obvious" before the operator has picked one, and remembering a song across sessions would be new storage.
 - **«Повторити»** reloads the same trainer in a new frame and auto-sings. That means one frame at a time, as now, at the
@@ -165,7 +196,7 @@ SONG(s) ─finished→ **RESULT(s) + NEXT(next song)** ─3-2-1 / «Почати
 - The next frame is preloaded hidden while the card counts down, as intro cards do today. If it has not loaded at 0,
   «Почати зараз» reads «Завантажуємо…» and auto-sing follows the frame's `load`.
 
-### The card, copy and chart (prototype variant 1)
+### The card, copy and chart (pinned layout, chart variant 1)
 
 | Case | Headline | Line | Number cells |
 |---|---|---|---|
@@ -194,7 +225,7 @@ SONG(s) ─finished→ **RESULT(s) + NEXT(next song)** ─3-2-1 / «Почати
     colour alone: today is also labelled.
 - **«Далі» section:** a 56 px ring with the number (3 → 2 → 1, one step a second, the ring empties). It shows «Далі ·
   почнеться сам за 3 с» and the next item: «Урок 2 · Середній · 3:20», the next song with its 44 px cover (the existing
-  `coverBox`), or «Вибір пісні». Buttons: primary «Почати зараз» (`#resultNow`; «До пісень зараз» after the last lesson),
+  `coverBox`), or «Вибір пісні». Buttons: primary «Почати зараз» (`#resultNow`; «До пісень» after the last lesson),
   secondary «Повторити урок n» / «Повторити» (`#resultRepeat`), and on songs «До пісень» (`#resultSongs`).
 - The polite live region announces the result once and «Далі урок 2 за 3 секунди». Ticks are not announced. Focus goes
   to «Почати зараз».
@@ -251,8 +282,8 @@ Studio                                               trainer (frame)
       hides the card. The trainer's own «Співати» works underneath.
   - While a mic permission prompt is open, the trainer is still awaiting `getUserMedia` and does not reply. The browser
     prompt is visible, so there is never a silent dead state.
-- **Picker card «Співати» auto-sings too.** The click is the gesture, and it is what «Співати» says (review question
-  `picker-autostart`, recommended).
+- **Picker card «Співати» auto-sings too.** The click is the gesture, and it is what «Співати» says (pinned:
+  recording starts right after the trainer's short count-in).
 
 ## Activity log
 
@@ -346,13 +377,18 @@ Required checks: `tests/e2e/run.sh` in full (it also runs every Python suite).
 
 ## Rollout
 
-The operator asked to redeploy when this is done.
+The operator asked to redeploy when this is done. Right after the merge, in the main checkout (`~/Projects/luma`), do
+this without asking:
 
-1. After the merge, re-wrap the lessons: `.venv/bin/python lessons/build_lessons.py --songs songs`, which
-   `luma-studio.sh` runs whenever `app/` changed.
+1. Re-wrap the lessons: `.venv/bin/python lessons/build_lessons.py --songs songs`.
 2. Rebuild every song trainer with the new `app.js`: `.venv/bin/python studio/build_html.py --rebuild
    songs/Luma_*.html`. An old song trainer neither finishes early nor auto-sings.
-3. `studio.html` is read on every request, so a browser reload of Studio is enough; there is no server restart.
+3. Restart Studio through its user unit: `XDG_RUNTIME_DIR=/run/user/1000 systemctl --user restart luma-studio` (port
+   8792). The unit's `ExecStartPre` also runs step 1.
+   - `studio.html` is read on every request, so the restart is not strictly needed for it. It is the standard
+     redeploy, and it keeps the server on the merged code.
+   - Never start Studio with `nohup`/`setsid` from an agent: that process dies with the agent's session.
+4. Check `curl -fsS http://127.0.0.1:8792/status`, then ask the operator to reload the Studio tab.
 
 Note: `--rebuild` rewrites every file, and the library is ordered by mtime, so a rebuild reorders the library. That
 order is also the next-song order. It already happened on today's 13:50 rebuild.
@@ -363,19 +399,25 @@ Published on this task as `pr_4d44e715e7d3990c827276c494a45a17`. Frames were ren
 CSS at 390×844 and 1440×900, with invented titles and generated art. Measured on every frame: 0 px horizontal overflow,
 no clipped or sub-36 px button, and the card inside the first screen.
 
+Every frame uses the [pinned layout](#pinned-the-card-layout-operator-decision-2026-10-11): one card, the result
+block above the 3-2-1, then «Почати зараз» and «Повторити урок N» (or «Повторити» and «До пісень» after a song).
+The two variants differ **only in the chart inside the card**:
+
 - **Variant 1 — columns per day + median line (recommended):** lesson better than the median, song worse with the next
   song, first attempt, after the last lesson, last song (no countdown), and the autoplay fallback card.
 - **Variant 2 — line per day + median line:** the same card. It is more compact, and one or two points read worse than
   columns.
 
-The review also asks four questions, each with a recommendation this design already follows: after the last song (stop),
-whether a picker click auto-sings (yes), the countdown length (3 s), and the median scope (all earlier full passes on
-the same settings). The design does not wait for the answers. A different answer changes only the named branch.
+One wording difference from the frames: after the last lesson the frame's primary reads «До пісень зараз». The pinned
+label is «До пісень», as in the operator's chosen variant.
+
+The review also asked four questions. The operator chose variant 1 and every recommended answer; see
+[Pinned: answers to this stage's review](#pinned-answers-to-this-stages-review-operator-decision-2026-10-11).
 
 ## Deferred — not currently justified
 
 - **Pausing the countdown** (hover, or a «Стоп» button): the quote asks for 3-2-1, and Skip, «Повторити» and × already
-  stop it. This is asked as an option in the review.
+  stop it. The operator chose a plain 3 s countdown in the review.
 - **Keeping the finished frame alive for «Повторити»** (avoids one reload): two frames and more state for a 1–2 s
   saving.
 - **Jumping from the last lesson straight into a song** remembered from an earlier session: this needs new storage, and
@@ -399,7 +441,7 @@ the same settings). The design does not wait for the answers. A different answer
 | «показывать «Congratulations»… график… в среднем… и сегодняшний… лучше-хуже… медиана» | «Чудово!» / «Готово», today vs the median of earlier full passes with the delta, and columns per day with today highlighted and a median line. «Перший прохід!» when there is no history. |
 | «на песнях тоже нужно обрывать раньше» | The same rule in every trainer: song A stops 52 s earlier, the typical song about 8 s earlier. |
 | «сразу переходило… показывало результат… и следующую песню» | The song result card, then 3-2-1 into the next song in picker order, which auto-sings. «До пісень» picks another. |
-| «деплой перезагружай» | Rollout: re-wrap the lessons, rebuild the song trainers, reload Studio. |
+| «деплой перезагружай» | Rollout: right after the merge, re-wrap the lessons, rebuild the song trainers, restart the `luma-studio` unit, check `/status`. |
 
 Privacy: no song titles, artists or lyrics appear in this document or the prototype. Library songs are named "A" and
 "B" by their measurements only.
