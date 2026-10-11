@@ -25,7 +25,7 @@ function levelLabel(opt){return opt.level==='custom'?'свій коридор':(
 // Signed distance in cents; on the easy level the octave is forgiven (distance folds into ±6 semitones).
 function centsOff(m,refM,opt){let d=m-refM;if(opt.octaveFree){d=((d%12)+12)%12;if(d>6)d-=12;}return d*100;}
 const LOOP_LANE=24;
-const s={ctx:null,stream:null,capture:null,micSource:null,worker:null,micGeneration:0,busy:false,cancel:0,mode:'idle',transport:null,sources:[],endTimer:null,nextTimer:null,bufs:new Map(),gains:null,pos:song.initialTime||0,range:{a:0,b:song.duration},rangeId:0,history:[],current:null,takes:[],takeCounter:0,pending:new Map(),awaitFinish:false,trace:null,live:null,verified:[],dirty:true,raf:0,lastDraw:0,lastFrame:0,lastUI:0,rangeLo:48,rangeHi:76,liveSmooth:null,lastSmoothT:0,toastTimer:0,edit:null,computeMs:0,windowMs:0,unsaved:false,undoPunch:null,busyFor:'',scrub:null,lyricKey:'',resumeAt:null,parkedAt:null,hostSing:false,tlDrag:null,seekTimer:0,dense:false,stageH:0,hist:{runs:[],days:[],loaded:false,note:'',persisted:null,stamp:'',stale:false,restored:false},shadow:null,shadowSig:'',progressSig:'',trendScope:'',weakOrder:'song',roomNotice:false};
+const s={ctx:null,stream:null,capture:null,micSource:null,worker:null,micGeneration:0,busy:false,cancel:0,mode:'idle',transport:null,sources:[],endTimer:null,nextTimer:null,bufs:new Map(),gains:null,pos:song.initialTime||0,range:{a:0,b:song.duration},rangeId:0,history:[],current:null,takes:[],takeCounter:0,pending:new Map(),awaitFinish:false,trace:null,live:null,verified:[],dirty:true,raf:0,lastDraw:0,lastFrame:0,lastUI:0,rangeLo:48,rangeHi:76,liveSmooth:null,lastSmoothT:0,toastTimer:0,edit:null,computeMs:0,windowMs:0,unsaved:false,undoPunch:null,busyFor:'',scrub:null,lyricKey:'',resumeAt:null,parkedAt:null,hostSing:false,tlDrag:null,seekTimer:0,dense:false,stageH:0,hist:{runs:[],days:[],loaded:false,note:'',persisted:null,stamp:'',stale:false,restored:false},shadow:null,shadowSig:'',progressSig:'',trendScope:'',weakOrder:'song',roomNotice:false,lat:null,latHint:null};
 const canvas=$('chart'),g=canvas.getContext('2d',{alpha:false}),tl=$('timeline'),tg=tl.getContext('2d',{alpha:false});let W=1,H=1,DPR=1,TW=1,TH=1;
 const reduced=matchMedia('(prefers-reduced-motion: reduce)');
 function fmt(t){t=Math.max(0,Number.isFinite(t)?t:0);return String(Math.floor(t/60)).padStart(2,'0')+':'+String(Math.floor(t%60)).padStart(2,'0');}
@@ -65,13 +65,17 @@ let spansCache=null;
 function scoredSpans(){
  if(spansCache)return spansCache;
  const on=!song.lesson&&(song.lyrics||[]).some(l=>l.words.length>0);if(!on)return spansCache={on,spans:[],last:null};
- const M=WORDLESS.margin,lines=song.lyrics.map(l=>[l.a-M,l.b+M]),near=n=>lines.some(([a,b])=>n.a<b&&n.b>a),spans=[...lines];let last=null;
- const ns=song.notes.filter(n=>!n.ignored).sort((x,y)=>x.a-y.a);
+ return spansCache={on,...wordedSpans(song.notes,song.lyrics.map(l=>[l.a,l.b]))};
+}
+// The rule itself, from notes and lyric lines [a, b]: also applied to other songs' maps by the latency estimate.
+function wordedSpans(notes,lyricLines){
+ const M=WORDLESS.margin,lines=lyricLines.map(([a,b])=>[a-M,b+M]),near=n=>lines.some(([a,b])=>n.a<b&&n.b>a),spans=[...lines];let last=null;
+ const ns=notes.filter(n=>!n.ignored).sort((x,y)=>x.a-y.a);
  for(let i=0;i<ns.length;){let j=i,end=ns[i].b,worded=near(ns[i]);
   while(j+1<ns.length&&ns[j+1].a-end<=WORDLESS.gap){j++;end=Math.max(end,ns[j].b);worded||=near(ns[j]);}
   if(worded){spans.push([ns[i].a,end]);if(last===null||end>last)last=end;}i=j+1;}
  spans.sort((x,y)=>x[0]-y[0]);const merged=[];for(const sp of spans){const top=merged.at(-1);if(top&&sp[0]<=top[1])top[1]=Math.max(top[1],sp[1]);else merged.push([...sp]);}
- return spansCache={on,spans:merged,last};
+ return {spans:merged,last};
 }
 function scoredAt(t){const w=scoredSpans();if(!w.on)return true;const a=w.spans;let lo=0,hi=a.length;while(lo<hi){const m=(lo+hi)>>1;if(a[m][0]<=t)lo=m+1;else hi=m;}const sp=a[lo-1];return !!sp&&t<=sp[1];}
 function wordlessNote(n){return !n.ignored&&!scoredAt((n.a+n.b)/2);}
@@ -269,7 +273,7 @@ function sync(){
  $('micToggle').textContent=s.stream?'Вимкнути мікрофон':'Увімкнути лише мікрофон';$('micToggle').disabled=active||s.busy||s.awaitFinish;$('takesPanel').dataset.open=prefs.takesOpen?'1':'0';$('takesToggle').setAttribute('aria-expanded',String(prefs.takesOpen));$('takesCount').textContent=s.takes.length;
  $('livesMode').checked=prefs.lives;$('livesCount').value=String(prefs.livesCount);$('livesMode').disabled=$('livesCount').disabled=active||s.busy||s.awaitFinish;renderLives('');
  $('lyricsBtn').setAttribute('aria-pressed',String(prefs.lyrics));$('shadowBtn').setAttribute('aria-pressed',String(prefs.shadow));$('recordAudio').checked=prefs.audio;
- refreshShadow();renderProgress();
+ refreshShadow();renderProgress();renderLatency();
  for(const b of document.querySelectorAll('[data-view]')){b.classList.toggle('active',b.dataset.view===prefs.view);b.setAttribute('aria-pressed',String(b.dataset.view===prefs.view));b.disabled=active||s.busy||s.awaitFinish;}
  const rv=traceShown();$('reviewBar').hidden=$('reviewDivider').hidden=!rv;if(rv){const t=s.trace.take,runs=missRuns(s.trace.score);$('reviewLabel').textContent='Спроба '+String(t.id).padStart(2,'0');const pct=scorePct(s.trace.score);$('reviewPct').textContent=pct===null?'—':pct+'%';$('missCount').textContent=runs.length?runs.length+' '+plural(runs.length,'промах','промахи','промахів'):'без промахів';$('prevMiss').disabled=$('nextMiss').disabled=!runs.length||s.mode!=='idle';}
  $('chartWrap').classList.toggle('scrub',s.mode!=='singing');
@@ -938,7 +942,7 @@ function storeTake(meta,m){
  const a=analyzeTake(meta,m.points,m.duration);
  const take={...meta,...m,...a,hasAudio:!!m.blob,clipped:!!m.clipped,url:m.blob?URL.createObjectURL(m.blob):null,endSong:meta.a+m.duration*meta.speed,runId:replaced?.runId||newRunId()};
  if(replaced){clearUndoPunch();if(meta.keepUndo!==false)s.undoPunch={before:replaced,after:take};else if(replaced.url)URL.revokeObjectURL(replaced.url);s.takes[s.takes.indexOf(replaced)]=take;}else s.takes.unshift(take);
- s.trace={take,points:take.points,score:take.score};s.current=null;const saved=saveRun(take);if(m.reason==='end')saved.then(ok=>tellHost(take,ok));markUnsaved();renderTakes();if(window.LumaActivity?.enabled())act('attempt',attemptLog(take,!!replaced));
+ s.trace={take,points:take.points,score:take.score};s.current=null;const saved=saveRun(take);if(m.reason==='end')saved.then(ok=>tellHost(take,ok));saved.then(ok=>{if(ok)setTimeout(latencyAuto,1000);});markUnsaved();renderTakes();if(window.LumaActivity?.enabled())act('attempt',attemptLog(take,!!replaced));
  say(replaced?'Спробу '+String(take.id)+' перезаписано від '+fmt(meta.lastPunchAt)+'.':'Спробу '+String(take.id)+' записано: лінія й оцінка зберігаються самі.');return take;
 }
 function clearUndoPunch(){if(s.undoPunch){if(s.undoPunch.before.url)URL.revokeObjectURL(s.undoPunch.before.url);s.undoPunch=null;}}
@@ -1573,7 +1577,9 @@ stage.addEventListener('pointermove',e=>{if(!s.scrub)return;const b=bounds(),v=v
 const endScrub=e=>{if(!s.scrub)return;const {moved,target}=s.scrub;s.scrub=null;if(moved)applySeek(target??s.pos);};stage.addEventListener('pointerup',endScrub);stage.addEventListener('pointercancel',endScrub);
 stage.addEventListener('wheel',e=>{if(s.mode==='singing')return;e.preventDefault();const d=(Math.abs(e.deltaX)>Math.abs(e.deltaY)?e.deltaX:e.deltaY)/120;const t=clamp((s.wheelPos??now())+d*.5,0,song.duration);s.wheelPos=t;if(s.mode==='idle'){s.pos=t;s.dirty=true;requestDraw();}clearTimeout(s.wheelTimer);s.wheelTimer=setTimeout(()=>{const p=s.wheelPos;s.wheelPos=null;applySeek(p);},120);},{passive:false});
 $('gate').oninput=()=>{prefs.gate=+$('gate').value;s.worker?.postMessage({type:'settings',gate:prefs.gate});savePrefs();sync();};$('octave').onchange=()=>{prefs.octave=+$('octave').value;if(traceShown())rescoreTake(s.trace.take,{octave:prefs.octave});savePrefs();setRangeScale();sync();};
-$('latency').onchange=()=>{const v=+$('latency').value;if(!Number.isFinite(v))return;prefs.latency=clamp(v,-500,1000);savePrefs();sync();};
+$('latency').onchange=()=>{const v=+$('latency').value;if(!Number.isFinite(v))return;prefs.latency=clamp(v,-500,1000);s.latHint=null;savePrefs();sync();};
+$('latencyCalc').onclick=latencyCalc;$('latencyApply').onclick=latencyApply;
+$('latencyHintCheck').onclick=()=>{s.latHint=null;sync();modal('settingsDialog');$('latencyResult').scrollIntoView({block:'nearest'});};$('latencyHintLater').onclick=()=>{s.latHint=null;sync();};
 $('tolerance').onchange=()=>{const v=+$('tolerance').value;if(!Number.isFinite(v))return;prefs.tolerance=clamp(v,10,100);prefs.level=Object.keys(LEVELS).find(k=>LEVELS[k].tolerance===prefs.tolerance)||'custom';savePrefs();sync();};
 $('micSelect').onchange=()=>{prefs.mic=$('micSelect').value;if(s.stream)releaseMic();};$('micToggle').onclick=async()=>{if(s.stream){await releaseMic();return;}if(s.busy)return;const token=++s.cancel;s.busy=true;s.busyFor='mic';sync();try{await ensureMic(token);}catch(e){error(micError(e),errorKind(e));}finally{if(token===s.cancel){s.busy=false;sync();}}};
 $('applyRange').onclick=()=>{const a=+$('rangeA').value,b=+$('rangeB').value;if(!Number.isFinite(a)||!Number.isFinite(b)||a<0||b>song.duration||b-a<.5){toast('Початок і кінець мають бути в межах пісні; довжина — від 0.5 с.');return;}setRange(a,b);s.pos=a;s.history=[];setRangeScale();sync();toast('Фрагмент встановлено.');};
@@ -1591,7 +1597,127 @@ window.addEventListener('beforeunload',e=>{if(s.unsaved||s.mode==='singing'){e.p
 document.addEventListener('visibilitychange',()=>{if(document.hidden){if(s.raf)cancelAnimationFrame(s.raf);s.raf=0;if(s.mode!=='idle'){prefs.loop=false;stopTransport('hidden');toast('Вкладку приховано — відтворення зупинено.');}}else{s.dirty=true;requestDraw();}});
 addEventListener('resize',fitStage);
 new ResizeObserver(resize).observe($('chartWrap'));new ResizeObserver(resize).observe($('timelineWrap'));
+// ── «Розрахувати затримку» (docs/design/LATENCY_AUTOCAL.md): the microphone offset the recorded attempts imply ──────
+// The newest attempts of every song, newest first, until 30 of them are usable; other songs' melodies come from Studio's
+// /targets, with this browser's note edits applied. Only what the score counts is matched: no ignored note, no
+// wordless stretch (docs/design/WORDLESS_TARGETS.md). Without Studio only this song's attempts count, and the result says
+// so. After a saved attempt the same check runs by itself at most once a day, and only a clearly wrong setting earns a
+// hint. Nothing is applied without a tap.
+const LAT={key:'luma.latency.check',same:10,hint:30,atSetting:8,months:['січня','лютого','березня','квітня','травня','червня','липня','серпня','вересня','жовтня','листопада','грудня']};
+const studioPage=/^https?:$/.test(location.protocol)&&(location.pathname==='/demo'||/^\/song\/[^/]+\.html$/.test(location.pathname));
+function editedNotes(id,notes,duration){try{const d=JSON.parse(localStorage.getItem('luma.target.'+id)||'null');if(d&&validNotes(d.notes,duration))return d.notes;}catch(_){}return notes;}
+function ownTarget(){const hop=song.hop,n=Math.round(song.duration/hop)+1,cents=new Int16Array(n).fill(HIST.noPitch);
+ for(const p of song.points){if(p[1]===null||!p[3])continue;const i=Math.round(p[0]/hop);if(i>=0&&i<n)cents[i]=clamp(Math.round(p[1]*100),-32767,32767);}
+ const w=scoredSpans();return {id:song.id,hop,cents,notes:song.notes,spans:w.on?w.spans:null};}
+async function otherTargets(ids){
+ if(!studioPage)return null;
+ try{const r=await fetch('/targets?ids='+ids.map(encodeURIComponent).join(','));if(!r.ok)return null;const got=await r.json(),out=new Map();
+  for(const h of ids){const t=got[h];if(!t||typeof t.id!=='string'||!(t.hop>0))continue;
+   const notes=editedNotes(t.id,t.notes||[],t.duration),on=!t.lesson&&!!t.words&&Array.isArray(t.lines);// wordless stretches never vote
+   out.set(h,{id:t.id,hop:t.hop,cents:unb64(t.cents,Int16Array),notes,spans:on?wordedSpans(notes,t.lines).spans:null});}
+  return out;}catch(_){return null;}
+}
+// stop() is asked before every attempt: the automatic check gives way as soon as singing starts.
+async function latencyEstimate(stop=()=>false){
+ const t0=performance.now(),own=songHash(),E=window.LumaLatency;let cands;
+ if(historyAvailable())cands=(await idbAll('runs')).filter(r=>r.hasTrace).sort(byNewest).map(run=>({run}));
+ else cands=s.takes.filter(t=>t.points.length).map(t=>({run:{a:t.a,speed:t.speed,latency:t.latency||0,startedAt:t.startedAt,mapVersion:t.mapVersion,songHash:own},trace:packTrace(t.points)})).sort((x,y)=>byNewest(x.run,y.run));
+ const targets=new Map([[own,ownTarget()]]),others=[...new Set(cands.map(c=>c.run.songHash).filter(h=>h!==own))];
+ let only=!historyAvailable();
+ if(others.length){const got=await otherTargets(others);if(got)for(const [h,t]of got)targets.set(h,t);else only=true;}
+ const ready=new Map(),takes=[];let usable=0;
+ for(const c of cands){
+  if(stop())return null;if(usable>=E.CAL.recent)break;
+  const tg=targets.get(c.run.songHash);if(!tg||!String(c.run.mapVersion||'').startsWith(tg.id+':'))continue;// sung against an older map
+  const tr=c.trace||await idbGet('traces',c.run.id).catch(()=>null);if(!tr)continue;
+  let T=ready.get(c.run.songHash);if(!T){T=E.prepareTarget(tg);ready.set(c.run.songHash,T);}
+  const e=E.estimateTake(c.run,tr,T);takes.push(e);if(e.ok)usable++;
+  if(c.trace)await new Promise(ok=>setTimeout(ok));
+ }
+ if(stop())return null;
+ return {...E.aggregate(takes),only,current:prefs.latency,ms:Math.round(performance.now()-t0)};
+}
+function latencyLog(r,auto,hint=false){act('latency_estimate',{latency:r.ok?Math.round(r.latency):null,ci90:r.ok?r.ci90.map(Math.round):null,n:r.n,current:r.current,onset:r.ok&&r.onsetLag!==null?Math.round(r.onsetLag):null,ms:r.ms,auto,hint});}
+const round5=v=>clamp(Math.round(v/5)*5,-500,1000);
+function latencySuggest(r){return round5(r.latency);}
+function latencyPrecision(r){return Math.max(5,Math.ceil((r.ci90[1]-r.ci90[0])/2/5)*5);}
+function dayMonth(iso){const d=new Date(iso);return {d:d.getDate(),m:d.getMonth(),y:d.getFullYear()};}
+function dateSpan(from,to){const a=dayMonth(from),b=dayMonth(to);
+ if(a.d===b.d&&a.m===b.m&&a.y===b.y)return b.d+' '+LAT.months[b.m];
+ return a.m===b.m&&a.y===b.y?a.d+'–'+b.d+' '+LAT.months[b.m]:a.d+' '+LAT.months[a.m]+' – '+b.d+' '+LAT.months[b.m];}
+function latencyLines(r){
+ const cur=prefs.latency,parts=[];
+ if(!r.ok){
+  parts.push(['Поки замало даних: '],['b',String(r.n)],[' '+plural(r.n,'придатна спроба','придатні спроби','придатних спроб')+' з '+window.LumaLatency.CAL.minTakes+' потрібних. Заспівай ще кілька пісень від початку до кінця.']);
+  return {parts,meta:r.only?(historyAvailable()?'Лише ця пісня: спроби інших пісень видно, коли пісню відкрито з бібліотеки Studio.':'Лише ця пісня і лише спроби з цієї вкладки: історію спроб веде бібліотека Studio.'):'',apply:null};}
+ const sug=latencySuggest(r),prec=latencyPrecision(r),diff=sug-cur;
+ const onset=r.onsetLag===null?'':Math.abs(r.onsetLag)<=60?'початок фраз — вчасно, без окремого запізнення'
+  :'на початку фраз ти вступаєш ще на ~'+Math.round(Math.abs(r.onsetLag)/10)*10+' мс '+(r.onsetLag>0?'пізніше':'раніше')+' — зсув цього не виправить';
+ const meta=[r.n+' '+plural(r.n,'остання спроба','останні спроби','останніх спроб')+', '+dateSpan(r.from,r.to),r.only?'лише ця пісня':'',onset].filter(Boolean).join(' · ')+'.';
+ if(Math.abs(diff)<=LAT.same){parts.push(['Зсув уже правильний (±'+prec+' мс).']);return {parts,meta,apply:null};}
+ parts.push(['Голос приходить на '],['b',Math.abs(diff)+' мс'],[' '+(diff<0?'раніше':'пізніше')+' за мелодію. Пропоную зсув '],['b',sug+' мс'],[' (зараз '+cur+' мс), точність ±'+prec+' мс.']);
+ return {parts,meta,apply:sug};
+}
+// sync() calls this often; the status region is rewritten only when what it says changes, so it is announced once.
+let latencySig='';
+function renderLatency(){
+ const L=s.lat,box=$('latencyResult'),blocked=s.mode!=='idle'||s.busy||s.awaitFinish;
+ $('latencyCalc').textContent=L?.busy?'Рахую…':L?.result?'Розрахувати знову':'Розрахувати затримку';$('latencyCalc').disabled=!!L?.busy||blocked;
+ $('latencyApply').disabled=blocked;$('latencyHint').hidden=!s.latHint||blocked;
+ const sig=L?[L.busy,L.error,L.saved,L.result,prefs.latency]:null;if(sig&&sig.every((v,i)=>v===latencySig[i])||!sig&&!latencySig)return;latencySig=sig||'';
+ let apply=null;box.hidden=!L||L.busy;
+ if(L&&!L.busy){const main=$('latencyMain');main.replaceChildren();let meta='';
+  if(L.error)main.textContent=L.error;
+  else if(L.saved!==undefined&&L.saved===prefs.latency){main.textContent='Зсув '+L.saved+' мс збережено.';meta=latencyLines(L.result).meta;}
+  else{const x=latencyLines(L.result);for(const [a,b]of x.parts)main.append(b===undefined?a:Object.assign(document.createElement(a),{textContent:b}));meta=x.meta;apply=x.apply;}
+  $('latencyMeta').textContent=meta;$('latencyMeta').hidden=!meta;}
+ $('latencyApply').hidden=apply===null;if(apply!==null){$('latencyApply').textContent='Застосувати '+apply+' мс';$('latencyApply').dataset.value=String(apply);}
+}
+async function latencyCalc(){
+ if(s.lat?.busy)return;s.lat={busy:true};renderLatency();
+ try{const r=await latencyEstimate();s.lat={result:r};latencyLog(r,false);}
+ catch(e){s.lat={error:readable(e,'Не вдалося прочитати спроби.')};}
+ renderLatency();
+}
+function latencyApply(){
+ const v=+$('latencyApply').dataset.value;if(!Number.isFinite(v)||!s.lat?.result)return;
+ const from=prefs.latency;prefs.latency=clamp(v,-500,1000);savePrefs();act('latency_apply',{from,to:prefs.latency});
+ s.lat.saved=prefs.latency;s.latHint=null;sync();say('Зсув '+prefs.latency+' мс збережено');
+}
+// The automatic check: from Studio only, never inside a «Заняття» frame, once a day, after an attempt is in the history.
+function latencyCheckDue(){
+ if(!studioPage||window.parent!==window||!historyAvailable()||!window.LumaLatency)return false;
+ try{return JSON.parse(localStorage.getItem(LAT.key)||'{}').day!==localDay(Date.now());}catch(_){return true;}
+}
+function latencyHintWorthy(r){
+ if(!r?.ok)return false;const cur=prefs.latency,sug=latencySuggest(r);
+ return r.settings.filter(v=>Math.abs(v-cur)<.5).length>=LAT.atSetting&&Math.abs(sug-cur)>=LAT.hint&&!(r.ci90[0]<=cur&&cur<=r.ci90[1]);
+}
+let latencyRunning=false;
+async function latencyAuto(){
+ if(latencyRunning||!latencyCheckDue()||s.mode!=='idle')return;latencyRunning=true;
+ try{const r=await latencyEstimate(()=>s.mode!=='idle');if(!r)return;// singing started: the next saved attempt tries again
+  try{localStorage.setItem(LAT.key,JSON.stringify({day:localDay(Date.now())}));}catch(_){}
+  const hint=latencyHintWorthy(r);latencyLog(r,true,hint);if(!s.lat?.busy)s.lat={result:r};
+  if(hint){const diff=latencySuggest(r)-prefs.latency;s.latHint={diff};
+   $('latencyHintText').textContent='Схоже, зсув мікрофона '+(diff<0?'завеликий':'замалий')+': голос у слідах на ~'+Math.abs(diff)+' мс '+(diff<0?'раніше':'пізніше')+' за мелодію.';}
+  sync();
+ }catch(_){}finally{latencyRunning=false;}
+}
 function silentWav(seconds,rate=48000){const n=Math.round(seconds*rate),b=new ArrayBuffer(44+n*2),v=new DataView(b);const text=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i));};text(0,'RIFF');v.setUint32(4,36+n*2,true);text(8,'WAVE');text(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,rate,true);v.setUint32(28,rate*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);text(36,'data');v.setUint32(40,n*2,true);return new Blob([b],{type:'audio/wav'});}
+// A voice for the latency checks: it sings this song's contour on time, heard `lag` ms later by the microphone (the
+// round trip the setting should equal), with ±15 ¢ of wobble. `late` ms of silence after every phrase onset makes a
+// singer who starts phrases late; kind 'random' is pitch with no relation to the melody, 'silence' is nothing at all.
+function synthTrace({lag=0,octave=0,kind='voice',late=0,seed=1},run){
+ const hop=.021333,n=Math.floor((run.b-run.a)/run.speed/hop),cents=new Int16Array(n),conf=new Uint8Array(n),db=new Int8Array(n),onsets=[];
+ let x=(seed*7919)%2147483647||1;const rnd=()=>(x=x*16807%2147483647)/2147483647;
+ let last=-1e9;for(const p of song.points)if(p[1]!==null){if(p[0]-last>.25)onsets.push(p[0]);last=p[0];}
+ for(let i=0;i<n;i++){const sT=run.a+(i*hop-(lag-run.latency)/1000)*run.speed,p=pointAt(sT);let m=p&&p[1]!==null?p[1]+octave:null;
+  if(m!==null&&late){let k=onsets.length;while(k>0&&onsets[k-1]>sT)k--;if(k&&sT-onsets[k-1]<late/1000)m=null;}
+  if(kind==='silence')m=null;else if(kind==='random')m=45+rnd()*36;
+  if(m===null){cents[i]=HIST.noPitch;conf[i]=0;db[i]=-70;}else{cents[i]=Math.round(m*100+(rnd()-.5)*30);conf[i]=242;db[i]=-20;}}
+ return {hop,segments:[{t0:0,cents,conf,db}]};
+}
 // Test hooks for the history: everything below is read-only except seedRun, which exists so a suite can build a
 // week of practice without a microphone and without waiting for real time to pass.
 const historyHooks={
@@ -1619,18 +1745,23 @@ const historyHooks={
  // Write attempts straight into the store, dated freely: the seed a progress test needs.
  seedRun:async spec=>{const ids=await historyHooks.seedMany([spec]);return ids[0];},
  seedMany:async list=>{
-  const make=({match=8000,target=600,startedAt,level=prefs.level,view=prefs.view,speed=prefs.speed,a=0,b=song.duration,phrases=[],songTarget,medianCents=20,id})=>{
+  const traces=[],make=({match=8000,target=600,startedAt,level=prefs.level,view=prefs.view,speed=prefs.speed,a=0,b=song.duration,phrases=[],songTarget,medianCents=20,id,latency=0,mapVersion:mv=mapVersion(),trace})=>{
    const started=startedAt||new Date().toISOString(),hit=Math.round(target*match/10000),L=LEVELS[level]||LEVELS.normal;
    const stat=[];for(const p of phrases)stat.push(p.target,p.hit,p.sung??p.hit,p.median??-1);
-   return {id:id||newRunId(),songHash:songHash(),mapVersion:mapVersion(),cmpKey:cmpKeyOf({mapVersion:mapVersion(),level,tolerance:level==='custom'?prefs.tolerance:L.tolerance,view,speed}),
-    startedAt:started,endedAt:started,localDay:localDay(Date.parse(started)),a,b,speed,level,tolerance:L.tolerance,view,octave:0,latency:0,
+   const run={id:id||newRunId(),songHash:songHash(),mapVersion:mv,cmpKey:cmpKeyOf({mapVersion:mv,level,tolerance:level==='custom'?prefs.tolerance:L.tolerance,view,speed}),
+    startedAt:started,endedAt:started,localDay:localDay(Date.parse(started)),a,b,speed,level,tolerance:L.tolerance,view,octave:0,latency,
     hasAudio:false,clipped:false,punches:0,target,hit,sung:hit,draftFrames:0,medianCents,match:Math.round(10000*hit/target),
     songTarget:songTarget??targetTotals(view).song,strict:{targetTime:0,compared:0,inside:0,median:-1},
-    phraseIds:Int32Array.from(phrases.map(p=>p.id)),phraseStats:Int32Array.from(stat),hasTrace:false};};
-  const runs=list.map(make),ops=runs.map(r=>['runs','put',r]);
+    phraseIds:Int32Array.from(phrases.map(p=>p.id)),phraseStats:Int32Array.from(stat),hasTrace:!!trace};
+   if(trace){const tr=synthTrace(trace,run);traces.push(['traces','put',{runId:run.id,songHash:run.songHash,hop:tr.hop,segments:tr.segments}]);}
+   return run;};
+  const runs=list.map(make),ops=[...runs.map(r=>['runs','put',r]),...traces];
   ops.push(['songs','put',songEntry([...s.hist.runs,...runs].sort(byNewest))]);
   await idbWrite(ops);await loadHistory();return runs.map(r=>r.id);},
- reloadMs:async()=>{const t0=performance.now();await loadHistory();return +(performance.now()-t0).toFixed(1);}
+ reloadMs:async()=>{const t0=performance.now();await loadHistory();return +(performance.now()-t0).toFixed(1);},
+ // the synthetic voice as live points, for an attempt injected into the tab (file:// keeps no history)
+ synthPoints:(spec,a,b,speed=1)=>{const tr=synthTrace(spec,{a,b,speed,latency:prefs.latency});return Array.from(tr.segments[0].cents,(c,i)=>({t:i*tr.hop,f:c===HIST.noPitch?null:440*2**((c/100-69)/12),confidence:tr.segments[0].conf[i]/255,db:tr.segments[0].db[i]}));},
+ latency:()=>({prefs:prefs.latency,result:s.lat?.result?{...s.lat.result}:null,hint:s.latHint,check:localStorage.getItem(LAT.key)})
 };
 window.Luma={diagnostics:()=>({mode:s.mode,busy:s.busy,pending:s.awaitFinish,time:now(),range:{...s.range},takeCount:s.takes.length,takes:s.takes.map(t=>({id:t.id,endSong:t.endSong,duration:t.duration,samples:t.duration*t.sampleRate,sampleRate:t.sampleRate,points:t.points.length,stats:t.stats,match:scorePct(t.score),frames:t.score.frames.length})),mic:!!s.stream,frequency:s.current?.f??null,computeMs:s.computeMs,windowMs:s.windowMs,contextState:s.ctx?.state,bufferDurations:[...s.bufs].map(([k,b])=>({speed:k,back:b.back.duration,fore:b.fore.duration}))}),targetAt:t=>targetAt(t),song:()=>({title:song.title,duration:song.duration,singEnd:singEnd(),metrics:song.metrics,notes:song.notes.length,phrases:song.phrases.length,lyrics:song.lyrics.length}),
  // Test hooks: pure scoring and synthetic takes (silent WAV) so the review path can be exercised without a microphone.

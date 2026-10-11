@@ -31,6 +31,10 @@ of your voice, no server after the file is built.
   buttons in the tab's footer.
 
   ![The Прогрес tab: the record, the average of the last five attempts, the day streak, a trend over attempts and the weak phrases](docs/screenshots/trainer-progress.png)
+- **Microphone offset from your attempts.** «Розрахувати затримку» in the settings compares the newest 30 usable
+  attempts of every song with the melody and suggests the offset, with its precision and dates; one tap applies it.
+  When the setting is clearly off, a hint after an attempt says so, at most once a day.
+  [docs/design/LATENCY_AUTOCAL.md](docs/design/LATENCY_AUTOCAL.md)
 - **Punch-in.** Seek inside an attempt and "Співати" becomes "Перезаписати з …": the same take is re-recorded from that point. Нова спроба records a separate take; Скасувати перезапис restores the previous version of the last punch.
 - **Lives mode.** An optional switch in the settings, off by default: hearts in the corner of the stage, a life lost only to
   sustained misses under the notes (never to one short slip or to silence between phrases), and when the last one goes
@@ -122,14 +126,18 @@ history, the 3-2-1 and auto-start, «Повторити», skip and close during
 refused, songs in picker order, lives mode, the activity events, the real autoplay policy after one click, leaving,
 reduced motion) and checks covers against an ffmpeg-made fixture. `autopick.mjs` drives «Обери за мене» on its own fixtures at 390 px and 1440 px:
 difficulty in `/status`, the first pick, a step up, down and none, a repeat that does not climb, random picks without
-repeats, the history read without creating the base, the home button and the real autoplay policy after its click. Every suite requires a clean console. Set `LUMA_BROWSER=/path/to/chrome` to use a specific
+repeats, the history read without creating the base, the home button and the real autoplay policy after its click.
+`latency.mjs` seeds attempts with a synthetic voice a known number of milliseconds late and checks «Розрахувати
+затримку»: recovery and Apply, pooling across settings and speeds, noise and octave-down takes, late phrase starts, too
+few attempts, other songs through `/targets`, wordless notes, 200 four-minute attempts under 1.5 s, the daily hint,
+390 px and 1440 px, and `file://`. Every suite requires a clean console. Set `LUMA_BROWSER=/path/to/chrome` to use a specific
 Chromium build.
 
 ## Layout
 
 ```
 app/       head.html (styles + markup, {{TITLE}} / {{ARTIST}} placeholders), workers.html (AudioWorklet capture + YIN worker), app.js,
-           activity.js (activity log, shared with Studio)
+           activity.js (activity log, shared with Studio), latency.js (microphone offset estimate from attempts)
 studio/    prepare_song.py (pipeline), build_html.py (package → HTML, --rebuild), studio_server.py + studio.html, covers.py, difficulty.py, luma-studio.sh,
            activity_report.py (digest of the activity log)
 examples/  make_demo.py (synthetic demo song)

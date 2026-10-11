@@ -149,5 +149,6 @@ in it — without those floors "100 % over 0.3 s" would hold first place forever
 the whole map can therefore never hold one: the weak-phrase map labels it «закоротка для рекорду», puts it last and leaves
 it out of the count of phrases without a counted attempt. Ties go to the smaller median |Δ|, then to
 the earlier date. For a lesson a record is also kept per exercise, on each level separately, because one exercise is one
-skill sung in nine keys. Rhythm and entry timing are still not scored: the end-to-end microphone latency is not measured,
-so a rhythm mark would be an invention.
+skill sung in nine keys. Rhythm and entry timing are still not scored. The microphone offset (`prefs.latency`) is now
+estimated from the recorded attempts on request («Розрахувати затримку», [design/LATENCY_AUTOCAL.md](design/LATENCY_AUTOCAL.md)),
+but that is one constant for the whole audio path, and a rhythm mark would still be an invention.
