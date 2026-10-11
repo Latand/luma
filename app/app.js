@@ -54,8 +54,30 @@ function effective(){if(s.mode==='singing'&&s.live)return s.live.opt;if(traceSho
 function customRange(){return s.rangeId!==0&&(s.range.a>.01||s.range.b<song.duration-.01);}
 function noteAt(t){const ns=song.notes;let a=0,b=ns.length;while(a<b){const m=(a+b)>>1;if(ns[m].a<=t)a=m+1;else b=m;}const n=ns[a-1];return n&&t<n.b?n:null;}
 function pointAt(t){const a=song.points;let lo=0,hi=a.length;while(lo<hi){const mid=(lo+hi)>>1;if(a[mid][0]<t)lo=mid+1;else hi=mid;}let p=a[Math.min(lo,a.length-1)];const prev=a[lo-1];if(prev&&(!p||Math.abs(prev[0]-t)<Math.abs(p[0]-t)))p=prev;return p&&Math.abs(p[0]-t)<song.hop*.75?p:null;}
-function targetAt(t,opt=effective()){
- if(t<0||t>song.duration)return null;const n=noteAt(t),p=pointAt(t);if(n?.ignored)return null;
+// Wordless target (docs/design/WORDLESS_TARGETS.md). In a song with words, a chain of notes that comes nowhere near a
+// lyric line is stem bleed in an instrumental break or singing with no words: it is drawn dimmed and never scored.
+// Notes chain the way the build chains phrases (gap ≤ 0.85 s); a chain is worded when any of its notes overlaps a lyric
+// line widened by 0.5 s. Scored time is the worded chains plus the widened lines. Lessons and songs without words keep
+// every target. Read from the notes as they are now, so an edit or a verified fragment is covered; invalidateMap()
+// drops it.
+const WORDLESS={gap:.85,margin:.5};
+let spansCache=null;
+function scoredSpans(){
+ if(spansCache)return spansCache;
+ const on=!song.lesson&&(song.lyrics||[]).some(l=>l.words.length>0);if(!on)return spansCache={on,spans:[],last:null};
+ const M=WORDLESS.margin,lines=song.lyrics.map(l=>[l.a-M,l.b+M]),near=n=>lines.some(([a,b])=>n.a<b&&n.b>a),spans=[...lines];let last=null;
+ const ns=song.notes.filter(n=>!n.ignored).sort((x,y)=>x.a-y.a);
+ for(let i=0;i<ns.length;){let j=i,end=ns[i].b,worded=near(ns[i]);
+  while(j+1<ns.length&&ns[j+1].a-end<=WORDLESS.gap){j++;end=Math.max(end,ns[j].b);worded||=near(ns[j]);}
+  if(worded){spans.push([ns[i].a,end]);if(last===null||end>last)last=end;}i=j+1;}
+ spans.sort((x,y)=>x[0]-y[0]);const merged=[];for(const sp of spans){const top=merged.at(-1);if(top&&sp[0]<=top[1])top[1]=Math.max(top[1],sp[1]);else merged.push([...sp]);}
+ return spansCache={on,spans:merged,last};
+}
+function scoredAt(t){const w=scoredSpans();if(!w.on)return true;const a=w.spans;let lo=0,hi=a.length;while(lo<hi){const m=(lo+hi)>>1;if(a[m][0]<=t)lo=m+1;else hi=m;}const sp=a[lo-1];return !!sp&&t<=sp[1];}
+function wordlessNote(n){return !n.ignored&&!scoredAt((n.a+n.b)/2);}
+// raw: the drawn target, wordless stretches included; everything that scores reads the default.
+function targetAt(t,opt=effective(),raw=false){
+ if(t<0||t>song.duration||!raw&&!scoredAt(t))return null;const n=noteAt(t),p=pointAt(t);if(n?.ignored)return null;
  if(opt.view==='notes')return n?{m:n.m+opt.octave,ok:!!n.ok||!!n.manual,verified:verifiedAt(t),id:n.id}:null;
  if(!p||p[1]===null)return null;let m=p[1];if(n?.manual)m+=n.m-(n.originalM??n.m);
  return {m:m+opt.octave,ok:!!p[3]||!!n?.manual,verified:verifiedAt(t),id:n?.id};
@@ -460,13 +482,17 @@ function songHash(){return song.sourceId||song.id;}
 // group; confirming a fragment by ear does not, because targetAt().m never reads `verified`.
 function hash16(text){let a=0x811c9dc5,b=0x1b873593;for(let i=0;i<text.length;i++){const c=text.charCodeAt(i);a=Math.imul(a^c,16777619)>>>0;b=Math.imul(b^(c+i),2246822519)>>>0;}return (a>>>0).toString(16).padStart(8,'0')+(b>>>0).toString(16).padStart(8,'0');}
 let mapVersionCache='',totalsCache=new Map();
-function invalidateMap(){mapVersionCache='';totalsCache=new Map();s.shadowSig='';s.progressSig='';}
-// A sung pass ends with the last thing to sing: the latest note or lyric line, plus a short release, never past the
-// audio. The outro and the silence after it are not part of the attempt (docs/design/SESSION_FLOW_RESULTS.md). One pass
-// over the notes, read from the song as it is now, so an edit or another song never meets a stale end.
+function invalidateMap(){mapVersionCache='';spansCache=null;totalsCache=new Map();s.shadowSig='';s.progressSig='';}
+// A sung pass ends with the last thing to sing: the latest scored note or lyric line, plus a short release, never past
+// the audio. The outro, a wordless tail and the silence after it are not part of the attempt
+// (docs/design/SESSION_FLOW_RESULTS.md, docs/design/WORDLESS_TARGETS.md). One pass over the notes, read from the song as
+// it is now, so an edit or another song never meets a stale end.
 const RELEASE=.5;
-function singEnd(){let e=0;for(const n of song.notes)if(!n.ignored&&n.b>e)e=n.b;for(const l of song.lyrics||[])if(l.b>e)e=l.b;return e>0?Math.min(song.duration,e+RELEASE):song.duration;}
-function mapVersion(){return mapVersionCache||(mapVersionCache=song.id+':'+hash16(JSON.stringify(song.notes.map(n=>[n.id,Math.round(n.a*1000),Math.round(n.b*1000),Math.round(n.m*100),n.ignored?1:0]))));}
+function singEnd(){let e=0;for(const n of song.notes)if(!n.ignored&&n.b>e&&!wordlessNote(n))e=n.b;for(const l of song.lyrics||[])if(l.b>e)e=l.b;return e>0?Math.min(song.duration,e+RELEASE):song.duration;}
+// With the wordless rule on, the scored spans are part of the ruler: every song with words opened a new group once
+// when the rule arrived, and a lesson or a song without words keeps the hash it always had.
+function mapVersion(){if(mapVersionCache)return mapVersionCache;const notes=song.notes.map(n=>[n.id,Math.round(n.a*1000),Math.round(n.b*1000),Math.round(n.m*100),n.ignored?1:0]),w=scoredSpans();
+ return mapVersionCache=song.id+':'+hash16(JSON.stringify(w.on?[notes,w.spans.map(([a,b])=>[Math.round(a*1000),Math.round(b*1000)])]:notes));}
 function levelKey(meta){return meta.level==='custom'?'custom:'+meta.tolerance:meta.level;}
 // The ruler a score was measured with. Two numbers may stand side by side only when all five agree. The vocal octave
 // is not in it: it moves the target and leaves the difficulty alone.
@@ -1061,36 +1087,41 @@ function rulerDiff(r){
  return parts.join(', ');
 }
 // Every phrase of the song, in the order it is sung. A phrase without a counted attempt says why: never sung, sung
-// only with another ruler, sung only in part, or too short for any record at all.
+// only with another ruler, sung only in part, too short for any record at all, or nothing in it is scored because it
+// has notes and no words (WORDLESS_TARGETS.md).
 function phraseMap(runs){
- const rec=records(runs),totals=targetTotals(prefs.view),key=currentKey(),cand=new Map(s.hist.runs.map(r=>[r,phraseCandidates(r)]));
+ const rec=records(runs),totals=targetTotals(prefs.view),rule=scoredSpans().on,key=currentKey(),cand=new Map(s.hist.runs.map(r=>[r,phraseCandidates(r)]));
  const mine=r=>cand.get(r)||phraseCandidates(r),others=s.hist.runs.filter(r=>r.cmpKey!==key);
  const order=[...(song.phrases||[])].sort((x,y)=>x.a-y.a||x.id-y.id);
  return order.map((p,i)=>{
   const best=rec.phrases.get(p.id),label=p.label||('Фрагмент '+p.id),num=(/(\d+)\s*$/.exec(label)||[])[1];
+  // no scored frame at all under notes that are drawn: a wordless phrase, which no attempt can count either
+  const wordless=rule&&!totals.phrase.get(p.id)&&song.notes.some(n=>!n.ignored&&n.a<p.b&&n.b>p.a);
   // under 1.5 s of target in the whole phrase no attempt can ever count it: the phrase is short, not unsung
-  const short=(totals.phrase.get(p.id)||0)<HIST.minPhraseFrames;
+  const short=!wordless&&(totals.phrase.get(p.id)||0)<HIST.minPhraseFrames;
   // the same 1.5 s floor the record uses, so the notch can never mark an attempt too short to be counted
   let last=null,count=0,brief=null;
   for(const r of runs)for(const c of mine(r))if(c.id===p.id){
    if(c.target>=HIST.minPhraseFrames){count++;if(last===null)last=c.match;}else if(brief===null)brief=c.match;}
   let why='',elsewhere=null;
   if(!best){
-   if(!short)elsewhere=others.find(r=>mine(r).some(c=>c.id===p.id&&c.target>=HIST.minPhraseFrames))||null;
-   if(short)why='закоротка для рекорду: у фразі менше 1.5 с нот'+(brief!==null?' · остання спроба '+pct100(brief)+'%':'');
+   if(!short&&!wordless)elsewhere=others.find(r=>mine(r).some(c=>c.id===p.id&&c.target>=HIST.minPhraseFrames))||null;
+   if(wordless)why='без слів — не рахується';
+   else if(short)why='закоротка для рекорду: у фразі менше 1.5 с нот'+(brief!==null?' · остання спроба '+pct100(brief)+'%':'');
    else if(brief!==null)why='спроба зачепила менше 1.5 с нот цієї фрази, тож не зарахована';
    else if(runs.some(r=>r.a<p.b&&r.b>p.a&&(r.a>p.a+.05||r.b<p.b-.05)))why='спроби накрили лише частину фрази; зараховується від 80 % її нот';
    else why=elsewhere?'':'не співано';
    if(elsewhere)why+=(why?' · зараховано':'зараховано лише')+' з іншою лінійкою: '+rulerDiff(elsewhere);
   }
-  return {id:p.id,a:p.a,b:p.b,label,num:num?String(+num):String(i+1),best:pct100(best?best.match:null),last:pct100(last),count,short,why,
+  return {id:p.id,a:p.a,b:p.b,label,num:num?String(+num):String(i+1),best:pct100(best?best.match:null),last:pct100(last),count,short,wordless,why,
    elsewhere:elsewhere?rulerDiff(elsewhere):''};
  });
 }
 // Worst first by the personal best: one bad take must not reshuffle the practice list, a phrase nobody has sung yet
-// stands after the sung ones rather than pretending to be the weakest, and a phrase too short to count stands last.
+// stands after the sung ones rather than pretending to be the weakest, a phrase too short to count after those, and a
+// wordless one last.
 function weakRows(runs){
- return phraseMap(runs).sort((a,b)=>(a.best===null)-(b.best===null)||a.short-b.short||(a.best-b.best)||a.a-b.a);
+ return phraseMap(runs).sort((a,b)=>(a.best===null)-(b.best===null)||a.wordless-b.wordless||a.short-b.short||(a.best-b.best)||a.a-b.a);
 }
 function phraseText(w){
  return w.label+' · '+fmt(w.a)+'–'+fmt(w.b)+' · '+(w.best===null?w.why
@@ -1101,7 +1132,7 @@ function phraseColumn(w,selected,onclick){
  const b=document.createElement('button');b.type='button';b.className='prog-col';b.dataset.phrase=String(w.id);
  b.setAttribute('aria-pressed',String(selected));b.title=phraseText(w);b.setAttribute('aria-label',b.title);b.onclick=onclick;
  const n=document.createElement('span');n.className='n';n.textContent=w.num;
- const col=document.createElement('span');col.className='col'+(w.best!==null?'':w.short?' short':' none');
+ const col=document.createElement('span');col.className='col'+(w.best!==null?'':w.wordless?' none wordless':w.short?' short':' none');
  if(w.best!==null){const fill=document.createElement('span');fill.className='fill'+(w.best>=70?' good':w.best<40?' low':'');fill.style.height=clamp(w.best,0,100)+'%';col.append(fill);
   if(w.last!==null){const i=document.createElement('i');i.className='mark';i.style.bottom=clamp(w.last,0,100)+'%';col.append(i);}}
  const v=document.createElement('span');v.className='v';v.textContent=w.best===null?'—':w.best+'%';
@@ -1236,12 +1267,12 @@ function buildProgress(box){
     const tell=()=>{detail.textContent=phraseText(w);},back=()=>{detail.textContent=rest;};
     col.addEventListener('mouseenter',tell);col.addEventListener('focus',tell);col.addEventListener('mouseleave',back);col.addEventListener('blur',back);
     grid.append(col);}
-   const counted=map.filter(w=>w.best!==null).length,short=map.filter(w=>w.short).length,unsung=map.length-counted-short,away=map.filter(w=>w.elsewhere);
+   const counted=map.filter(w=>w.best!==null).length,short=map.filter(w=>w.short).length,wordless=map.filter(w=>w.wordless).length,unsung=map.length-counted-short-wordless,away=map.filter(w=>w.elsewhere);
    const sum=document.createElement('p');sum.className='prog-note';
-   sum.textContent='Зараховано '+counted+' з '+map.length+' · без зарахованої спроби: '+unsung+(short?' · закоротких для рекорду: '+short:'')
+   sum.textContent='Зараховано '+counted+' з '+map.length+' · без зарахованої спроби: '+unsung+(short?' · закоротких для рекорду: '+short:'')+(wordless?' · без слів: '+wordless:'')
     +(away.length?' · '+away.length+' з них '+(away.length===1?'зарахований':'зараховані')+' з іншою лінійкою ('+[...new Set(away.map(w=>w.elsewhere))].join('; ')+')':'');
    const key=document.createElement('div');key.className='legend prog-legend';
-   for(const [cls,text]of [['good','найкраще'],['mark','остання спроба'],['none','не співано'],['short','закоротка для рекорду, менше 1.5 с нот']]){
+   for(const [cls,text]of [['good','найкраще'],['mark','остання спроба'],['none','не співано'],['short','закоротка для рекорду, менше 1.5 с нот'],...(wordless?[['none wordless','без слів — не рахується']]:[])]){
     const sp=document.createElement('span'),i=document.createElement('i');i.className=cls;sp.append(i,text);key.append(sp);}
    box.append(sum,grid,detail,key);
    if(had!==undefined)grid.querySelector('[data-phrase="'+had+'"]')?.focus({preventScroll:true});
@@ -1343,6 +1374,7 @@ function tracePaths(points,x,y,frames,upTo){
 const HIT_FILL='#a1eed899',HIT_CUR='#a1eed8d6',HIT_INK='#0d2620';
 // Diagonal hatch behind a missed note: hit and miss stay apart for an eye that does not read the colours.
 let missPat=null,probe=null;
+const WORDLESS_ALPHA=.35;// how far a wordless target steps back
 function missHatch(){if(missPat)return missPat;const c=document.createElement('canvas');c.width=c.height=7;const h=c.getContext('2d');
  h.strokeStyle='#dd8f9759';h.lineWidth=1.2;h.beginPath();h.moveTo(-2,7);h.lineTo(7,-2);h.moveTo(1,10);h.lineTo(10,1);h.stroke();missPat=g.createPattern(c,'repeat');return missPat;}
 function draw(t){
@@ -1373,6 +1405,11 @@ function draw(t){
  if(opt.view==='notes'){
   for(const n of song.notes){if(n.a>v.b)break;if(n.b<v.a)continue;const xx=x(n.a),ww=Math.max(2,x(n.b)-xx),yy=y(n.m+opt.octave);const ok=(n.ok||n.manual)&&!n.ignored;
    const kind=n.ignored?null:noteKind(sc,n.id),missed=kind==='miss'||kind==='silent';const cur=t>=n.a&&t<n.b,curState=cur?frameState(sc,t-.03):0;
+   // a wordless note is drawn as a plain target at low opacity: no corridor, no ✓/×, nothing to hit (WORDLESS_TARGETS.md)
+   if(wordlessNote(n)){g.globalAlpha=WORDLESS_ALPHA;g.beginPath();g.roundRect(xx,yy-barH/2,ww,barH,Math.min(4,ww/2,barH/2));g.fillStyle=ok?'#b4a2eb3a':'#9a94b41c';g.fill();
+    g.strokeStyle=ok?'#c9baf4':'#aaa4c4';g.lineWidth=1.1;g.setLineDash(ok?[]:[4,3]);g.stroke();g.setLineDash([]);const label=ww>=32&&barH>=10?name(n.m+opt.octave):'';
+    const ink=ok?'#f2edff':'#dcd8ea';if(label){g.font='11px '+mono;g.textAlign='left';g.textBaseline='middle';g.fillStyle=ink;g.fillText(label,xx+6,yy);}
+    if(probe)probe.push({id:n.id,kind:'wordless',cur:false,x:xx,y:yy,w:ww,h:barH,label,ink,tx:xx+6,tw:label?g.measureText(label).width:0,alpha:g.globalAlpha});g.globalAlpha=1;continue;}
    // tolerance corridor behind the bar
    if(!n.ignored){g.fillStyle=kind==='hit'?'#a1eed812':kind?'#c9707a10':ok?'#b4a2eb14':'#9a94b40c';g.fillRect(xx,yy-tolH/2,ww,tolH);}
    // outline and fill carry the state on their own: solid + filled = hit, solid + hatched = miss, dashed = draft or ignored
@@ -1394,9 +1431,11 @@ function draw(t){
   }g.globalAlpha=1;
  }else{
   g.lineCap='round';g.lineJoin='round';
-  let last=null;for(const p of song.points){if(p[0]<v.a-.03)continue;if(p[0]>v.b+.03)break;const r=targetAt(p[0],opt);if(!r){last=null;continue;}const pt={t:p[0],m:r.m,ok:r.ok};
-   if(last&&pt.t-last.t<.05&&Math.abs(pt.m-last.m)<8){const st=frameState(sc,pt.t);g.beginPath();g.moveTo(x(last.t),y(last.m));g.lineTo(x(pt.t),y(pt.m));
-    g.strokeStyle=st===1?'#a1eed8d8':st>=2?'#c9707ac0':pt.ok?'#b4a2ebc4':'#aaa4c4b0';g.lineWidth=pt.ok?2.6:1.9;g.setLineDash(pt.ok?[]:[3,3]);g.stroke();g.setLineDash([]);}
+  // a wordless stretch keeps its line at low opacity, and the probe gets one entry per stretch
+  let last=null,dimRun=null;for(const p of song.points){if(p[0]<v.a-.03)continue;if(p[0]>v.b+.03)break;const r=targetAt(p[0],opt,true);if(!r){last=null;continue;}const pt={t:p[0],m:r.m,ok:r.ok,dim:!scoredAt(p[0])};
+   if(last&&pt.t-last.t<.05&&Math.abs(pt.m-last.m)<8){const st=pt.dim?0:frameState(sc,pt.t);g.beginPath();g.moveTo(x(last.t),y(last.m));g.lineTo(x(pt.t),y(pt.m));g.globalAlpha=pt.dim?WORDLESS_ALPHA:1;
+    g.strokeStyle=st===1?'#a1eed8d8':st>=2?'#c9707ac0':pt.ok?'#b4a2ebc4':'#aaa4c4b0';g.lineWidth=pt.ok?2.6:1.9;g.setLineDash(pt.ok?[]:[3,3]);g.stroke();g.setLineDash([]);g.globalAlpha=1;
+    if(probe&&pt.dim){if(dimRun&&dimRun.b>=last.t-1e-6)dimRun.b=pt.t;else probe.push(dimRun={kind:'wordless',a:last.t,b:pt.t,alpha:WORDLESS_ALPHA});}}
    last=pt;}
   // Hit and miss stay readable in contour mode too: a filled disc against a dashed ring, each with its own glyph.
   let lastMark=-Infinity;g.textAlign='center';g.textBaseline='middle';
@@ -1461,7 +1500,7 @@ function updateReadout(t){
  let p=s.current;const review=traceShown();if(review)p=pointNear(s.trace.points,t,.12);
  const live=p&&p.m!==null&&p.m!==undefined&&(review||s.ctx&&s.ctx.currentTime-(p.t||0)<.23);
  $('liveNote').innerHTML=noteHTML(live?p.m:null);$('liveNote').classList.toggle('empty',!live);$('liveDesc').textContent=live?words[(Math.round(p.m)%12+12)%12]+(review?' · запис':''):review?'У цю мить у записі тиша':s.stream?'Заспівай зручну ноту':'Час заспівати';$('liveFreq').textContent=live?(p.f.toFixed(1)+' Гц'):review?'Спроба '+String(s.trace.take.id).padStart(2,'0'):s.stream?'Слухаю мікрофон':'Мікрофон вимкнено';
- const opt=effective(),target=targetAt(t,opt),ref=p?.songT!==undefined?targetAt(p.songT,opt):target;$('targetNote').textContent=target?name(target.m):'—';let text='Тут ціль не визначена',delta=null;if(target)text=target.ok?'Слухай. Потім повтори.':'Невпевнена ціль';if(live&&ref){delta=centsOff(p.raw??p.m,ref.m,opt);text=(ref.ok?'':'≈ ')+(delta>0?'+':'')+Math.round(delta)+' ¢'+(opt.octaveFree&&Math.abs((p.raw??p.m)-ref.m)>=6?' · інша октава':'')+(!ref.verified?' · чернетка':'');}
+ const opt=effective(),target=targetAt(t,opt),ref=p?.songT!==undefined?targetAt(p.songT,opt):target;$('targetNote').textContent=target?name(target.m):'—';let text=!target&&targetAt(t,opt,true)?'Без слів — не рахується':'Тут ціль не визначена',delta=null;if(target)text=target.ok?'Слухай. Потім повтори.':'Невпевнена ціль';if(live&&ref){delta=centsOff(p.raw??p.m,ref.m,opt);text=(ref.ok?'':'≈ ')+(delta>0?'+':'')+Math.round(delta)+' ¢'+(opt.octaveFree&&Math.abs((p.raw??p.m)-ref.m)>=6?' · інша октава':'')+(!ref.verified?' · чернетка':'');}
  const inTol=delta!==null&&Math.abs(delta)<=opt.tolerance;$('deviation').textContent=text;$('deviation').style.color=delta===null?'#94a0b3':inTol?'#a1eed8':'#d99aa2';$('needle').style.opacity=delta===null?0:1;$('needle').style.setProperty('--n',clamp(.5+(delta||0)/200,0,1));$('needle').style.background=delta!==null&&!inTol?'#d47f88':'#a1eed8';$('liveNote').classList.toggle('miss',delta!==null&&!inTol&&!!ref);
  $('level').style.width=p&&!review?clamp((p.db+60)/60*100,0,100)+'%':'0%';$('level').style.background=p?.peak>.99?'#f3a1b5':'#a1eed8';
  // live target-match: hit frames ÷ frames with any drawn target, tolerance from the attempt itself
@@ -1608,6 +1647,7 @@ window.Luma={diagnostics:()=>({mode:s.mode,busy:s.busy,pending:s.awaitFinish,tim
    if(!s.ctx||!('_fake' in s.ctx))s.ctx={currentTime:0,state:'running',sampleRate:48000,resume(){},get _fake(){return true;}};const when=s.ctx.currentTime;s.transport={token:++s.cancel,when,offset:a,end:b,speed,loop:null};s.mode='singing';s.history=[];s.live=newScore(meta);s.pending.set(id,meta);sync();return {id,when};},
   fakeTick:(ctxTime)=>{if(s.ctx&&'_fake' in s.ctx)s.ctx.currentTime=ctxTime;const t=now();if(s.mode==='singing'&&s.live&&s.transport){scoreAdvance(s.live,s.history,Math.min(t-.18*s.transport.speed,s.transport.end));livesStep();}draw(t);updateReadout(t);return t;},
   fakeFinish:()=>{const id=s.takeCounter,meta=s.pending.get(id);if(!meta)return null;const pts=s.history.map(p=>({t:(p.songT-meta.a)/meta.speed,f:p.f,confidence:p.confidence,db:p.db}));s.pending.delete(id);const duration=(s.pos=now())-meta.a;s.transport=null;s.mode='idle';s.live=null;const m={id,blob:meta.hasAudio?silentWav(duration/meta.speed):null,hasAudio:!!meta.hasAudio,clipped:false,sampleRate:48000,duration:duration/meta.speed,start:0,end:duration/meta.speed,reason:'end',points:pts,gap:0};const t=storeTake(meta,m);sync();return {id:t.id,pct:scorePct(t.score)};},
+  wordless:()=>{const w=scoredSpans();return {on:w.on,spans:w.spans.map(x=>[...x]),last:w.last,raw:t=>targetAt(t,effective(),true)};},
   history:historyHooks}};
 populateSong();fitStage();resize();setRangeScale();updateReadout(s.pos);loadHistory();
 // A profile that has never opened Luma before did not live through the change, so it is told nothing; the flag is set

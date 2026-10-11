@@ -4,6 +4,8 @@
 The song is split into 20 ms frames from the start of the attempt. For every frame:
 
 - **no target drawn** (no note or contour there) → the frame is excluded from both numerator and denominator;
+- **wordless target** (a song with words, and a chain of notes that comes nowhere near a lyric line) → excluded the same
+  way, though it is drawn: see «Wordless target» below;
 - **target present** → the frame counts. It is a **hit** when a confident sung pitch (YIN periodicity ≥ 0.8) exists within the
   level's time slack and its distance to the target is inside the corridor; **silence, noise or low-confidence pitch under a
   target is a miss**.
@@ -11,6 +13,24 @@ The song is split into 20 ms frames from the start of the attempt. For every fra
 `match = hits ÷ frames with a target`. Draft (dashed) targets count too; the readout says "чернетка" while the fragment is
 unverified. Each frame is scored once, so seeking, redrawing and looping never double-count. The same engine scores finished
 attempts, which is why the live number and the attempt card agree.
+
+## Wordless target («Без слів — не рахується»)
+In a song that has lyric words, notes are chained the way the build chains phrases (gap ≤ 0.85 s), and a chain is
+**worded** when any of its notes overlaps a lyric line widened by 0.5 s on each side. Scored time is every worded chain
+plus every widened line; outside it there is no target. A wordless chain is mostly Demucs bleed left in the vocal stem in
+an instrumental break, sometimes singing with no words (vocalise); measurements and the choice of rule are in
+[design/WORDLESS_TARGETS.md](design/WORDLESS_TARGETS.md).
+
+- **Drawn dimmed, never scored.** A wordless note or contour stretch is drawn at 35 % opacity in the plain target style,
+  with no corridor and no ✓/×. It is not in the match, the voice coverage, the median |Δ|, the draft share, the record's
+  `songTarget`, the full-pass rule, the strict statistics or lives. With the playhead on it the readout says
+  «Без слів — не рахується».
+- **A pass ends before a wordless tail.** `singEnd()` takes the last scored note, so a take no longer waits through
+  wordless target after the last line.
+- **Weak phrases.** A phrase with notes and no scored frame is a dimmed column labelled «без слів — не рахується», counted
+  apart from the phrases with no attempt.
+- **Where it applies.** Computed when the trainer loads, from the notes after the user's edits and the lyrics, and again
+  after every note edit. A lesson, and a song with no lyrics (no Soniox key), keep every target as before.
 
 ## Levels
 
@@ -63,8 +83,8 @@ match percentage; on a phone, a row of its own under it) shows a set of hearts �
 with the other settings — and every recorded attempt starts with a full set.
 
 Lives are read from the live score's own frames, so the corridor, the time slack and the level are the attempt's, and
-only frames **with a target** count: silence where nothing is drawn never costs a life. Silence *under* a note is a miss
-here exactly as it is in the match. The rule, with the constants named as they are in `LIVES` in `app/app.js`:
+only frames **with a target** count: silence where nothing is drawn never costs a life, and neither does silence under a
+dimmed wordless note. Silence *under* a scored note is a miss here exactly as it is in the match. The rule, with the constants named as they are in `LIVES` in `app/app.js`:
 
 | constant | value | meaning |
 |---|---|---|
@@ -109,7 +129,8 @@ cmpKey = songHash · mapVersion · level · view · speed
 ```
 
 Re-preparing a song opens a new `mapVersion` and keeps the history; editing a note opens a new one too, because you
-changed the target; confirming a fragment by ear does not, because `verified` never reaches `targetAt().m`. The vocal
+changed the target. In a song with words the scored spans are part of `mapVersion` too, so every such song opened a new
+group once when the wordless rule arrived, and its median restarted from the next full pass; confirming a fragment by ear does not, because `verified` never reaches `targetAt().m`. The vocal
 octave is not in the key: it moves the target and leaves the difficulty alone. The microphone shift is not in it either —
 it is not scored and it is not calibrated.
 
