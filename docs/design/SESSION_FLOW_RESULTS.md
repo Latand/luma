@@ -122,6 +122,9 @@ function singEnd(){if(singEndCache)return singEndCache;let e=0;for(const n of so
   second «Співати» after a finished pass would start at `singEnd()` and record nothing.
 - An explicit fragment keeps its own end (`s.range.b`), and listening (`sing=false`) still plays to `song.duration`.
   Neither was asked to change.
+- A finished whole-song pass parks the playhead at `singEnd()`, which listening would read as a spot in the outro.
+  `onFinished` records it in `s.parkedAt`; a Listen from that exact spot starts from 0, as it did when the pass parked
+  at `song.duration`. A seek clears it, so a playhead the singer moves into the outro still plays from there.
 - **Finished** = `m.reason==='end'` and `take.endSong >= singEnd() - .25`. `tellHost` uses this in place of
   `song.duration - .25`. A stopped attempt (`'user'`), a lives rewind (`'lives'`), a seek or an attempt that never
   reaches the last note still never counts. An attempt started midway that runs to the end still counts, as it does now.

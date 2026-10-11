@@ -109,7 +109,7 @@ seek, vocal toggle, an attempt with the recording switch off and the same with i
 that a stored trace re-scores to the same numbers, that records stay inside one ruler, and that export and import
 round-trip. `lives.mjs` sings a synthetic voice through lives mode: a short miss costs nothing, a wrong passage loses lives at the cooldown's pace, and losing the last one rewinds, saves the attempt and refills. `progress.mjs` checks the Прогрес tab: trend, weak phrases, the record shadow, the day streak, lesson lamps,
 and the 390 px layout. `finish.mjs` sings the demo and lesson 1 through the real transport: the pass stops half a second
-after the last note, is stored once and scores the same, the next pass starts from the top, and listening and a fragment
+after the last note, is stored once and scores the same, the next pass and a Listen after it start from the top, and listening and a fragment
 still run to the end. `session.mjs` drives «Заняття» in Studio at 390 px and 1440 px (the result card with and without
 history, the 3-2-1 and auto-start, «Повторити», skip and close during the countdown, the start button when sound is
 refused, songs in picker order, lives mode, the activity events, the real autoplay policy after one click, leaving,

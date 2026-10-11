@@ -1,5 +1,5 @@
 // Early finish: a sung pass over the whole song stops half a second after the last note or lyric line, is saved and
-// scored as before, and the next «Співати» starts from the top. Listening and an explicit fragment still run to the end
+// scored as before, and the next «Співати» or «Слухати» starts from the top. Listening and an explicit fragment still run to the end
 // of the audio. Real transport with Chrome's fake microphone, on the demo and on lesson 1 served by the test Studio.
 // docs/design/SESSION_FLOW_RESULTS.md
 import {execFileSync} from 'node:child_process';
@@ -54,6 +54,20 @@ try {
     assert(restart < 1, `${name}: a second «Співати» after a finished pass starts at ${restart.toFixed(2)} s`);
     await page.locator('#stopBtn').click();
     await until(page, () => window.Luma.diagnostics().mode === 'idle' && !window.Luma.diagnostics().pending, null, 5000);
+
+    // ── 3b · «Слухати» after a finished pass also starts from the top (the pass parks at singEnd, not at the end) ──
+    await page.evaluate(t => window.Luma.test.seek(t), song.singEnd - 2);
+    await page.locator('#singBtn').click();
+    await until(page, () => window.Luma.diagnostics().mode === 'singing', null, 8000);
+    await until(page, () => window.Luma.diagnostics().mode === 'idle' && !window.Luma.diagnostics().pending, null, 15000);
+    const parked = await page.evaluate(() => window.Luma.test.state().pos);
+    assert(Math.abs(parked - song.singEnd) < .05, `${name}: the pass parks the playhead at singEnd (${parked.toFixed(2)})`);
+    await page.locator('#listenBtn').click();
+    await until(page, () => window.Luma.diagnostics().mode === 'listen', null, 5000);
+    const heardFrom = await page.evaluate(() => window.Luma.diagnostics().time);
+    assert(heardFrom < 1, `${name}: «Слухати» after a finished pass starts at ${heardFrom.toFixed(2)} s`);
+    await page.locator('#stopBtn').click();
+    await until(page, () => window.Luma.diagnostics().mode === 'idle', null, 5000);
 
     // ── 5 · listening still plays to the end of the audio ─────────────────────────────────────────────────────
     await page.evaluate(t => window.Luma.test.seek(t), song.duration - 1.5);

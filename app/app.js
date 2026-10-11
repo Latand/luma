@@ -25,7 +25,7 @@ function levelLabel(opt){return opt.level==='custom'?'свій коридор':(
 // Signed distance in cents; on the easy level the octave is forgiven (distance folds into ±6 semitones).
 function centsOff(m,refM,opt){let d=m-refM;if(opt.octaveFree){d=((d%12)+12)%12;if(d>6)d-=12;}return d*100;}
 const LOOP_LANE=24;
-const s={ctx:null,stream:null,capture:null,micSource:null,worker:null,micGeneration:0,busy:false,cancel:0,mode:'idle',transport:null,sources:[],endTimer:null,nextTimer:null,bufs:new Map(),gains:null,pos:song.initialTime||0,range:{a:0,b:song.duration},rangeId:0,history:[],current:null,takes:[],takeCounter:0,pending:new Map(),awaitFinish:false,trace:null,live:null,verified:[],dirty:true,raf:0,lastDraw:0,lastFrame:0,lastUI:0,rangeLo:48,rangeHi:76,liveSmooth:null,lastSmoothT:0,toastTimer:0,edit:null,computeMs:0,windowMs:0,unsaved:false,undoPunch:null,busyFor:'',scrub:null,lyricKey:'',resumeAt:null,tlDrag:null,seekTimer:0,dense:false,stageH:0,hist:{runs:[],days:[],loaded:false,note:'',persisted:null,stamp:'',stale:false,restored:false},shadow:null,shadowSig:'',progressSig:'',trendScope:'',weakOrder:'song',roomNotice:false};
+const s={ctx:null,stream:null,capture:null,micSource:null,worker:null,micGeneration:0,busy:false,cancel:0,mode:'idle',transport:null,sources:[],endTimer:null,nextTimer:null,bufs:new Map(),gains:null,pos:song.initialTime||0,range:{a:0,b:song.duration},rangeId:0,history:[],current:null,takes:[],takeCounter:0,pending:new Map(),awaitFinish:false,trace:null,live:null,verified:[],dirty:true,raf:0,lastDraw:0,lastFrame:0,lastUI:0,rangeLo:48,rangeHi:76,liveSmooth:null,lastSmoothT:0,toastTimer:0,edit:null,computeMs:0,windowMs:0,unsaved:false,undoPunch:null,busyFor:'',scrub:null,lyricKey:'',resumeAt:null,parkedAt:null,tlDrag:null,seekTimer:0,dense:false,stageH:0,hist:{runs:[],days:[],loaded:false,note:'',persisted:null,stamp:'',stale:false,restored:false},shadow:null,shadowSig:'',progressSig:'',trendScope:'',weakOrder:'song',roomNotice:false};
 const canvas=$('chart'),g=canvas.getContext('2d',{alpha:false}),tl=$('timeline'),tg=tl.getContext('2d',{alpha:false});let W=1,H=1,DPR=1,TW=1,TH=1;
 const reduced=matchMedia('(prefers-reduced-motion: reduce)');
 function fmt(t){t=Math.max(0,Number.isFinite(t)?t:0);return String(Math.floor(t/60)).padStart(2,'0')+':'+String(Math.floor(t%60)).padStart(2,'0');}
@@ -377,9 +377,11 @@ function mergeTake(old,meta,m){
 // end (a finished pass parks the playhead there); with the loop on, from anywhere; otherwise the song plays on to its end.
 // A punch-in re-records the shown take from the playhead, except on a fresh pass of the auto-repeat. capacity() reads
 // this, startTransport() applies it.
-// A sung pass that runs to the end of the song stops at singEnd(); listening plays on to the end of the audio.
+// A sung pass that runs to the end of the song stops at singEnd(); listening plays on to the end of the audio. A Listen
+// after such a pass starts from the top, as it did when the pass parked at the end of the audio; a playhead the singer
+// moved into the outro plays from there.
 function nextSegment(sing,fresh=false){
- const speed=prefs.speed,punch=sing&&!fresh?punchTarget():null,cr=customRange(),last=sing?singEnd():song.duration;let pos=s.pos>=(cr?song.duration:last)-.1?0:s.pos;
+ const speed=prefs.speed,punch=sing&&!fresh?punchTarget():null,cr=customRange(),last=sing?singEnd():song.duration,parked=!sing&&!cr&&s.pos===s.parkedAt;let pos=parked||s.pos>=(cr?song.duration:last)-.1?0:s.pos;
  if(punch)return{start:pos,end:Math.max(cr?s.range.b:last,punch.endSong),speed,loop:null,punch};
  const atEnd=cr&&pos>=s.range.b-.1&&pos<=s.range.b+.25;
  if(cr&&(atEnd||prefs.loop&&(pos<s.range.a||pos>=s.range.b-.1)))pos=s.range.a;
@@ -921,7 +923,7 @@ function onFinished(m){
  const meta=s.pending.get(m.id);if(!meta)return;
  if(s.mode==='singing'&&m.reason==='end'&&s.transport&&s.ctx){const end=s.transport.when+(s.transport.end-s.transport.offset)/s.transport.speed;if(s.ctx.currentTime<end-.01){setTimeout(()=>onFinished(m),(end-s.ctx.currentTime)*1000+20);return;}}
  s.pending.delete(m.id);const auto=s.mode==='singing'&&m.reason==='end'&&prefs.loop;s.awaitFinish=false;
- if(s.transport)s.pos=Math.min(s.transport.end,meta.a+m.duration*meta.speed);clearSources();s.transport=null;s.mode='idle';s.live=null;
+ if(s.transport)s.pos=Math.min(s.transport.end,meta.a+m.duration*meta.speed);s.parkedAt=s.transport&&!customRange()&&s.pos>=singEnd()-.1?s.pos:null;clearSources();s.transport=null;s.mode='idle';s.live=null;
  if(m.duration>.15&&(!m.hasAudio||m.blob?.size>44))storeTake(meta,m);
  if(['discontinuity','late-start'].includes(m.reason))error('Розрив аудіопотоку: запис завершено, щоб не зсувати його відносно пісні.');
  if(s.resumeAt!==null){const t=s.resumeAt;s.resumeAt=null;s.pos=t;sync();startTransport(true,true);return;}// seek during singing: new take from the new spot
@@ -1482,7 +1484,7 @@ async function importFile(file){if(!file)return;if(file.size>100*1024*1024){erro
  else{if(!d.assets?.['1']?.backing||!d.assets?.['1']?.foreground)throw Error('У пакеті відсутні аудіодоріжки.');assets=d.assets;s.bufs.clear();}
  stopTransport('import');await releaseMic();s.takes.forEach(t=>{if(t.url)URL.revokeObjectURL(t.url);});clearUndoPunch();s.takes=[];s.unsaved=false;s.trace=null;s.history=[];song=newSong;song.notes.sort((a,b)=>a.a-b.a);song.points.sort((a,b)=>a[0]-b[0]);resetHistory();populateSong();if(Array.isArray(newSong.verified)){s.verified=newSong.verified.filter(r=>Number.isFinite(r.a)&&Number.isFinite(r.b)&&r.a>=0&&r.b<=song.duration);saveEdits();}renderTakes();act('song_open',{source:packed?'pack':'target',songHash:songHash(),songId:song.id,lessonId:song.lesson?.id||null,duration:song.duration,notes:song.notes.length});sync();await loadHistory();toast('Ціль імпортовано. Перевір мелодію перед тренуванням.');
  }catch(e){error(e.message||'Не вдалося прочитати пакет.');}}
-function seekTo(t,keepRange){if(s.mode!=='idle'){applySeek(t);return;}clearTimeout(s.nextTimer);s.cancel++;s.pos=clamp(t,0,song.duration);s.history=[];s.current=null;setRangeScale();sync();}
+function seekTo(t,keepRange){if(s.mode!=='idle'){applySeek(t);return;}clearTimeout(s.nextTimer);s.cancel++;s.parkedAt=null;s.pos=clamp(t,0,song.duration);s.history=[];s.current=null;setRangeScale();sync();}
 // One entry point for every seek gesture: idle → move the playhead; listen/review → rebuild audio live; singing → close the take and restart from there.
 function applySeek(t){t=clamp(t,0,song.duration);if(s.busy||s.awaitFinish)return;actSeek(now(),t);
  if(s.mode==='idle'){seekTo(t,true);return;}
