@@ -93,9 +93,9 @@ rule, the result card, the 3-2-1 and the songs step are in [design/SESSION_FLOW_
   today highlighted and the median as a dashed line. A trainer opened on its own posts nothing.
 - **3-2-1.** Under the result, «Далі» names the next lesson, the next song, or the picker, and counts 3-2-1 on a ring.
   The next trainer loads behind the card; at 0 (or on «Почати зараз») it opens and starts singing by itself, after a
-  0.6 s lead-in. «Повторити» runs the same lesson or song again, only when pressed. Lesson 1 gets the same card without
+  0.6 s lead-in with no number of its own: the ring was the count-in. «Повторити» runs the same lesson or song again, only when pressed. Lesson 1 gets the same card without
   a result.
-- **Auto-start.** Studio posts `{type:'luma:sing'}` to the frame, and the trainer answers
+- **Auto-start.** Studio posts `{type:'luma:sing', counted}` to the frame (`counted` when a card's 3-2-1 led there), and the trainer answers
   `{type:'luma:autostart', ok, reason}`. The click on «Почати заняття» lets later frames of the tab play sound in Chromium
   and Chrome. If the browser still refuses sound (`audio`) or the microphone (`mic`), a card over the trainer offers
   «Почати співати»; its click starts the attempt.

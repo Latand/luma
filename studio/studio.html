@@ -61,7 +61,7 @@ body.locked{overflow:hidden}
 .rnums{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:2px}.rnum{display:flex;flex-direction:column;gap:2px;min-width:0}.rnum b{display:flex;align-items:center;gap:7px;font-size:24px;font-weight:600;letter-spacing:-.4px;font-variant-numeric:tabular-nums;line-height:1.2}.rnum span{font-size:12px;color:var(--muted);line-height:1.35}
 .rnum i{width:7px;height:7px;flex:none;border-radius:50%;background:var(--dim)}.rnum i.up{background:var(--mint)}.rnum i.down{background:var(--amber)}
 .rchart{min-width:0}.rchart svg{display:block;font-family:var(--sans);overflow:visible}.rchart .cap{margin:4px 0 0;font-size:12px;color:var(--dim)}
-.nsec{border-top:1px solid var(--border);padding-top:14px;display:flex;flex-direction:column;gap:12px}.rcard .nsec{margin-top:4px}.nrow{display:flex;gap:14px;align-items:center;min-width:0}
+.nsec{border-top:1px solid var(--border);padding-top:14px;display:flex;flex-direction:column;gap:12px}.rcard .nsec{margin-top:4px}.nsec.off{opacity:.45}.nrow{display:flex;gap:14px;align-items:center;min-width:0}
 @property --p{syntax:'<percentage>';inherits:false;initial-value:100%}
 .ring{width:56px;height:56px;flex:none;border-radius:50%;display:grid;place-items:center;background:conic-gradient(var(--mint) var(--p),#ffffff14 0);transition:--p 1s linear}.ring b{width:48px;height:48px;border-radius:50%;background:var(--panel);display:grid;place-items:center;font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
 .nwhat{min-width:0;display:flex;flex-direction:column;gap:2px}.nwhat strong{font-size:16px;font-weight:600;overflow-wrap:anywhere}.nwhat small{color:var(--muted);font-size:13px}.nrow .auto{margin:0}
@@ -214,7 +214,7 @@ function renderEntry(list){$('sessionEntry').hidden=!list.length;$('lead').hidde
  const song=el('span',null,'chip');song.append(el('i'),el('span','Пісня'));parts.push(song);
  const key=parts.map(p=>p.textContent).join('|');if(path.dataset.key===key)return;path.dataset.key=key;path.replaceChildren();
  parts.forEach((p,i)=>{if(i)path.append(el('span','→'));path.append(p);});}
-const S={open:false,steps:[],results:[],i:0,phase:'',frame:null,loaded:false,wantOpen:false,wantSing:false,asked:0,card:null,drawLater:null,songs:[],song:null,gen:0,timers:[]};
+const S={open:false,steps:[],results:[],i:0,phase:'',frame:null,loaded:false,wantOpen:false,wantSing:null,asked:0,card:null,drawLater:null,songs:[],song:null,gen:0,timers:[]};
 const COUNT=3;
 const REDUCED=matchMedia('(prefers-reduced-motion: reduce)');
 const ms=t=>REDUCED.matches?0:t;   // the reduced-motion rule above zeroes every transition, so nothing here waits for transitionend
@@ -232,8 +232,9 @@ function renderBar(){const dots=$('sessionDots'),n=S.steps.length,at=barAt();
  [...dots.children].forEach((d,k)=>{const r=S.results[k];d.className='dot'+(k===at?' current':r?.done?' done':r?.skipped?' skipped':'');});
  const label=at<n?lessonLabel(at):songish()?'Пісня':'Вибір пісні';
  dots.setAttribute('aria-valuemin','1');dots.setAttribute('aria-valuemax',String(n+1));dots.setAttribute('aria-valuenow',String(at+1));dots.setAttribute('aria-valuetext',label);$('sessionStep').textContent=label;
- const skip=$('sessionSkip');skip.hidden=S.phase==='picker'||!songish()&&at>=n;skip.textContent=songish()?'До пісень':'Пропустити урок';}
-function dropFrame(){const f=S.frame;S.frame=null;S.loaded=false;S.wantOpen=false;S.wantSing=false;hideAutostart();if(!f)return;f.classList.remove('shown');
+ const skip=$('sessionSkip');skip.hidden=S.phase==='picker'||!songish()&&at>=n||S.phase==='card'&&S.card.from?.kind==='song';   // a song's card has its own «До пісень»
+ skip.textContent=songish()?'До пісень':'Пропустити урок';}
+function dropFrame(){const f=S.frame;S.frame=null;S.loaded=false;S.wantOpen=false;S.wantSing=null;hideAutostart();if(!f)return;f.classList.remove('shown');
  // Removing the document stops its audio and frees the microphone without a beforeunload prompt; an attempt still in
  // progress is dropped, a finished one is already in the history.
  setTimeout(()=>f.remove(),ms(200));}
@@ -241,13 +242,18 @@ function makeFrame(src){dropFrame();const f=el('iframe',null,'sframe');f.src=src
  f.addEventListener('load',()=>{if(S.frame!==f)return;S.loaded=true;if(S.wantOpen)showFrame();});S.frame=f;$('sessionBody').append(f);return f;}
 function showFrame(){const f=S.frame;if(!f)return;S.wantOpen=false;
  const card=$('sessionBody').querySelector('.sintro');if(card){card.classList.add('out');setTimeout(()=>card.remove(),ms(180));}
- f.inert=false;f.removeAttribute('tabindex');f.classList.add('shown');f.focus();if(S.wantSing)askSing();}
+ f.inert=false;f.removeAttribute('tabindex');f.classList.add('shown');f.focus();if(S.wantSing)askSing(S.wantSing==='counted');}
 // The step opened by the session sings by itself: the click that started the session lets later frames of this tab play
-// sound. If the browser still refuses, the trainer says so and a start button appears over it.
-function askSing(){const f=S.frame;S.wantSing=false;if(!f?.contentWindow)return;S.asked=performance.now();f.contentWindow.postMessage({type:'luma:sing'},location.origin);}
-function openStep(phase,src,loading){nextPhase(phase);renderBar();
- if(src)makeFrame(src);S.wantSing=true;if(S.loaded){showFrame();return;}
- S.wantOpen=true;const go=$('sessionBody').querySelector('.sintro .primary');if(go&&loading){go.textContent=loading;go.disabled=true;}}
+// sound. If the browser still refuses, the trainer says so and a start button appears over it. counted: the step comes
+// from a card, whose 3-2-1 (or the click that cut it short) is the count-in, so the trainer adds no number of its own.
+function askSing(counted){const f=S.frame;S.wantSing=null;if(!f?.contentWindow)return;S.asked=performance.now();f.contentWindow.postMessage({type:'luma:sing',counted:!!counted},location.origin);}
+// pressed: the card's button that led here. While the frame loads it reads «Завантажуємо…», the other buttons wait, and
+// the «Далі» row steps back, so a repeat never looks like the next step loading.
+function openStep(phase,src,pressed){const box=$('sessionBody').querySelector('.sintro:not(.out):not(.over) .card');nextPhase(phase);renderBar();
+ if(src)makeFrame(src);S.wantSing=box?'counted':'own';if(S.loaded){showFrame();return;}
+ S.wantOpen=true;if(!box)return;
+ box.querySelectorAll('.actions button').forEach(b=>{b.disabled=true;if(b.id===pressed)b.textContent='Завантажуємо…';});
+ const sec=box.querySelector('.nsec');if(sec&&pressed==='resultRepeat'){sec.classList.add('off');sec.setAttribute('aria-hidden','true');}}
 function clearBody(){const body=$('sessionBody');body.classList.remove('scroll');for(const n of [...body.children])if(n!==S.frame)n.remove();}
 function startSession(){if(S.open||!shownLessons.length)return;
  Object.assign(S,{open:true,steps:shownLessons.slice(),results:shownLessons.map(()=>null),i:0,song:null,songs:[]});
@@ -271,22 +277,30 @@ function verdict(r){
  if(d<=-2)return {head:'Готово',line:'Цього разу на '+pts+' нижче за медіану. Буває — рахуються всі твої дні.'+notSaved};
  return {head:'Готово!',line:'Рівно на рівні твоєї медіани.'+notSaved};}
 // Columns per day (the day's median of full passes), today highlighted, the median as a dashed line. Drawn at the
-// measured width so the labels keep their size on a phone.
+// measured width so the labels keep their size on a phone. The median's label takes the first place along its line that
+// is clear of every column and label: the left end, the right end, then any gap between, above the line before below
+// it. With none clear it is left out, the caption names the dashed line instead, and the median cell gives the number.
 function drawChart(box,r){const bars=r.days.map(d=>({label:dayLabel(d.day),value:d.value,title:dayLabel(d.day)+': '+d.value+' %'+(d.n>1?' (медіана '+d.n+' '+plural(d.n,'спроби','спроб','спроб')+')':'')}));
  if(r.full&&r.score!==null)bars.push({label:'сьогодні',value:r.score,title:'сьогодні: '+r.score+' %',today:true});
  if(!bars.length)return false;
  const W=Math.max(220,Math.round(box.clientWidth||300)),H=136,L=30,T=20,B=22,ph=H-T-B,y=v=>T+ph*(1-Math.max(0,Math.min(100,v))/100),slot=(W-L)/Math.max(bars.length,4),bw=Math.min(24,slot*.6);
- const g=svg('svg',{width:W,height:H,viewBox:'0 0 '+W+' '+H,role:'img','aria-label':'Збіг по днях: '+bars.map(b=>b.label+' '+b.value+' %').join(', ')+(r.median!==null&&r.prev>0?'; медіана '+r.median+' %':'')});
+ const g=svg('svg',{width:W,height:H,viewBox:'0 0 '+W+' '+H,role:'img','aria-label':'Збіг по днях: '+bars.map(b=>b.label+' '+b.value+' %').join(', ')+(r.median!==null&&r.prev>0?'; медіана '+r.median+' %':'')});box.append(g);
+ const taken=[],width=n=>n.getComputedTextLength()||n.textContent.length*6.5,hold=(n,anchor,lift)=>{const w=width(n),x=+n.getAttribute('x'),y=+n.getAttribute('y'),x1=anchor==='middle'?x-w/2:anchor==='end'?x-w:x;taken.push({x1,x2:x1+w,y1:y-lift,y2:y+3});};
  for(const v of [0,50,100]){g.append(svg('line',{x1:L,x2:W,y1:y(v),y2:y(v),stroke:'#ffffff1a','stroke-width':1}));const t=svg('text',{x:L-6,y:y(v)+4,'text-anchor':'end',fill:'#95a3b8','font-size':11});t.textContent=String(v);g.append(t);}
  const med=r.median!==null&&r.prev>0?y(r.median):null;
  bars.forEach((b,k)=>{const cx=L+slot*(k+.5),top=y(b.value),bottom=y(0),h=Math.max(0,bottom-top),rr=Math.min(4,h,bw/2),x=cx-bw/2;
   const col=svg('path',{d:'M'+x+','+bottom+'V'+(top+rr)+'Q'+x+','+top+' '+(x+rr)+','+top+'H'+(x+bw-rr)+'Q'+(x+bw)+','+top+' '+(x+bw)+','+(top+rr)+'V'+bottom+'Z',fill:b.today?'#a1eed8':'#5d6a80'});
-  const tip=svg('title');tip.textContent=b.title;col.append(tip);if(b.today)col.dataset.today='1';g.append(col);
-  const day=svg('text',{x:cx,y:H-6,'text-anchor':'middle',fill:b.today?'#e9edf5':'#95a3b8','font-size':11});day.textContent=b.label;g.append(day);
-  if(b.today){let ly=top-6;if(med!==null&&Math.abs(ly-med)<16)ly=Math.min(ly,med-6);const v=svg('text',{x:cx,y:Math.max(12,ly),'text-anchor':'middle',fill:'#a1eed8','font-size':12,'font-weight':600,stroke:'#111722','stroke-width':3,'paint-order':'stroke'});v.textContent=b.value+' %';g.append(v);}});
+  const tip=svg('title');tip.textContent=b.title;col.append(tip);if(b.today)col.dataset.today='1';g.append(col);taken.push({x1:x,x2:x+bw,y1:top,y2:bottom});
+  const day=svg('text',{x:cx,y:H-6,'text-anchor':'middle',fill:b.today?'#e9edf5':'#95a3b8','font-size':11});day.textContent=b.label;g.append(day);hold(day,'middle',10);
+  if(b.today){let ly=top-6;if(med!==null&&Math.abs(ly-med)<16)ly=Math.min(ly,med-6);const v=svg('text',{x:cx,y:Math.max(12,ly),'text-anchor':'middle',fill:'#a1eed8','font-size':12,'font-weight':600,stroke:'#111722','stroke-width':3,'paint-order':'stroke'});v.textContent=b.value+' %';v.dataset.today='1';g.append(v);hold(v,'middle',11);}});
+ let named=true;
  if(med!==null){g.append(svg('line',{x1:L,x2:W,y1:med,y2:med,stroke:'#d3b88f','stroke-width':1.5,'stroke-dasharray':'5 4'}));
-  const t=svg('text',{x:L+4,y:med-5,fill:'#d3b88f','font-size':11,stroke:'#111722','stroke-width':3,'paint-order':'stroke'});t.textContent='медіана '+r.median+' %';g.append(t);}
- box.append(g);return true;}
+  const t=svg('text',{fill:'#d3b88f','font-size':11,stroke:'#111722','stroke-width':3,'paint-order':'stroke'});t.textContent='медіана '+r.median+' %';t.dataset.median='1';g.append(t);
+  const w=width(t),clear=([x,ly,anchor])=>{const x1=anchor==='end'?x-w:x,x2=x1+w,y1=ly-10,y2=ly+3;return y1>=0&&y2<=H&&!taken.some(b=>x1<b.x2+3&&x2>b.x1-3&&y1<b.y2+2&&y2>b.y1-2);};
+  const along=ly=>[[L+4,ly,'start'],[W-2,ly,'end'],...Array.from({length:Math.max(0,Math.floor((W-2-w-L-4)/4))},(_,k)=>[L+8+4*k,ly,'start'])];
+  const spot=[...along(med-5),...along(med+13)].find(clear);
+  if(spot){t.setAttribute('x',spot[0]);t.setAttribute('y',spot[1]);t.setAttribute('text-anchor',spot[2]);}else{t.remove();named=false;}}
+ return {named};}
 function resultSection(r,from){const sec=el('section',null,'rsec');sec.setAttribute('aria-label','Результат');
  const what=from.kind==='lesson'?lessonLabel(from.i)+' · '+S.steps[from.i].title.split(' · ').pop()+' · пройдено':'Пісня · «'+songTitle(from.s)+'» · завершено';
  const v=verdict(r),d=delta(r);sec.append(el('div',what,'eyebrow'),el('div',v.head,'rhead'));if(v.line)sec.append(el('p',v.line.trim(),'rline'));
@@ -296,7 +310,7 @@ function resultSection(r,from){const sec=el('section',null,'rsec');sec.setAttrib
  if(d!==null)cell(signed(d),d<0?'від медіани':'до медіани',d>=2?'up':d<=-2?'down':'even').dataset.cell='delta';
  sec.append(nums);
  if(r.prev!==null&&!r.legacy){const chart=el('div',null,'rchart');sec.append(chart);chart.dataset.days=String(r.days.length);
-  S.drawLater=()=>{if(drawChart(chart,r))chart.append(el('p',r.prev?'Збіг повних проходів по днях · '+r.ruler:'Наступні дні з’являться тут поруч','cap'));else chart.remove();};}
+  S.drawLater=()=>{const drawn=drawChart(chart,r);if(drawn)chart.append(el('p',r.prev?'Збіг повних проходів по днях · '+r.ruler+(drawn.named?'':' · пунктир — медіана'):'Наступні дні з’являться тут поруч','cap'));else chart.remove();};}
  return sec;}
 function nextLine(next){const box=el('div',null,'nwhat'),auto=el('p',null,'auto');box.append(auto);
  if(next.kind==='lesson'){const l=S.steps[next.i];box.append(el('strong',l.title),el('small',[l.duration?clock(l.duration):null,l.level].filter(Boolean).join(' · ')));}
@@ -339,12 +353,12 @@ function showCard({result,from,next}){nextPhase('card');S.card={from,next};if(ne
 function advanceTo(how){if(S.phase!=='card')return;const {from,next}=S.card;if(!next)return;
  activity.log('session_next',{from:stepFile(from),to:stepFile(next),how});
  if(next.kind==='picker'){showPicker();return;}
- if(next.kind==='lesson'){S.i=next.i;openStep('lesson',null,'Завантажуємо…');return;}
- S.song=next.s;openStep('song',null,'Завантажуємо…');}
+ if(next.kind==='lesson'){S.i=next.i;openStep('lesson',null,'resultNow');return;}
+ S.song=next.s;openStep('song',null,'resultNow');}
 function repeatStep(){if(S.phase!=='card')return;const {from}=S.card;if(!from)return;
  activity.log('session_next',{from:stepFile(from),to:stepFile(from),how:'repeat'});
- if(from.kind==='lesson'){S.i=from.i;openStep('lesson','/song/'+encodeURIComponent(stepFile(from)),'Завантажуємо…');}
- else{S.song=from.s;openStep('song','/song/'+encodeURIComponent(stepFile(from)),'Завантажуємо…');}}
+ if(from.kind==='lesson'){S.i=from.i;openStep('lesson','/song/'+encodeURIComponent(stepFile(from)),'resultRepeat');}
+ else{S.song=from.s;openStep('song','/song/'+encodeURIComponent(stepFile(from)),'resultRepeat');}}
 function toPicker(how){activity.log('session_next',{from:S.phase==='card'?stepFile(S.card.from):S.song?S.song.name:null,to:'picker',how});showPicker();}
 function advance(i){if(i+1<S.steps.length)showCard({next:{kind:'lesson',i:i+1}});else showPicker();}
 function finishLesson(d){const i=S.i,r=resultOf(d);S.results[i]={done:true,match:r.score};
@@ -381,7 +395,7 @@ function showAutostart(reason){hideAutostart();$('sessionBody').querySelectorAll
  const lesson=S.phase==='lesson',wrap=el('div',null,'sintro over'),card=el('article',null,'card');wrap.id='autostartCard';
  card.append(el('div',lesson?'Урок '+(S.i+1)+' готовий':'Пісня готова','title'),el('p',reason==='mic'?'Мікрофон недоступний: дозволь доступ (значок біля адреси) і натисни ще раз.':reason==='audio'?'Браузер не дав увімкнути звук сам. Натисни — і запис почнеться після короткого відліку.':'Запис не почався сам — причину показано в тренажері. Натисни, щоб спробувати ще раз.','goal'));
  const acts=el('div',null,'actions'),go=el('button','Почати співати','primary'),own=el('button','Сам натисну «Співати»','secondary');go.type=own.type='button';go.id='autostartBtn';own.id='autostartDismiss';
- go.onclick=()=>{hideAutostart();askSing();};own.onclick=()=>{hideAutostart();S.frame?.focus();};acts.append(go,own);card.append(acts);wrap.append(card);$('sessionBody').append(wrap);go.focus();
+ go.onclick=()=>{hideAutostart();askSing(false);};own.onclick=()=>{hideAutostart();S.frame?.focus();};acts.append(go,own);card.append(acts);wrap.append(card);$('sessionBody').append(wrap);go.focus();
  announce(card.firstChild.textContent+'. Натисни «Почати співати».');}
 function hideAutostart(){$('autostartCard')?.remove();}
 function closeSession(){if(!S.open)return;nextPhase('');S.open=false;dropFrame();

@@ -195,9 +195,11 @@ SONG(s) ─finished→ **RESULT(s) + NEXT(next song)** ─3-2-1 / «Почати
   cost of a 6–40 MB load from localhost.
 - **Skip/close during the countdown:** the countdown is a `later()` timer, so `nextPhase()` cancels it. In RESULT(n)
   the bar is already on lesson n+1: the current dot and the label «Урок n+1 з N». «Пропустити урок» skips that lesson,
-  marks it `skipped` and shows NEXT(n+2) or the picker. In RESULT(song) the bar button reads «До пісень». × leaves.
+  marks it `skipped` and shows NEXT(n+2) or the picker. In RESULT(song) the bar button is hidden: the card's own «До пісень» is the one on screen. × leaves.
 - The next frame is preloaded hidden while the card counts down, as intro cards do today. If it has not loaded at 0,
-  «Почати зараз» reads «Завантажуємо…» and auto-sing follows the frame's `load`.
+  the button that led there («Почати зараз», or «Повторити» for a repeat) reads «Завантажуємо…», the card's other
+  buttons wait, and auto-sing follows the frame's `load`. A repeat also dims the «Далі» row at once, so it never looks
+  like the next step loading.
 
 ### The card, copy and chart (pinned layout, chart variant 1)
 
@@ -220,7 +222,9 @@ SONG(s) ─finished→ **RESULT(s) + NEXT(next song)** ─3-2-1 / «Почати
   - y runs 0–100 % with hairline grid lines at 0/50/100. One column per day, ≤ 24 px wide, with a 4 px rounded top.
     Earlier days are `#5d6a80`; today is `--mint`, with its value directly above. When that label falls within 16 px
     of the median line it is lifted above the line.
-  - The median is a 1.5 px dashed `--amber` line labelled «медіана 70 %» at the left edge. Day labels read «6.10» and
+  - The median is a 1.5 px dashed `--amber` line labelled «медіана 70 %». The label takes the first place clear of
+    every column and label: the left end, the right end, then any gap between the columns, above the line before below it. With no
+    clear place it is left out, the caption adds «· пунктир — медіана», and the median cell above gives the number. Day labels read «6.10» and
     «сьогодні».
   - Each column has a `<title>` («6.10: 66 %»). The SVG has `role="img"` and an `aria-label` that lists the values.
   - Caption: «Збіг повних проходів по днях · <ruler>»; on a first attempt, «Наступні дні з’являться тут поруч».
@@ -256,22 +260,25 @@ were not probed. The fallback below covers them.
 
 ```
 Studio                                               trainer (frame)
- frame load event ──── {type:'luma:sing'} ─────────▶ autoSing()
+ frame load event ── {type:'luma:sing', counted} ──▶ autoSing(counted)
                                                      ensureContext() raced against 1.5 s
                                                        not running → reply ok:false, reason 'audio'
                                                      closeTrace(); s.pos = song.initialTime||0
-                                                     await startTransport(true, quick=true, fresh=true)
+                                                     await startTransport(true, counted?'counted':true, fresh=true)
  ◀── {type:'luma:autostart', file, ok, reason} ───── ok = s.mode==='singing'; else reason 'mic' | 'busy' | 'other'
  ok:false → fallback card over the frame
- «Почати співати» (#autostartBtn, a real click in Studio) ── {type:'luma:sing'} again ──▶ (now allowed)
+ «Почати співати» (#autostartBtn, a real click in Studio) ── {type:'luma:sing', counted:false} ──▶ (now allowed)
 ```
 
 - **Trainer side** (`app/app.js`, ~15 lines):
   - A `message` listener that accepts only `e.source===parent`, `parent!==window`, `e.origin===location.origin` and
     `type==='luma:sing'`.
-  - `autoSing()` replies `busy` unless the trainer is idle, not busy and not awaiting a finish. It uses `quick=true`
-    (0.6 s lead-in), so the Studio 3-2-1 is the only countdown. It uses `fresh=true`, so a shown trace never turns the
-    pass into a punch-in.
+  - `autoSing()` replies `busy` unless the trainer is idle, not busy and not awaiting a finish. It uses the quick
+    0.6 s lead-in and `fresh=true`, so a shown trace never turns the pass into a punch-in. `counted` (the step came
+    from a card) shows no count-in number over that lead-in, so the Studio 3-2-1 is the only countdown. From the
+    moment the request arrives until the answer, the first-visit invitation («Натисни «Слухати»…») stays hidden, so
+    the frame never flashes it while the sound and the microphone start. A picker card and «Почати співати» send
+    `counted:false`: no Studio count came before, so the trainer's short count-in shows.
   - `ensureContext()` builds the gain graph **before** `await s.ctx.resume()`. A context whose resume is still pending
     is then complete, and a later call after a gesture just resumes it.
   - The reason is `mic` when `startTransport` ended in a mic error (`errorKind`).

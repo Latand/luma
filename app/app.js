@@ -25,7 +25,7 @@ function levelLabel(opt){return opt.level==='custom'?'свій коридор':(
 // Signed distance in cents; on the easy level the octave is forgiven (distance folds into ±6 semitones).
 function centsOff(m,refM,opt){let d=m-refM;if(opt.octaveFree){d=((d%12)+12)%12;if(d>6)d-=12;}return d*100;}
 const LOOP_LANE=24;
-const s={ctx:null,stream:null,capture:null,micSource:null,worker:null,micGeneration:0,busy:false,cancel:0,mode:'idle',transport:null,sources:[],endTimer:null,nextTimer:null,bufs:new Map(),gains:null,pos:song.initialTime||0,range:{a:0,b:song.duration},rangeId:0,history:[],current:null,takes:[],takeCounter:0,pending:new Map(),awaitFinish:false,trace:null,live:null,verified:[],dirty:true,raf:0,lastDraw:0,lastFrame:0,lastUI:0,rangeLo:48,rangeHi:76,liveSmooth:null,lastSmoothT:0,toastTimer:0,edit:null,computeMs:0,windowMs:0,unsaved:false,undoPunch:null,busyFor:'',scrub:null,lyricKey:'',resumeAt:null,parkedAt:null,tlDrag:null,seekTimer:0,dense:false,stageH:0,hist:{runs:[],days:[],loaded:false,note:'',persisted:null,stamp:'',stale:false,restored:false},shadow:null,shadowSig:'',progressSig:'',trendScope:'',weakOrder:'song',roomNotice:false};
+const s={ctx:null,stream:null,capture:null,micSource:null,worker:null,micGeneration:0,busy:false,cancel:0,mode:'idle',transport:null,sources:[],endTimer:null,nextTimer:null,bufs:new Map(),gains:null,pos:song.initialTime||0,range:{a:0,b:song.duration},rangeId:0,history:[],current:null,takes:[],takeCounter:0,pending:new Map(),awaitFinish:false,trace:null,live:null,verified:[],dirty:true,raf:0,lastDraw:0,lastFrame:0,lastUI:0,rangeLo:48,rangeHi:76,liveSmooth:null,lastSmoothT:0,toastTimer:0,edit:null,computeMs:0,windowMs:0,unsaved:false,undoPunch:null,busyFor:'',scrub:null,lyricKey:'',resumeAt:null,parkedAt:null,hostSing:false,tlDrag:null,seekTimer:0,dense:false,stageH:0,hist:{runs:[],days:[],loaded:false,note:'',persisted:null,stamp:'',stale:false,restored:false},shadow:null,shadowSig:'',progressSig:'',trendScope:'',weakOrder:'song',roomNotice:false};
 const canvas=$('chart'),g=canvas.getContext('2d',{alpha:false}),tl=$('timeline'),tg=tl.getContext('2d',{alpha:false});let W=1,H=1,DPR=1,TW=1,TH=1;
 const reduced=matchMedia('(prefers-reduced-motion: reduce)');
 function fmt(t){t=Math.max(0,Number.isFinite(t)?t:0);return String(Math.floor(t/60)).padStart(2,'0')+':'+String(Math.floor(t%60)).padStart(2,'0');}
@@ -228,7 +228,7 @@ function sync(){
  if(window.LumaActivity)window.LumaActivity.state({mode:s.mode,view:prefs.view,level:prefs.level,tolerance:levelOpt().tolerance,speed:prefs.speed,loop:prefs.loop,tab:prefs.tab,rangeId:s.rangeId,range:[+s.range.a.toFixed(1),+s.range.b.toFixed(1)],octave:prefs.octave,vocal:prefs.vocal,lyrics:prefs.lyrics,shadow:prefs.shadow,audio:prefs.audio,takesOpen:prefs.takesOpen,review:traceShown()?s.trace.take.runId:null});
  s.dirty=true;$('lyricBand').hidden=!prefs.lyrics||!song.lyrics.length;
  // nothing recorded and nothing running: one invitation instead of a readout with no reading and a meter with no level
- const intro=!s.takes.length&&s.mode!=='singing'&&!s.stream&&!s.trace;$('invite').hidden=!intro;$('chartWrap').dataset.intro=intro?'1':'0';
+ const intro=!s.takes.length&&s.mode!=='singing'&&!s.stream&&!s.trace&&!s.hostSing;$('invite').hidden=!intro;$('chartWrap').dataset.intro=intro?'1':'0';
  const active=s.mode!=='idle',singing=s.mode==='singing';$('singBtn').disabled=s.awaitFinish||(s.busy&&s.busyFor!=='sing');$('singBtn').classList.toggle('recording',singing);$('singLabel').textContent=s.busy?(s.busyFor==='sing'?'Скасувати':'Співати'):singing?'Завершити':'Співати';$('singBtn').querySelector('use').setAttribute('href',singing?'#i-stop':'#i-mic');
  $('listenBtn').disabled=s.busy||s.awaitFinish;$('listenLabel').textContent=s.busy&&s.busyFor==='listen'?'Готую…':singing?'Стоп':active?'Пауза':'Слухати';$('listenBtn').setAttribute('aria-label',singing?'Зупинити запис':active?'Пауза':'Слухати пісню');$('listenIcon').setAttribute('href',singing?'#i-stop':active?'#i-pause':'#i-play');$('stopBtn').disabled=!active&&!s.busy&&!s.awaitFinish;
  for(const id of ['phraseSelect','prevPhrase','nextPhrase','octave','latency','tolerance','rangeA','rangeB','applyRange','editBtn','applyEdit','importBtn','exportTarget','saveVerify','resetEdits','revokeVerify'])$(id).disabled=active||s.busy||s.awaitFinish;
@@ -405,7 +405,7 @@ async function startTransport(sing,quick=false,fresh=false){
   const b=await buffers(prefs.speed);if(token!==s.cancel)return;await s.ctx.resume();
   const seg=nextSegment(sing,fresh),punch=seg.punch,room=sing?audioRoom(seg):null;if(room)freeVoices(room);if(sing&&!punch){makeRoom();s.trace=null;}if(seg.start!==s.pos){s.pos=seg.start;setRangeScale();}// only a moved playhead is framed at once; otherwise the eased planner takes over
   const speed=seg.speed,when=s.ctx.currentTime+(sing?(quick?.6:2.1):.12),offset=seg.start,end=seg.end,loop=seg.loop;
-  s.transport={token,when,offset,end,speed,loop};s.mode=sing?'singing':'listen';s.history=punch?punch.points.filter(p=>p.songT<offset).map(p=>({...p,raw:p.m})):[];s.current=null;s.liveSmooth=null;s.busy=false;s.live=null;
+  s.transport={token,when,offset,end,speed,loop,counted:quick==='counted'};s.mode=sing?'singing':'listen';s.history=punch?punch.points.filter(p=>p.songT<offset).map(p=>({...p,raw:p.m})):[];s.current=null;s.liveSmooth=null;s.busy=false;s.live=null;
   const duration=scheduleSources(b,when,offset,end,speed,loop,token);
   if(sing){const lag=prefs.latency/1000,meta=takeMeta(offset,end,speed);if(punch){meta.punchInto=punch.id;meta.keepUndo=room.keepUndo;s.trace=null;}s.pending.set(meta.id,meta);s.live=newScore(meta);s.worker.postMessage({type:'record',id:meta.id,start:when+lag,end:when+duration+lag,audio:meta.hasAudio});if(punch)say('Перезапис спроби '+punch.id+' від '+fmt(offset));}
   if(!loop)s.endTimer=setTimeout(()=>{if(s.transport?.token===token){if(s.mode==='singing'){s.worker?.postMessage({type:'stop',time:when+duration+prefs.latency/1000,reason:'end'});}else naturalEnd(token);}},(when-s.ctx.currentTime+duration+1.1)*1000);
@@ -890,19 +890,22 @@ function sessionResult(t,saved){
 }
 function tellHost(t,saved){if(window.parent===window||!finishedTake(t))return;parent.postMessage({type:'luma:finished',file:hostFile(),match:scorePct(t.score),result:sessionResult(t,saved)},location.origin);}
 // A Studio session asks the trainer it opened to start singing by itself; the answer says whether it did, so Studio can
-// show a start button when the browser keeps the sound or the microphone off. Never a silent dead state.
-async function autoSing(){
- const reply=(ok,reason=null)=>parent.postMessage({type:'luma:autostart',file:hostFile(),ok,reason},location.origin);
- if(s.mode!=='idle'||s.busy||s.awaitFinish)return reply(false,'busy');
+// show a start button when the browser keeps the sound or the microphone off. Never a silent dead state. counted: Studio
+// has just run its own 3-2-1, so the short lead-in shows no number of its own, and the first-visit invitation stays away
+// from the moment the request arrives (docs/design/SESSION_FLOW_RESULTS.md).
+async function autoSing(counted){
+ const reply=(ok,reason=null)=>{s.hostSing=false;sync();parent.postMessage({type:'luma:autostart',file:hostFile(),ok,reason},location.origin);};
+ if(s.mode!=='idle'||s.busy||s.awaitFinish)return parent.postMessage({type:'luma:autostart',file:hostFile(),ok:false,reason:'busy'},location.origin);
+ s.hostSing=true;sync();
  const block=window.Luma?.test?.autostartBlock;if(block){window.Luma.test.autostartBlock=null;return reply(false,block);}
  try{const ok=await Promise.race([ensureContext().then(c=>c.state==='running'),new Promise(r=>setTimeout(()=>r(false),1500))]);if(!ok)return reply(false,'audio');}
  catch(_){return reply(false,'audio');}
  if(s.mode!=='idle'||s.busy||s.awaitFinish)return reply(false,'busy');
  if(s.trace)closeTrace();s.pos=song.initialTime||0;s.errorKind='';
- await startTransport(true,true,true);// the short lead-in: Studio's own 3-2-1 was the count-in
+ await startTransport(true,counted?'counted':true,true);
  reply(s.mode==='singing',s.mode==='singing'?null:s.errorKind==='mic'?'mic':'other');
 }
-if(window.parent!==window)addEventListener('message',e=>{if(e.source===parent&&e.origin===location.origin&&e.data?.type==='luma:sing')autoSing();});
+if(window.parent!==window)addEventListener('message',e=>{if(e.source===parent&&e.origin===location.origin&&e.data?.type==='luma:sing')autoSing(!!e.data.counted);});
 function storeTake(meta,m){
  let replaced=null;
  if(meta.punchInto!==undefined){const old=s.takes.find(t=>t.id===meta.punchInto);const merged=old?mergeTake(old,meta,m):null;if(merged){meta=merged.meta;m=merged.m;replaced=old;}else{s.takeCounter++;meta={...meta,id:s.takeCounter};m={...m,id:meta.id};}}
@@ -1466,7 +1469,7 @@ function updateReadout(t){
  if(sc&&pct!==null){pe.textContent=pct+'%';if(pct>=70)pe.classList.add('good');else if(pct<40)pe.classList.add('low');de.textContent='Влучання '+(sc.hit*GRID).toFixed(1)+' с із '+(sc.target*GRID).toFixed(1)+' с цілі · ±'+sc.opt.tolerance+'¢ '+levelLabel(sc.opt)+(sc.sung<sc.target?' · тиша = промах':'')+(rangeVerified()?'':' · чернетка');}
  else if(sc){pe.textContent='—';de.textContent=s.mode==='singing'?'Чекаю на першу намальовану ноту…':'У цій спробі не було намальованих нот';}
  else{pe.textContent='—';de.textContent=s.mode==='listen'?'Слухаємо ціль · збіг рахується тільки під час співу':'Заспівай — рахую по намальованих нотах · '+levelLabel(levelOpt())+' ±'+levelOpt().tolerance+'¢';}
- $('timeNow').textContent=fmt(t);if(s.transport&&s.ctx.currentTime<s.transport.when&&s.mode==='singing'){$('countdown').hidden=false;$('countNumber').textContent=Math.ceil(s.transport.when-s.ctx.currentTime);}else $('countdown').hidden=true;
+ $('timeNow').textContent=fmt(t);if(s.transport&&s.ctx.currentTime<s.transport.when&&s.mode==='singing'&&!s.transport.counted){$('countdown').hidden=false;$('countNumber').textContent=Math.ceil(s.transport.when-s.ctx.currentTime);}else $('countdown').hidden=true;
  renderLyric(t);placeCountdown();
  if($('settingsDialog').open)$('diagnostics').textContent='YIN · '+(s.ctx?(s.ctx.sampleRate/1000).toFixed(1)+' kHz':'мікрофон вимкнено')+'\nВікно аналізу: '+s.windowMs.toFixed(1)+' мс\nОбчислення останнього кадру: '+s.computeMs.toFixed(2)+' мс\nЦе не вимір повної затримки.\nКалібрування: ручний зсув '+prefs.latency+' мс';
 }

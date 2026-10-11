@@ -86,6 +86,30 @@ const card = page => page.evaluate(() => {
     bottom: r.bottom, fits: r.bottom <= H + .5 && document.documentElement.scrollWidth === document.documentElement.clientWidth, buttons,
     focus: document.activeElement?.id || document.activeElement?.textContent};
 });
+// The chart's median label against every column and the today value: true when it is clear of them all, or when it is
+// left out and the caption names the dashed line instead.
+const medianClear = page => page.evaluate(() => {
+  const g = document.querySelector('#session .rchart svg'); if (!g) return {clear: true, label: null};
+  const t = g.querySelector('text[data-median]'), box = n => { const b = n.getBBox(); return {x1: b.x, x2: b.x + b.width, y1: b.y, y2: b.y + b.height}; };
+  if (!t) return {clear: /пунктир — медіана/.test(document.querySelector('#session .rchart .cap')?.textContent || ''), label: null};
+  const m = box(t), hit = [...g.querySelectorAll('path'), g.querySelector('text[data-today]')].filter(Boolean).map(box).filter(b => m.x1 < b.x2 && m.x2 > b.x1 && m.y1 < b.y2 && m.y2 > b.y1);
+  return {clear: !hit.length, label: t.textContent, at: [Math.round(m.x1), Math.round(m.y1)], hit};
+});
+// Watches the trainer the card has preloaded: whether a visible frame ever shows its first-visit invitation or its own
+// count-in number between the session's request to sing and the first two seconds of singing.
+const watchHandover = async page => {
+  await page.waitForFunction(() => document.querySelector('#session iframe.sframe')?.contentWindow?.Luma);
+  const f = await (await page.$('#session iframe.sframe')).contentFrame();
+  await f.evaluate(() => { const w = window.__handover = {invite: 0, count: 0, done: false}; let sang = 0;
+    const look = () => { const el = frameElement, seen = el && el.classList.contains('shown') && parseFloat(getComputedStyle(el).opacity) > .1;
+      if (seen && !document.getElementById('invite').hidden) w.invite++;
+      if (seen && !document.getElementById('countdown').hidden) w.count++;
+      if (window.Luma.diagnostics().mode === 'singing' && !sang) sang = performance.now();
+      if (sang && performance.now() - sang > 2000) { w.done = true; return; } requestAnimationFrame(look); };
+    requestAnimationFrame(look); });
+  return f;
+};
+const handover = async f => { await f.waitForFunction(() => window.__handover.done, null, {timeout: 8000}); return f.evaluate(() => window.__handover); };
 const layoutOk = c => c && c.fits && c.buttons.length && c.buttons.every(b => b.h >= 36 && b.inside) && (c.chartFont >= 11);
 const layoutText = c => JSON.stringify(c && {bottom: Math.round(c.bottom), fits: c.fits, chartFont: c.chartFont, buttons: c.buttons.map(b => [b.id, Math.round(b.h), b.inside])});
 
@@ -168,9 +192,12 @@ try {
 
     // ── 8 · «Повторити урок 1»: the same lesson, singing again ─────────────────────────────────────────────────
     auto = (await msgs(page, 'luma:autostart')).length;
+    await page.evaluate(() => document.addEventListener('click', e => { if (e.target.id === 'resultRepeat') requestAnimationFrame(() => { window.__repeat = {now: document.getElementById('resultNow')?.textContent, again: document.getElementById('resultRepeat')?.textContent, next: !!document.querySelector('#session .nsec.off')}; }); }, {once: true}));
     await page.locator('#resultRepeat').click(); await waitSinging(page, lessonFiles[0], 6000);
     await waitMsg(page, 'luma:autostart', auto);
     assert((await msgs(page, 'luma:autostart')).at(-1).ok && (await dots(page))[0] === 'current', `${width}: «Повторити урок 1» reopens lesson 1 and it sings within 6 s`);
+    const rep = await page.evaluate(() => window.__repeat);
+    assert(rep && rep.now === 'Почати зараз' && rep.again === 'Завантажуємо…' && rep.next, `${width}: the first frame after «Повторити» shows the loading state on that button and steps the «Далі» row back ` + JSON.stringify(rep));
 
     // ── 9 · result with history: three earlier days plus the first pass; the median is theirs ──────────────────
     frame = await frameOf(page);
@@ -186,7 +213,25 @@ try {
     assert(c.cells.median === median + ' %' && c.cells.delta === (d > 0 ? '+' + d : d < 0 ? '−' + -d : '0'), `${width}: the median is the true median of the earlier full passes (${median} %), delta ${d} ` + JSON.stringify(c.cells));
     assert(c.head === (d >= 2 ? 'Чудово!' : d <= -2 ? 'Готово' : 'Готово!'), `${width}: the headline follows the delta: ${c.head}`);
     assert(c.columns.length === 4 && c.columns.at(-1).today && c.columns.slice(0, 3).every(x => !x.today), `${width}: four columns, the last one today ` + JSON.stringify(c.columns));
-    assert(/^Збіг повних проходів по днях · (Легко|Звично|Точно) · Ноти · 1×$/.test(c.caption), `${width}: the caption names the ruler: ${c.caption}`);
+    assert(/^Збіг повних проходів по днях · (Легко|Звично|Точно) · Ноти · 1×( · пунктир — медіана)?$/.test(c.caption), `${width}: the caption names the ruler: ${c.caption}`);
+    const mc = await medianClear(page);
+    assert(mc.clear, `${width}: the median label is clear of the columns and today's value ` + JSON.stringify(mc));
+    // The same chart drawn at this card's width for the layouts that used to collide: five earlier days with a tall second
+    // column, today alone at the median, and every column crossing the line (no clear place: the caption names the line).
+    const charts = await page.evaluate(() => {
+      const host = document.querySelector('#session .rchart'), day = k => new Date(Date.now() - k * 86400e3).toISOString().slice(0, 10);
+      const cases = {five: {days: [70, 88, 75, 79, 82].map((value, k) => ({day: day(5 - k), value, n: 1})), score: 85, median: 79, prev: 5},
+        solo: {days: [], score: 100, median: 100, prev: 1}, crossed: {days: [95, 95, 95, 95, 95].map((value, k) => ({day: day(5 - k), value, n: 1})), score: 95, median: 60, prev: 5}};
+      return Object.fromEntries(Object.entries(cases).map(([k, r]) => {
+        const box = document.createElement('div'); box.className = 'rchart'; host.after(box);
+        const drawn = drawChart(box, {...r, full: true}), g = box.querySelector('svg'), t = g.querySelector('text[data-median]');
+        const bb = n => { const b = n.getBBox(); return {x1: b.x, x2: b.x + b.width, y1: b.y, y2: b.y + b.height}; };
+        const hit = t ? [...g.querySelectorAll('path'), g.querySelector('text[data-today]')].map(bb).filter(o => { const m = bb(t); return m.x1 < o.x2 && m.x2 > o.x1 && m.y1 < o.y2 && m.y2 > o.y1; }).length : 0;
+        box.remove(); return [k, {named: drawn.named, label: !!t, hit, inside: t ? bb(t).y1 >= 0 && bb(t).x2 <= +g.getAttribute('width') : true}];
+      }));
+    });
+    assert(charts.five.label && !charts.five.hit && charts.five.inside && charts.solo.label && !charts.solo.hit && charts.solo.inside && !charts.crossed.label && !charts.crossed.named,
+      `${width}: the median label finds a clear place or is left out ` + JSON.stringify(charts));
     assert(layoutOk(c), `${width}: the card with history fits ` + layoutText(c));
     await shot(page, 'result_history', width);
 
@@ -203,11 +248,14 @@ try {
     // ── 11 · the countdown runs out: 3, 2, 1, and lesson 1 opens and sings by itself ───────────────────────────
     await page.locator('#sessionStart').click(); await waitCard(page, 'lesson:1');
     const ring = [await page.locator('#session .ring b').textContent()]; const r0 = Date.now();
+    let watch = await watchHandover(page);
     await page.waitForTimeout(1100 - (Date.now() - r0)); ring.push(await page.locator('#session .ring b').textContent());
     await page.waitForTimeout(2100 - (Date.now() - r0)); ring.push(await page.locator('#session .ring b').textContent());
     auto = (await msgs(page, 'luma:autostart')).length;
     await waitSinging(page, lessonFiles[0], 6000); await waitMsg(page, 'luma:autostart', auto);
     assert(JSON.stringify(ring) === '["3","2","1"]' && Date.now() - r0 <= 6000, `${width}: the ring counts 3, 2, 1 and the lesson sings ${Date.now() - r0} ms after the card ` + JSON.stringify(ring));
+    let ho = await handover(watch);
+    assert(!ho.invite && !ho.count, `${width}: after the ring's «1» the lesson shows no invitation and no second count-in ` + JSON.stringify(ho));
 
     // ── 12 · the browser refuses sound: a visible start button over the trainer, and a real click starts it ─────
     await page.locator('#sessionSkip').click(); await waitCard(page, 'lesson:2');
@@ -252,17 +300,29 @@ try {
     c = await card(page);
     assert(c.eyebrow === 'Пісня · «Demo» · завершено' && c.head === 'Перший прохід!' && c.ring === '3' && c.buttons.map(b => b.id).join() === 'resultNow,resultRepeat,resultSongs', `${width}: the song result counts into the next song, with «Повторити» and «До пісень» ` + JSON.stringify(c.buttons.map(b => b.id)));
     assert(layoutOk(c), `${width}: the song card fits ` + layoutText(c));
+    assert(await page.locator('#sessionSkip').isHidden() && await page.locator('#session button:visible', {hasText: 'До пісень'}).count() === 1, `${width}: the song result offers «До пісень» once`);
     await shot(page, 'result_song', width);
+    watch = await watchHandover(page);
     auto = (await msgs(page, 'luma:autostart')).length;
     await waitSinging(page, picker.order[1], 7000); await waitMsg(page, 'luma:autostart', auto);
     assert((await frameSrc(page)) === '/song/' + picker.order[1], `${width}: after 3 s the next song in picker order is in the frame and singing`);
+    ho = await handover(watch);
+    assert(!ho.invite && !ho.count, `${width}: the next song starts with no invitation and no second count-in ` + JSON.stringify(ho));
     await sing(await frameOf(page), 0, 'end'); await waitCard(page, 'none');
     c = await card(page);
     assert(!c.ring && c.buttons[0].id === 'resultSongs' && /primary/.test(c.buttons[0].cls) && !c.buttons.some(b => b.id === 'resultNow'), `${width}: the last song: no countdown, «До пісень» is the primary ` + JSON.stringify(c.buttons));
     assert(layoutOk(c), `${width}: the last-song card fits ` + layoutText(c));
     await shot(page, 'result_lastsong', width);
+    assert(await page.locator('#sessionSkip').isHidden() && await page.locator('#session button:visible', {hasText: 'До пісень'}).count() === 1, `${width}: the last-song result offers «До пісень» once`);
     await page.waitForTimeout(3500);
     assert((await cardNext(page)) === 'none' && !(await page.$('#session iframe')), `${width}: nothing starts by itself after the last song`);
+    // «Повторити» on it: a second pass the same day, so today is the only column and stands at the median
+    await page.locator('#resultRepeat').click(); await waitSinging(page, picker.order[1], 6000);
+    await sing(await frameOf(page), 0, 'end'); await waitCard(page, 'none');
+    c = await card(page);
+    const solo = await medianClear(page);
+    assert(c.columns.length === 1 && c.columns[0].today && c.cells.median && solo.clear, `${width}: today alone at the median: the median label is clear of today's value and column ` + JSON.stringify({cells: c.cells, solo}));
+    await shot(page, 'result_lastsong_repeat', width);
     await page.locator('#resultSongs').click(); await page.waitForSelector('#session .spicker');
     assert(!(await page.$('#session iframe')), `${width}: «До пісень» returns to the picker`);
 
