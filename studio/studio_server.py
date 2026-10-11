@@ -7,6 +7,7 @@
   POST /retry?id=                queue a failed job again
   POST /activity                 {"events":[…]} from Studio and its trainers -> songs/logs/activity/<day>.jsonl
   GET  /status                   jobs with stage progress, library with title / artist / duration / songHash / difficulty
+  GET  /targets?ids=<hash,…>     compact melody of each library trainer by song hash, for the latency estimate
   GET  /song/<name>.html         generated trainers (served over http so the microphone works)
   GET  /cover/<name>.html        the album cover cached beside that trainer's package (studio/covers.py)
   GET  /demo                     the synthetic demo trainer, if it has been built
@@ -15,8 +16,9 @@
 Run: python studio/studio_server.py [--port 8792] [--songs DIR] [--copy-to DIR]
 """
 from __future__ import annotations
-import argparse, datetime, json, os, re, shutil, subprocess, sys, threading, time, urllib.parse, uuid
+import argparse, base64, datetime, json, os, re, shutil, subprocess, sys, threading, time, urllib.parse, uuid
 import covers, difficulty
+from array import array
 from concurrent.futures import ThreadPoolExecutor
 from build_html import wrap
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
@@ -131,6 +133,61 @@ def song_difficulty(p: Path, st: os.stat_result) -> dict:
         if p.name not in _measuring: _measuring.add(p.name); _measure_pool.submit(_measure, p, sig)
     return {'songHash': None, 'difficulty': None}
 
+# Targets for «Розрахувати затримку» (docs/design/LATENCY_AUTOCAL.md §5): the melody of every trainer Studio serves, by
+# song hash, in the form the trainer matches attempts against. Only LUMA_SONG is read, never the audio after it; each
+# file is parsed once per (size, mtime). The contour is Int16 cents on the song's hop grid, -32768 where there is no
+# confident pitch; notes carry what the trainer needs to apply ignored notes and manual shifts; lyric lines are times only.
+SONG_MARK, ASSETS_MARK = b'<script>window.LUMA_SONG=', b';window.LUMA_ASSETS='
+TARGET_ID = re.compile(r'^[A-Za-z0-9_-]{1,128}$'); MAX_TARGET_IDS = 400
+_targets: dict[Path, tuple[tuple[int, float], dict | None]] = {}; _targets_lock = threading.Lock()
+
+def read_song(p: Path) -> dict:
+    """The LUMA_SONG object of a trainer, read in 1 MiB pieces up to the assets marker; ValueError when it has none."""
+    buf = bytearray(); start = -1
+    with open(p, 'rb') as f:
+        while True:
+            chunk = f.read(1 << 20)
+            if not chunk: raise ValueError('no LUMA_SONG')
+            buf += chunk
+            if start < 0: start = buf.find(SONG_MARK)
+            if start >= 0:
+                end = buf.find(ASSETS_MARK, max(start + len(SONG_MARK), len(buf) - len(chunk) - len(ASSETS_MARK)))
+                if end >= 0: break
+    song = json.loads(bytes(buf[start + len(SONG_MARK):end]).decode('utf-8'))
+    if not isinstance(song, dict) or song.get('schema') != 'luma.song.v1': raise ValueError('schema')
+    return song
+
+def compact_target(song: dict) -> dict:
+    hop = float(song['hop']); n = int(round(float(song['duration']) / hop)) + 1; cents = array('h', [-32768]) * n
+    for p in song.get('points') or []:
+        if p[1] is None or not p[3]: continue
+        i = int(round(p[0] / hop))
+        if 0 <= i < n: cents[i] = max(-32767, min(32767, int(round(p[1] * 100))))
+    if sys.byteorder != 'little': cents.byteswap()
+    lyrics = song.get('lyrics') or []
+    return {'id': song.get('id'), 'hop': hop, 'duration': song['duration'], 'cents': base64.b64encode(cents.tobytes()).decode('ascii'),
+            'notes': [{k: x[k] for k in ('a', 'b', 'm', 'ignored', 'manual', 'originalM') if k in x} for x in song.get('notes') or []],
+            'lines': [[line['a'], line['b']] for line in lyrics], 'words': any(line.get('words') for line in lyrics), 'lesson': bool(song.get('lesson'))}
+
+def library_targets() -> dict[str, dict]:
+    """{songHash: target} over the library and the demo; when two trainers share a song hash, the newer file wins."""
+    files = sorted(SONGS.glob('Luma_*.html')); demo = ROOT / 'examples' / 'demo' / 'Luma_Demo.html'
+    if demo.is_file(): files.append(demo)
+    found: dict[str, tuple[float, dict]] = {}
+    for p in files:
+        try: st = p.stat()
+        except OSError: continue
+        sig = (st.st_size, st.st_mtime)
+        with _targets_lock: hit = _targets.get(p)
+        if hit and hit[0] == sig: entry = hit[1]
+        else:
+            try: song = read_song(p); entry = {'hash': song.get('sourceId') or song.get('id'), 'target': compact_target(song)}
+            except (OSError, ValueError, KeyError, TypeError, IndexError): entry = None
+            with _targets_lock: _targets[p] = (sig, entry)
+        if entry and isinstance(entry['hash'], str) and (entry['hash'] not in found or found[entry['hash']][0] < st.st_mtime):
+            found[entry['hash']] = (st.st_mtime, entry['target'])
+    return {k: v for k, (_, v) in found.items()}
+
 def cover_stamp(name: str) -> int | None:
     """The cover's mtime for /status: Studio asks for /cover/<name>?v=<stamp>, so a re-extracted cover is a new URL."""
     cover = covers.cover_for(SONGS, name)
@@ -191,6 +248,11 @@ class Handler(BaseHTTPRequestHandler):
                 st = p.stat()
                 songs.append({'name': p.name, 'bytes': st.st_size, 'mtime': time.strftime('%Y-%m-%d %H:%M', time.localtime(st.st_mtime)), 'cover': cover_stamp(p.name), **song_meta(p), **song_difficulty(p, st)})
             return self.send(200, json.dumps({'jobs': js, 'songs': songs}), 'application/json')
+        if u.path == '/targets':
+            ids = urllib.parse.parse_qs(u.query).get('ids', [''])[0].split(',')
+            if not ids or len(ids) > MAX_TARGET_IDS or not all(TARGET_ID.match(i) for i in ids): return self.send(400, 'bad ids', 'text/plain')
+            known = library_targets()
+            return self.send(200, json.dumps({i: known[i] for i in dict.fromkeys(ids) if i in known}, separators=(',', ':')), 'application/json')
         if u.path.startswith('/song/'):
             name = os.path.basename(urllib.parse.unquote(u.path[6:])); p = SONGS / name
             if p.is_file() and name.endswith('.html'): return self.send(200, p.read_bytes())

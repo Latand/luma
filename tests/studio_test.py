@@ -1,4 +1,5 @@
 """HTTP contracts with the preparation worker disabled; no audio processing or paid APIs."""
+import base64
 import contextlib
 import io
 import json
@@ -7,6 +8,7 @@ from pathlib import Path
 import runpy
 import shutil
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
@@ -272,6 +274,35 @@ class StudioHTTPTests(unittest.TestCase):
             if got['Luma_Easy.html'] == 'd' * 64: break
             time.sleep(.1)
         self.assertEqual(got['Luma_Easy.html'], 'd' * 64, 'a rewritten trainer is measured again')
+
+    def test_targets_by_song_hash(self):
+        """/targets: the melody of library trainers and lessons by song hash, compact, without audio; cached by mtime."""
+        songs = Path(self.directory.name)
+        def trainer(name, source, points, extra):
+            song = {'schema': 'luma.song.v1', 'title': name, 'artist': '', 'duration': 2.0, 'hop': .02, 'id': 'id-' + name, 'points': points,
+                    'notes': notes_of(60, (62, True)), 'sourceId': source, **extra}
+            (songs / f'Luma_{name}.html').write_text('<html><script>window.LUMA_SONG=' + json.dumps(song, separators=(',', ':'))
+                                                       + ';window.LUMA_ASSETS={"1":{"backing":"AUDIOBYTES"}};</script>', encoding='utf-8')
+        points = [[0.0, None, 0, 0], [0.02, 60.0, .9, 1], [0.04, 61.5, .9, 0], [0.06, 62.25, .9, 1]]
+        lines = [{'a': .1, 'b': .9, 'words': [{'a': .1, 'b': .5, 'w': 'la'}]}, {'a': 1.0, 'b': 1.5, 'words': []}]
+        trainer('Song', 'a' * 64, points, {'lyrics': lines}); trainer('Lesson', 'lesson-one', points, {'lyrics': [], 'lesson': {'id': 'l1'}})
+        status, body = self.request('/targets?ids=' + 'a' * 64 + ',lesson-one,unknown-hash')
+        got = json.loads(body)
+        self.assertEqual((status, sorted(got)), (200, sorted(['a' * 64, 'lesson-one'])), 'an unknown id is left out')
+        self.assertNotIn(b'AUDIOBYTES', body, 'the audio after LUMA_SONG is never read into the answer')
+        song, lesson = got['a' * 64], got['lesson-one']
+        cents = struct.unpack('<' + 'h' * 101, base64.b64decode(song['cents']))
+        self.assertEqual(cents[:4], (-32768, 6000, -32768, 6225), 'confident frames in cents, the rest marked as none')
+        self.assertEqual((song['id'], song['hop'], song['duration']), ('id-Song', .02, 2.0))
+        self.assertEqual(song['notes'][1], {'a': 1.0, 'b': 2.0, 'm': 62.0, 'ignored': True}, 'notes carry what edits and ignored notes need')
+        self.assertEqual((song['lines'], song['words'], song['lesson']), ([[.1, .9], [1.0, 1.5]], True, False), 'lyric lines as times only')
+        self.assertEqual((lesson['words'], lesson['lesson']), (False, True))
+        self.assertNotIn('la', json.dumps(song['lines']), 'no lyric text')
+        later = time.time() + 10; trainer('Song', 'a' * 64, [[0.0, 70.0, .9, 1]], {'lyrics': []}); os.utime(songs / 'Luma_Song.html', (later, later))
+        again = json.loads(self.request('/targets?ids=' + 'a' * 64)[1])['a' * 64]
+        self.assertEqual(struct.unpack('<h', base64.b64decode(again['cents'])[:2])[0], 7000, 'a rewritten trainer is read again')
+        for bad in ('/targets', '/targets?ids=', '/targets?ids=a%20b', '/targets?ids=a,,b', '/targets?ids=' + ','.join(['x'] * 401), '/targets?ids=' + 'x' * 129):
+            self.assertEqual(self.request(bad)[0], 400, bad[:40])
 
     def test_activity_is_appended_as_jsonl(self):
         event = lambda n, kind: {'ts': '2026-10-07T10:00:0%dZ' % n, 'session': 's1', 'page': 'Luma_Test', 'seq': n, 'type': kind, 'data': {'id': 'singBtn', 'extra': 'кліки'}, 'junk': 1}
