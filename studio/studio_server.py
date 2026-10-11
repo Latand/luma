@@ -6,7 +6,7 @@
   PUT  /import?name=             finished trainer HTML -> re-wrapped with the current app, added to the library
   POST /retry?id=                queue a failed job again
   POST /activity                 {"events":[…]} from Studio and its trainers -> songs/logs/activity/<day>.jsonl
-  GET  /status                   jobs with stage progress, library with title / artist / duration
+  GET  /status                   jobs with stage progress, library with title / artist / duration / songHash / difficulty
   GET  /song/<name>.html         generated trainers (served over http so the microphone works)
   GET  /cover/<name>.html        the album cover cached beside that trainer's package (studio/covers.py)
   GET  /demo                     the synthetic demo trainer, if it has been built
@@ -16,7 +16,8 @@ Run: python studio/studio_server.py [--port 8792] [--songs DIR] [--copy-to DIR]
 """
 from __future__ import annotations
 import argparse, datetime, json, os, re, shutil, subprocess, sys, threading, time, urllib.parse, uuid
-import covers
+import covers, difficulty
+from concurrent.futures import ThreadPoolExecutor
 from build_html import wrap
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
@@ -112,6 +113,24 @@ def song_meta(p: Path) -> dict:
     except (OSError, ValueError): meta = {}
     _meta_cache[p.name] = (sig, meta); return meta
 
+# Difficulty for «Обери за мене» (studio/difficulty.py, docs/design/AUTOPICK.md): the song hash sits after the long arrays,
+# so the whole data line is parsed, about 0.15 s a song. One worker does it off the request thread; /status says null
+# until it is done, and the next poll carries the number. A file that cannot be read is cached as null and never picked.
+_difficulty: dict[str, tuple[tuple[int, float], dict | None]] = {}; _measuring: set[str] = set()
+_measure_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='difficulty'); _difficulty_lock = threading.Lock()
+def _measure(p: Path, sig: tuple[int, float]):
+    try: value = difficulty.of_file(p)
+    except (OSError, ValueError, KeyError, TypeError): value = None
+    with _difficulty_lock: _difficulty[p.name] = (sig, value); _measuring.discard(p.name)
+def song_difficulty(p: Path, st: os.stat_result) -> dict:
+    """{songHash, difficulty} for /status: both null while the file is being measured or when it cannot be read."""
+    sig = (st.st_size, st.st_mtime)
+    with _difficulty_lock:
+        hit = _difficulty.get(p.name)
+        if hit and hit[0] == sig: return {'songHash': hit[1] and hit[1]['songHash'], 'difficulty': hit[1] and hit[1]['D']}
+        if p.name not in _measuring: _measuring.add(p.name); _measure_pool.submit(_measure, p, sig)
+    return {'songHash': None, 'difficulty': None}
+
 def cover_stamp(name: str) -> int | None:
     """The cover's mtime for /status: Studio asks for /cover/<name>?v=<stamp>, so a re-extracted cover is a new URL."""
     cover = covers.cover_for(SONGS, name)
@@ -169,7 +188,8 @@ class Handler(BaseHTTPRequestHandler):
                 js.append(d)
             songs = []
             for p in sorted(SONGS.glob('Luma_*.html'), key=lambda p: -p.stat().st_mtime):
-                songs.append({'name': p.name, 'bytes': p.stat().st_size, 'mtime': time.strftime('%Y-%m-%d %H:%M', time.localtime(p.stat().st_mtime)), 'cover': cover_stamp(p.name), **song_meta(p)})
+                st = p.stat()
+                songs.append({'name': p.name, 'bytes': st.st_size, 'mtime': time.strftime('%Y-%m-%d %H:%M', time.localtime(st.st_mtime)), 'cover': cover_stamp(p.name), **song_meta(p), **song_difficulty(p, st)})
             return self.send(200, json.dumps({'jobs': js, 'songs': songs}), 'application/json')
         if u.path.startswith('/song/'):
             name = os.path.basename(urllib.parse.unquote(u.path[6:])); p = SONGS / name

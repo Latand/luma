@@ -20,6 +20,7 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'studio'))
 import covers  # noqa: E402
+import difficulty  # noqa: E402
 HAS_FFMPEG = bool(shutil.which('ffmpeg') and shutil.which('ffprobe'))
 
 
@@ -91,6 +92,46 @@ class CoverTests(unittest.TestCase):
             self.assertIsNone(covers.extract(self.songs / 'Fixture'))
         self.assertEqual(sorted(p.name for p in (self.songs / 'Fixture').iterdir()), ['original.m4a'], 'retried on the next start')
 
+
+def notes_of(*spec, length=1.0, gap=0.0):
+    """Connected notes of one length: spec holds MIDI numbers, or (MIDI, True) for an ignored note."""
+    out, t = [], 0.0
+    for x in spec:
+        m, ignored = x if isinstance(x, tuple) else (x, False)
+        out.append({'id': len(out), 'a': round(t, 3), 'b': round(t + length, 3), 'm': float(m), 'n': m, 'ok': True, 'ignored': ignored}); t += length + gap
+    return out
+
+
+class DifficultyTests(unittest.TestCase):
+    """docs/design/AUTOPICK.md: D is the mean of five features between fixed anchors."""
+    def test_an_easy_map_scores_zero(self):
+        m = difficulty.measure({'notes': notes_of(60, 62, 64)})
+        self.assertEqual((m['span'], m['out'], m['rate'], m['leaps'], m['sung'], m['D']), (4, 0, 1, 0, 3, 0))
+
+    def test_hand_computed_map(self):
+        # 10 notes of 0.2 s: 5 notes/s (→ 1); 30 % of the time at MIDI 76, above D5 (→ 0.75); jumps 60→72, 72→60, 60→76
+        # in 9 moves (→ 1); P10–P90 = 60–76, 16 semitones (→ 9/13); 2 s sung (→ 0). D = 100 × 3.442 / 5 = 69.
+        spec = [60, 60, 60, 60, 72, 60, 60, 76, 76, 76]
+        m = difficulty.measure({'notes': notes_of(*spec, length=.2)})
+        self.assertEqual((m['span'], m['out'], m['rate'], round(m['leaps'], 3), m['sung']), (16, .3, 5, .333, 2))
+        self.assertEqual(m['D'], round(100 * (9 / 13 + .75 + 1 + 1 + 0) / 5))
+        # an ignored note is neither sung nor counted
+        with_ignored = notes_of(*spec[:5], (100, True), *spec[5:], length=.2)
+        self.assertEqual(difficulty.measure({'notes': with_ignored})['D'], m['D'])
+        self.assertIsNone(difficulty.measure({'notes': notes_of((60, True))}))
+
+    def test_a_gap_breaks_a_jump(self):
+        self.assertEqual(difficulty.measure({'notes': notes_of(60, 72, 60, gap=.3)})['leaps'], 0)
+        self.assertEqual(difficulty.measure({'notes': notes_of(60, 72, 60, gap=.29)})['leaps'], 1)
+
+    def test_lessons_are_ordered(self):
+        """The three built-in lessons, from the note plan their trainers are built from: lesson 1 < lesson 2 < lesson 3."""
+        sys.path.insert(0, str(ROOT / 'lessons'))
+        try: import build_lessons
+        except ImportError as e: self.skipTest(f'lessons/build_lessons.py needs numpy and soundfile: {e}')
+        ds = [difficulty.measure({'notes': build_lessons.plan(lesson)[0]})['D'] for lesson in sorted(build_lessons.LESSONS, key=lambda x: x.order)]
+        self.assertEqual(len(ds), 3)
+        self.assertTrue(ds[0] < ds[1] < ds[2], ds)
 
 
 class StudioHTTPTests(unittest.TestCase):
@@ -208,6 +249,29 @@ class StudioHTTPTests(unittest.TestCase):
         status, body = self.request('/status')
         song = json.loads(body)['songs'][0]
         self.assertEqual((status, song['title'], song['artist'], song['duration']), (200, 'T\u00e9st "q"', 'Band', 123.4))
+
+    def test_status_lists_song_hash_and_difficulty(self):
+        songs = Path(self.directory.name)
+        def trainer(name, notes, source):
+            song = {'schema': 'luma.song.v1', 'title': name, 'artist': '', 'duration': 30, 'id': 'id-' + name, 'points': [[0, None, 0, 0]] * 3000, 'notes': notes, 'sourceId': source}
+            text = '<html><script>window.LUMA_SONG=' + json.dumps(song, separators=(',', ':')) + ';window.LUMA_ASSETS={};</script>'
+            (songs / f'Luma_{name}.html').write_text(text, encoding='utf-8'); return text
+        trainer('Easy', notes_of(60, 62, 64), 'a' * 64); trainer('Hard', notes_of(60, 60, 60, 60, 72, 60, 60, 76, 76, 76, length=.2), 'b' * 64)
+        whole = trainer('Cut', notes_of(60, 62), 'c' * 64); (songs / 'Luma_Cut.html').write_text(whole[:len(whole) // 2], encoding='utf-8')
+        listed, deadline = {}, time.time() + 5
+        while time.time() < deadline:
+            listed = {s['name']: (s['songHash'], s['difficulty']) for s in json.loads(self.request('/status')[1])['songs']}
+            if listed['Luma_Easy.html'][1] is not None and listed['Luma_Hard.html'][1] is not None: break
+            time.sleep(.1)
+        self.assertEqual(listed['Luma_Easy.html'], ('a' * 64, 0), 'within 5 s of the start')
+        self.assertEqual(listed['Luma_Hard.html'], ('b' * 64, 69))
+        self.assertEqual(listed['Luma_Cut.html'], (None, None), 'a truncated LUMA_SONG has no difficulty and the others still do')
+        later = time.time() + 10; os.utime(songs / 'Luma_Easy.html', (later, later)); trainer('Easy', notes_of(60, 62, 64), 'd' * 64); os.utime(songs / 'Luma_Easy.html', (later, later))
+        for _ in range(50):
+            got = {s['name']: s['songHash'] for s in json.loads(self.request('/status')[1])['songs']}
+            if got['Luma_Easy.html'] == 'd' * 64: break
+            time.sleep(.1)
+        self.assertEqual(got['Luma_Easy.html'], 'd' * 64, 'a rewritten trainer is measured again')
 
     def test_activity_is_appended_as_jsonl(self):
         event = lambda n, kind: {'ts': '2026-10-07T10:00:0%dZ' % n, 'session': 's1', 'page': 'Luma_Test', 'seq': n, 'type': kind, 'data': {'id': 'singBtn', 'extra': 'кліки'}, 'junk': 1}
