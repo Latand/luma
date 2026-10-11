@@ -227,7 +227,8 @@ present, as before.
 - One extra line under the next song: a chip «↑ складніша» / «= той самий ступінь» / «↓ легша» (from the step's actual
   move, so a good result at step 4 reads «=»), the meter, and the reason after «ступінь N з 4 ·»: «57 % ≥ твоїх звичних
   48 %», «57 % — біля твоїх звичних 48 %», «нижче звичних 48 % більш ніж на 10», «спроба з перемотуванням життів»,
-  «голосу майже не було, ступінь той самий» or «повтор не змінює ступінь».
+  «голосу майже не було» or «повтор не змінює ступінь». After a silent pass the line above the song reads «Далі · без
+  відліку» and the ring is gone, so the card says each fact once.
 - The eyebrow ends with «· обрано за тебе».
 - There is no "last song". The chain runs until × or «До пісень», which also ends autopick (`S.auto = false`) and shows
   the picker. The s < 5 rule stops the countdown when nobody sang.

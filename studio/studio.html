@@ -341,7 +341,7 @@ function showCard({result,from,next}){nextPhase('card');S.card={from,next};if(ne
   ring=el('div',null,'ring');ring.setAttribute('aria-hidden','true');ring.append(el('b',String(COUNT)));
   const row=el('div',null,'nrow');if(result){const what=nextLine(next);auto=what.auto;row.append(ring,what.box);}else{auto=el('p',null,'auto');row.append(ring,auto);}
   sec.append(row);if(next.auto)sec.append(whyRow(next.auto));card.append(sec);
-  if(next.auto?.hold){ring.remove();auto.textContent='Далі · без відліку: голосу майже не було';}
+  if(next.auto?.hold){ring.remove();auto.textContent='Далі · без відліку';}
   go=button(result?(next.kind==='picker'?'До пісень':next.auto?.hold?'Почати':'Почати зараз'):'Почати урок','resultNow','primary',()=>advanceTo('now'));}
  if(result&&from){const again=button(from.kind==='lesson'?'Повторити урок '+(from.i+1):'Повторити','resultRepeat','secondary',repeatStep);if(!next)acts.prepend(again);}
  if(from?.kind==='song'){const songs=button('До пісень','resultSongs',next?'secondary':'primary',()=>toPicker('songs'));if(!next){acts.prepend(songs);go=songs;}}
@@ -471,7 +471,7 @@ async function autoFinish(d){const s=S.song,r=resultOf(d),pick=S.autoPick,silent
  showCard({result:r,from:{kind:'song',s,auto:true},next:{kind:'song',s:x.s,auto:S.autoNext}});}
 function meter(step,top){const m=el('span',null,'meter');m.setAttribute('aria-hidden','true');for(let k=0;k<top;k++)m.append(el('i',null,k<step?'on':''));return m;}
 function autoReason(a){const b=Math.round(a.baseline),at='ступінь '+a.to+' з '+a.top;
- return at+' · '+({up:a.score+' % ≥ твоїх звичних '+b+' %',stay:a.score+' % — біля твоїх звичних '+b+' %',down:'нижче звичних '+b+' % більш ніж на '+AUTO.below,lives:'спроба з перемотуванням життів',silent:'голосу майже не було, ступінь той самий',repeat:'повтор не змінює ступінь'})[a.why];}
+ return at+' · '+({up:a.score+' % ≥ твоїх звичних '+b+' %',stay:a.score+' % — біля твоїх звичних '+b+' %',down:'нижче звичних '+b+' % більш ніж на '+AUTO.below,lives:'спроба з перемотуванням життів',silent:'голосу майже не було',repeat:'повтор не змінює ступінь'})[a.why];}
 function whyRow(a){const row=el('div',null,'why'),dir=a.to>a.from?'up':a.to<a.from?'down':'same',chip=el('span',null,'chip '+dir);row.dataset.why=a.why;
  chip.append(el('i'),el('span',dir==='up'?'↑ складніша':dir==='down'?'↓ легша':'= той самий ступінь'));row.append(chip,meter(a.to,a.top),el('span',autoReason(a)));return row;}
 // The tile at the top of the song picker. Its button waits until at least one song has a difficulty.

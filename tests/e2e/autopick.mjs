@@ -181,7 +181,8 @@ try {
     await sing(frame, 0, 'end', false); await waitMsg(page, 'luma:finished', fin); await waitWhy(page, 'silent');
     auto = (await msgs(page, 'luma:autostart')).length;
     c = await card(page); st = await stored(page);
-    assert(!c.ring && c.buttons[0].id === 'resultNow' && c.buttons[0].text === 'Почати' && c.chip === '= той самий ступінь' && st.step === 1 && byHash[st.recent[0]].k === 1,
+    assert(!c.ring && c.buttons[0].id === 'resultNow' && c.buttons[0].text === 'Почати' && c.chip === '= той самий ступінь' && c.auto === 'Далі · без відліку' && c.reason === 'ступінь 1 з 4 · голосу майже не було'
+      && st.step === 1 && byHash[st.recent[0]].k === 1,
       `${width}: a silent pass keeps step 1, names the pick with «Почати» and no ring ` + JSON.stringify({c, st}));
     await page.waitForTimeout(4000);
     assert((await msgs(page, 'luma:autostart')).length === auto && !(await page.$('#session iframe.sframe.shown')) && (await card(page))?.why === 'silent', `${width}: 4 s later nothing has started`);
