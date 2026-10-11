@@ -1129,10 +1129,10 @@ function phraseText(w){
 }
 // One column per phrase: the fill is the personal best, the tick the last counted attempt, the number under it the best.
 function phraseColumn(w,selected,onclick){
- const b=document.createElement('button');b.type='button';b.className='prog-col';b.dataset.phrase=String(w.id);
+ const b=document.createElement('button');b.type='button';b.className='prog-col'+(w.wordless?' wordless':'');b.dataset.phrase=String(w.id);
  b.setAttribute('aria-pressed',String(selected));b.title=phraseText(w);b.setAttribute('aria-label',b.title);b.onclick=onclick;
  const n=document.createElement('span');n.className='n';n.textContent=w.num;
- const col=document.createElement('span');col.className='col'+(w.best!==null?'':w.wordless?' none wordless':w.short?' short':' none');
+ const col=document.createElement('span');col.className='col'+(w.best!==null?'':w.wordless?' wordless':w.short?' short':' none');
  if(w.best!==null){const fill=document.createElement('span');fill.className='fill'+(w.best>=70?' good':w.best<40?' low':'');fill.style.height=clamp(w.best,0,100)+'%';col.append(fill);
   if(w.last!==null){const i=document.createElement('i');i.className='mark';i.style.bottom=clamp(w.last,0,100)+'%';col.append(i);}}
  const v=document.createElement('span');v.className='v';v.textContent=w.best===null?'—':w.best+'%';
@@ -1272,7 +1272,7 @@ function buildProgress(box){
    sum.textContent='Зараховано '+counted+' з '+map.length+' · без зарахованої спроби: '+unsung+(short?' · закоротких для рекорду: '+short:'')+(wordless?' · без слів: '+wordless:'')
     +(away.length?' · '+away.length+' з них '+(away.length===1?'зарахований':'зараховані')+' з іншою лінійкою ('+[...new Set(away.map(w=>w.elsewhere))].join('; ')+')':'');
    const key=document.createElement('div');key.className='legend prog-legend';
-   for(const [cls,text]of [['good','найкраще'],['mark','остання спроба'],['none','не співано'],['short','закоротка для рекорду, менше 1.5 с нот'],...(wordless?[['none wordless','без слів — не рахується']]:[])]){
+   for(const [cls,text]of [['good','найкраще'],['mark','остання спроба'],['none','не співано'],['short','закоротка для рекорду, менше 1.5 с нот'],...(wordless?[['wordless','без слів — не рахується']]:[])]){
     const sp=document.createElement('span'),i=document.createElement('i');i.className=cls;sp.append(i,text);key.append(sp);}
    box.append(sum,grid,detail,key);
    if(had!==undefined)grid.querySelector('[data-phrase="'+had+'"]')?.focus({preventScroll:true});

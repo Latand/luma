@@ -124,6 +124,12 @@ try {
   assert(map.others.every(c => !/wordless/.test(c)), 'phrases with words are not marked wordless');
   const [, counted, all, unsung] = (/Зараховано (\d+) з (\d+) · без зарахованої спроби: (\d+)/.exec(map.sum) || []).map(Number), short = +(/закоротких для рекорду: (\d+)/.exec(map.sum) || [0, 0])[1];
   assert(/· без слів: 1/.test(map.sum) && counted + unsung + short + 1 === all && /без слів — не рахується/.test(map.legend), 'the summary counts it apart from unsung phrases: ' + map.sum);
+  // the column and its key read apart from «не співано» without a hover: a bare rule in place of the dashed box, the dash dimmed
+  const look = await p.evaluate(() => { const st = e => e && getComputedStyle(e), q = s => document.querySelector('#progressPanel ' + s);
+    const col = st(q('.prog-col[data-phrase="5"] .col')), v = st(q('.prog-col[data-phrase="5"] .v')), key = st(q('.prog-legend i.wordless')), none = st(q('.prog-legend i.none'));
+    return {col: [col.borderTopStyle, col.backgroundImage.startsWith('linear-gradient'), +col.opacity], v: +v.opacity, key: [key.borderTopStyle, key.backgroundImage.startsWith('linear-gradient'), +key.opacity], none: none.borderTopStyle}; });
+  assert(look.col[0] === 'none' && look.col[1] && look.col[2] === 1 && look.v < 1 && look.key[0] === 'none' && look.key[1] && look.key[2] === 1 && look.none === 'dashed',
+    'a wordless column and its legend key are a full-strength rule with a dimmed dash, unlike the dashed «не співано» box: ' + JSON.stringify(look));
   // ── 3 · lives: a voice on the words keeps every life across (b) ─────────────────────────────────────────────────────
   await p.evaluate(() => document.getElementById('tabTakes')?.click());
   await setLives(p, true);

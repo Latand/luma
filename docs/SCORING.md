@@ -27,8 +27,9 @@ an instrumental break, sometimes singing with no words (vocalise); measurements 
   «Без слів — не рахується».
 - **A pass ends before a wordless tail.** `singEnd()` takes the last scored note, so a take no longer waits through
   wordless target after the last line.
-- **Weak phrases.** A phrase with notes and no scored frame is a dimmed column labelled «без слів — не рахується», counted
-  apart from the phrases with no attempt.
+- **Weak phrases.** A phrase with notes and no scored frame is labelled «без слів — не рахується» and counted apart from
+  the phrases with no attempt. Its column is a bare rule in place of the dashed «не співано» box, with its number and
+  dash dimmed, and the legend shows the same rule, so the two read apart on a phone, where there is no hover.
 - **Where it applies.** Computed when the trainer loads, from the notes after the user's edits and the lyrics, and again
   after every note edit. A lesson, and a song with no lyrics (no Soniox key), keep every target as before.
 
