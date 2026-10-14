@@ -137,4 +137,43 @@ self.onmessage=e=>{const m=e.data;
   rec={id:m.id,start:m.start,end:m.end,audio:!!m.audio,chunks:[],count:0,points:[],gap:0,clipped:false};self.postMessage({type:'armed',id:m.id});
  }else if(m.type==='stop'&&rec){rec.end=Math.min(rec.end,Number.isFinite(m.time)?m.time:lastEnd||rec.start);finish(m.reason||'user');}
 };
+</script><script id="cloud-source" type="text/plain">
+'use strict';
+// Past takes as dust (docs/design/TAKE_CLOUD.md). `takes`: every frame becomes one speck, nudged a little in time (±25 ms)
+// and pitch (triangular, ±0.32 semitone) so the takes melt into grain, with one of two alpha tiers; the seed is the
+// take's own, so a new take never reshuffles the others. The specks stay here, sorted by time. `layer`: the specks
+// between ta and tb painted at the stage's scale and pixel ratio, sent back as an ImageBitmap the stage only blits.
+let dust = null, gen = 0, cv = null;
+const draws = (() => { try { return typeof OffscreenCanvas !== 'undefined' && !!new OffscreenCanvas(1, 1).getContext('2d'); } catch (_) { return false; } })();
+self.onmessage = (e) => {
+  const d = e.data, t0 = performance.now();
+  if (d.type === 'takes') {
+    let n = 0; for (const tk of d.takes) n += tk.buf.length >> 1;
+    const t = new Float32Array(n), m = new Float32Array(n), k = new Uint8Array(n);
+    let j = 0;
+    for (const tk of d.takes) {
+      let seed = tk.seed % 2147483646 + 1; const rnd = () => (seed = seed * 16807 % 2147483647) / 2147483647, b = tk.buf;
+      for (let i = 0; i < b.length; i += 2, j++) { t[j] = b[i] + (rnd() - .5) * .05; m[j] = b[i + 1] + (rnd() + rnd() - 1) * .32; k[j] = rnd() < .5 ? 0 : 1; }
+    }
+    const order = new Uint32Array(n); for (let i = 0; i < n; i++) order[i] = i;
+    order.sort((a, b) => t[a] - t[b]);
+    dust = {t: new Float32Array(n), m: new Float32Array(n), k: new Uint8Array(n), n}; gen = d.gen;
+    for (let i = 0; i < n; i++) { const o = order[i]; dust.t[i] = t[o]; dust.m[i] = m[o]; dust.k[i] = k[o]; }
+    self.postMessage({type: 'specks', gen, n, takes: d.takes.length, draws, ms: +(performance.now() - t0).toFixed(1)});
+  } else if (d.type === 'layer') {
+    if (!dust || d.gen !== gen || !draws) { self.postMessage({type: 'layer', id: d.id, gen: d.gen, bitmap: null}); return; }
+    const {ta, tb, pxs, ph, lo, hi, oct, dpr, size} = d, w = Math.max(1, Math.ceil((tb - ta) * pxs * dpr)), h = Math.max(1, Math.ceil(ph * dpr));
+    if (!cv) cv = new OffscreenCanvas(w, h); else { cv.width = w; cv.height = h; }
+    const q = cv.getContext('2d'), {t, m, k, n} = dust, half = size / 2, ky = ph / (hi - lo);
+    q.setTransform(dpr, 0, 0, dpr, 0, 0); q.fillStyle = d.color;
+    let i0 = 0, i1 = n; while (i0 < i1) { const mid = (i0 + i1) >> 1; if (t[mid] < ta - .05) i0 = mid + 1; else i1 = mid; }
+    for (let tier = 0; tier < d.alpha.length; tier++) {
+      q.globalAlpha = d.alpha[tier]; q.beginPath();
+      for (let i = i0; i < n && t[i] <= tb + .05; i++) { if (k[i] !== tier) continue; const y = ph - (m[i] + oct - lo) * ky; if (y < -size || y > ph + size) continue; q.rect((t[i] - ta) * pxs - half, y - half, size, size); }
+      q.fill();
+    }
+    const bitmap = cv.transferToImageBitmap();
+    self.postMessage({type: 'layer', id: d.id, gen, ta, tb, pxs, ph, lo, hi, oct, dpr, bitmap, ms: +(performance.now() - t0).toFixed(1)}, [bitmap]);
+  }
+};
 </script>

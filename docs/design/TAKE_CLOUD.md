@@ -124,30 +124,57 @@ The outline the prototype lane wrote for Туман (a worker-built density bitm
 setting) is replaced by this one for Пил.
 
 1. **Source.** The takes in the tab (`s.takes`, at most `TRACE_TAKES` = 20: the session's plus the newest ones
-   `restoreTakes()` brings back), whatever their level, view or speed. Left out: the take on screen in review, and a
-   take being re-recorded by a punch-in. The take being sung is not in `s.takes` until it ends. Nothing new is read
-   from IndexedDB.
-2. **Packing (main thread, once per take).** Each take's confident frames (pitch present, confidence ≥ 0.5) are packed
-   once into a `Float32Array` of `songT, m − octave` pairs, cached against the take's points array, so a re-scored or
-   punched take is packed again and nothing else is.
-3. **Build (worker).** `refreshCloud()` runs from `sync()` and posts the packed takes to the `cloud-source` worker in
-   `app/workers.html` when the set of takes changes. The worker scatters every frame a little in time (± 25 ms) and
-   pitch (triangular, ± 0.32 semitone) with a seed per take, so one new take never reshuffles the others. It assigns
-   each speck one of two alpha tiers, sorts all specks by time and transfers three typed arrays back. An answer that
-   arrives after the take set has moved on is dropped.
-4. **Drawing.** Specks never go straight onto the stage. They are drawn once into an offscreen layer that covers the
-   plot's height and 1.6 view spans of song time from just behind the visible window, at the stage's own pixel ratio,
-   using the current pitch scale and the current vocal octave. Each frame then costs one `drawImage` of the visible
-   part, at the insertion point behind the target (after the grid, before the notes), inside the plot clip. The layer
-   is redrawn when the window walks off it, when the plot size, pixel ratio or octave changes, and when the pitch scale
-   settles somewhere new. While the scale eases, the old layer is stretched to the moving scale and redrawn at most
-   every 150 ms.
-5. **Prefs and log.** `prefs.shadow` and the activity `state` key `shadow` go (see the decisions above).
-6. **Tests.** `tests/e2e/cloud.mjs`: seeded takes put specks on the plot behind the target and the live line; target-bar
-   and live-trace pixels are the same with and without the cloud; the take under review is left out; a punch-in leaves
-   its own take out; the old `#shadowBtn` and «твій рекорд» are gone and a saved `shadow` pref is dropped; wordless
-   notes keep their alpha and their unscored state; the build runs in the worker; frame time with the cloud during
-   singing, at 1× and 4× CPU throttle, stays within budget at 390 px and on desktop.
+   `restoreTakes()` brings back), whatever their level, view or speed. Left out: the take on screen in review
+   (`s.trace.take`), and a take being re-recorded by a punch-in (`punchInto` of a pending recording). The take being
+   sung is not in `s.takes` until it ends. Nothing new is read from IndexedDB.
+2. **Packing (main thread, once per take).** `packTake()` copies a take's confident frames (pitch present,
+   confidence ≥ 0.5) into a `Float32Array` of `songT, m − octave` pairs, cached against the take's points array, so a
+   re-scored or punched take is packed again and nothing else is. `refreshCloud()` runs from `sync()` and
+   `renderTakes()` and posts only when the list of packed takes changes.
+3. **Scatter (worker).** The `cloud-source` worker in `app/workers.html` nudges every frame in time (± 25 ms) and pitch
+   (triangular, ± 0.32 semitone) with a seed per take, so one new take never reshuffles the others, gives each speck one
+   of two alpha tiers, sorts all specks by time and keeps them. An answer for a take set that has moved on is dropped.
+4. **Painting (worker).** The worker also paints: asked for a layer, it draws the specks between `ta` and `tb` into an
+   `OffscreenCanvas` at the stage's scale, pitch range, vocal octave and pixel ratio, one path per alpha tier, and
+   transfers it back as an `ImageBitmap`. A layer covers 1.6 view spans from just behind the visible window.
+5. **Drawing (main thread).** `drawCloud()` runs at the insertion point behind the target (after the grid, before the
+   notes), inside the plot clip, and costs one `drawImage` of the visible part of the layer. It asks for a new layer
+   when the window comes within 0.3 span of the layer's end, when the plot size, pixel ratio or octave changes, when
+   the take set changes, and when the pitch scale moves: at once when it has settled, at most every 150 ms while it
+   eases. One request is in flight at a time. Until the answer arrives the old layer is drawn, stretched to the
+   current pitch scale. A browser whose workers cannot paint gets no dust, and the trainer runs as before.
+6. **Prefs and log.** `prefs.shadow` and the activity `state` key `shadow` are gone; see the decisions above.
+7. **Tests.** `tests/e2e/cloud.mjs` covers the following:
+   - the record line, its button, its legend entry, its saved pref and its log key are gone;
+   - seeded takes become specks built and painted in the worker, drawn before the first target bar;
+   - the dust is faint: at most +110 of 255 on any pixel, measured +88 to +90;
+   - every core pixel of the live line is the same with the dust on and off;
+   - the take under review and a punched take are left out, and come back afterwards;
+   - wordless notes keep their alpha and stay unscored in both views;
+   - frame time with 20 takes at 390 px and 1440 px (2×), 1× and 4× CPU throttle: p95 within +25 % or +1.5 ms, median
+     within +1 ms;
+   - twenty 4:30 takes (253 140 specks) build in the worker.
+
+### Measurements (2026-10-14, headless Edge / Chromium, software rendering, machine load 16–19)
+
+Frame time of a whole stage frame (`draw()` and the readout) during singing, 480 frames per row, dust hidden and shown
+in alternating blocks of 32 frames, median / p95 in ms.
+
+Operator's real history, song A (4:30), 19 past takes, 44 319 specks, DPR 2, Контур:
+
+| Stage | CPU | without dust | with dust | worker layer paint |
+|---|---|---|---|---|
+| 1440 × 900 | 1× | 2.5 / 5.8 | 2.5 / 5.7 | 60 ms |
+| 1440 × 900 | 4× | 9.0 / 14.6 · 8.8 / 15.0 | 9.0 / 14.8 · 8.1 / 13.9 | 190–206 ms |
+| 390 × 844 | 1× | 1.7 / 2.4 | 1.7 / 2.2 | 12 ms |
+| 390 × 844 | 4× | 7.6 / 12.8 | 7.8 / 13.9 | 99 ms |
+
+For comparison, the prototype drew the specks straight onto the stage every frame and measured p95 9.7 → 19.2 ms
+under 4× throttle. A first build of this lane painted the layer on the main thread; at 390 px under 4× throttle that
+took p95 from 8.5 to 24.1 ms. With the painting in the worker, the main thread keeps only the blit.
+
+Building twenty full 4:30 takes (253 140 specks) takes 75–78 ms in the worker. Packing on the main thread happens once
+per take.
 
 ## Questions for the operator (asked in the review, each with a recommendation)
 
@@ -160,18 +187,22 @@ None of these blocks the design. The recommended set is buildable as written.
 
 ## Validation against the quote
 
-| Obligation | How the recommended design meets it | Evidence |
+The prototype lane's table checked the Туман recommendation. This one checks what was built (Пил, no switch):
+
+| Obligation | How the build meets it | Evidence |
 |---|---|---|
-| 1. Show my previous takes | Every take in the tab, up to 20, feeds the cloud over the whole stage, ahead of the playhead too. | all variant-1 frames |
-| 2. Do not disturb singing | Drawn under the target, the shadow and the live line. Pale blue outside the live colour language. ≤ 34 % alpha at «тихо». Zero measured frame cost. Built in a worker, off the «Співати» path. One tap turns it off. | perf table; «до/після» pairs |
-| 3. The spread, blurred | Density normalised by coverage, blur σ ≈ 120 ms × 0.8 semitone. Shows where the voice usually is, including octave habits. | frame «03:04 … октавою вище» |
-| 4. Colour only, like clouds | No lines, glyphs or labels; one soft hue. | variant 1 frames |
+| 1. Show my previous takes | Every take in the tab, up to 20, any level, view or speed, over the whole stage, ahead of the playhead too. | `cloud.mjs` §2; PR frames |
+| 2. Do not disturb singing | Drawn under the target and the live line. One pale hue outside the live colours, alpha 0.22 / 0.26. Built and painted in a worker; the frame keeps one blit and stays within budget. | `cloud.mjs` §2, §5; measurements above |
+| 3. The spread, blurred | Each frame is a speck nudged ± 25 ms and ± 0.32 semitone; together they show where the voice usually goes, octave habits included. | PR frame at 03:04 |
+| 4. Colour only, like noise | Specks only: no lines, glyphs or labels. | PR frames |
 
 ## Deferred — not currently justified
 
 - **Hit/miss colouring of the cloud** (variant 4): it reuses the live mint and rose and competes with the present take. Revisit only if the operator picks it.
 - **Per-note bands** (variant 2) as a second layer on top of the fog: two encodings of the same data.
-- **Dust / animated drifting noise**: the only option whose cost grows with points on screen. Motion behind a moving target distracts.
+- **Туман** (variant 1, the prototype's recommendation): not chosen by the operator.
+- **Animated, drifting dust**: motion behind a moving target distracts.
+- **An off switch or an intensity setting for the dust**: the operator chose one fixed level and no setting.
 - **Cloud on the timeline strip or in the Прогрес tab**: the requirement is about the stage while singing.
 - **Weighting recent takes higher, or a 7-day window**: the 20-take window already tracks the present. Add it only if the cloud is seen lagging behind real progress.
 - **A cross-song "my range" cloud**: answers a separate question about vocal range across songs.

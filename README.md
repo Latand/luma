@@ -25,8 +25,9 @@ of your voice, no server after the file is built.
 - **Progress that lives on this computer.** Every finished attempt goes into a local history by itself — no files to save.
   The Прогрес tab shows the record, the average of the last five attempts, the best of the day, the day streak, a trend
   over attempts and the weak phrases — each bar is that phrase's personal best, with a notch where the last attempt
-  landed, and a click on a phrase loops it. A pale line under your trace is your own best attempt
-  at that fragment. Scores are only ever compared within the same level, target map, view and speed; see
+  landed, and a click on a phrase loops it. Behind the melody, your last 20 attempts at the song lie as faint dust,
+  one speck per sung moment, so you see roughly where your voice usually goes without it getting in the way
+  ([docs/design/TAKE_CLOUD.md](docs/design/TAKE_CLOUD.md)). Scores are only ever compared within the same level, target map, view and speed; see
   [docs/SCORING.md](docs/SCORING.md) and [docs/HISTORY_SCHEMA.md](docs/HISTORY_SCHEMA.md). Export and import are two
   buttons in the tab's footer.
 
@@ -118,7 +119,7 @@ seek and miss navigation, lyrics. `audio.mjs` drives the real audio path with Ch
 seek, vocal toggle, an attempt with the recording switch off and the same with it on, punch-in, review playback.
 `history.mjs` builds a practice history without a microphone and checks that it survives a reload and a rebuilt trainer,
 that a stored trace re-scores to the same numbers, that records stay inside one ruler, and that export and import
-round-trip. `lives.mjs` sings a synthetic voice through lives mode: a short miss costs nothing, a wrong passage loses lives at the cooldown's pace, and losing the last one rewinds, saves the attempt and refills. `progress.mjs` checks the Прогрес tab: trend, weak phrases, the record shadow, the day streak, lesson lamps,
+round-trip. `lives.mjs` sings a synthetic voice through lives mode: a short miss costs nothing, a wrong passage loses lives at the cooldown's pace, and losing the last one rewinds, saves the attempt and refills. `progress.mjs` checks the Прогрес tab: trend, weak phrases, the day streak, lesson lamps,
 and the 390 px layout. `finish.mjs` sings the demo and lesson 1 through the real transport: the pass stops half a second
 after the last note, is stored once and scores the same, the next pass and a Listen after it start from the top, and listening and a fragment
 still run to the end. `session.mjs` drives «Заняття» in Studio at 390 px and 1440 px (the result card with and without
@@ -130,13 +131,15 @@ repeats, the history read without creating the base, the home button and the rea
 `latency.mjs` seeds attempts with a synthetic voice a known number of milliseconds late and checks «Розрахувати
 затримку»: recovery and Apply, pooling across settings and speeds, noise and octave-down takes, late phrase starts, too
 few attempts, other songs through `/targets`, wordless notes, 200 four-minute attempts under 1.5 s, the daily hint,
-390 px and 1440 px, and `file://`. Every suite requires a clean console. Set `LUMA_BROWSER=/path/to/chrome` to use a specific
+390 px and 1440 px, and `file://`. `cloud.mjs` checks the dust of past takes: built and painted in a worker, the take on
+screen and a punch-in left out, drawn under the target and the live line, faint, wordless notes unchanged, the record
+line gone with its saved pref, and frame time with 20 takes at 390 px and 1440 px under 1× and 4× CPU throttle. Every suite requires a clean console. Set `LUMA_BROWSER=/path/to/chrome` to use a specific
 Chromium build.
 
 ## Layout
 
 ```
-app/       head.html (styles + markup, {{TITLE}} / {{ARTIST}} placeholders), workers.html (AudioWorklet capture + YIN worker), app.js,
+app/       head.html (styles + markup, {{TITLE}} / {{ARTIST}} placeholders), workers.html (AudioWorklet capture + YIN worker + the worker that builds and paints the dust of past takes), app.js,
            activity.js (activity log, shared with Studio), latency.js (microphone offset estimate from attempts)
 studio/    prepare_song.py (pipeline), build_html.py (package → HTML, --rebuild), studio_server.py + studio.html, covers.py, difficulty.py, luma-studio.sh,
            activity_report.py (digest of the activity log)
