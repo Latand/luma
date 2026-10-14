@@ -37,7 +37,7 @@ const stateKeys = await p.evaluate(() => { const A = window.LumaActivity, seen =
 assert(stateKeys.length && !stateKeys.includes('shadow'), 'the activity state carries no `shadow` key ' + JSON.stringify([...new Set(stateKeys)]));
 let c = await cloud();
 assert(c.ready && c.specks === 0 && c.ids.length === 0, 'no takes, no dust ' + JSON.stringify(c));
-assert(!(await p.evaluate(() => window.Luma.test.noteBoxes())).some(e => e.kind === 'cloud'), 'an empty cloud draws nothing');
+assert((await p.evaluate(() => window.Luma.test.cloudOrder())).at === -1, 'an empty cloud draws nothing');
 
 // ── 2 · seeded takes become dust, built in the worker ─────────────────────────────────────────────────────────────────
 const ids = await p.evaluate(`(${SEED})(6, 2, 11)`);
@@ -46,9 +46,8 @@ assert(c.worker && !c.failed && c.workMs > 0 && c.takes === 6 && c.ids.length ==
 assert(c.specks > 6 * 400, 'every confident frame is a speck (' + c.specks + ')');
 const tAt = await p.evaluate(() => { const n = window.LUMA_SONG.notes.find(n => n.ok && n.b - n.a > .5 && n.a > 4); return (n.a + n.b) / 2; });
 await p.evaluate(t => { window.Luma.test.seek(t); }, tAt); await fitted(p);
-const boxes = await p.evaluate(() => window.Luma.test.noteBoxes());
-const cloudAt = boxes.findIndex(e => e.kind === 'cloud'), firstNote = boxes.findIndex(e => e.kind !== 'cloud');
-assert(cloudAt === 0 && firstNote > 0, 'the dust is drawn before the first target bar, so every bar paints over it ' + JSON.stringify(boxes.slice(0, 2).map(e => e.kind)));
+const order = await p.evaluate(() => window.Luma.test.cloudOrder());
+assert(order.at === 0 && order.boxes > 0, 'the dust is drawn before the first target bar, so every bar paints over it ' + JSON.stringify(order));
 c = await cloud();
 assert(c.layer && c.layer.w > 0 && c.layer.h > 0 && c.builds >= 1, 'the worker paints the specks into a layer the stage only blits ' + JSON.stringify({layer: c.layer, ms: c.layerMs}));
 
@@ -99,11 +98,11 @@ await wp.goto(url); await wp.waitForTimeout(600);
 await wp.evaluate(`(${SEED})(5, 0, 5)`); await settle(wp);
 const words = await wp.evaluate(async () => { const T = window.Luma.test, last = window.LUMA_SONG.notes.filter(n => !n.ignored).at(-1);
   T.seek(last.a - 1.5); for (let i = 0; i < 100 && (T.draw(), !T.cloud().fit); i++) await new Promise(r => setTimeout(r, 30));
-  const strip = list => JSON.stringify(list.filter(e => e.kind !== 'cloud'));
+  const strip = list => JSON.stringify(list);
   const out = {};
   for (const view of ['notes', 'contour']) { document.querySelector('[data-view="' + view + '"]').click(); await new Promise(r => setTimeout(r, 80));
     T.cloudShown(false); const off = T.noteBoxes(); T.cloudShown(true); const on = T.noteBoxes();
-    out[view] = {same: strip(on) === strip(off), wordless: off.filter(e => e.kind === 'wordless').length, alpha: [...new Set(on.filter(e => e.kind === 'wordless').map(e => e.alpha))], cloud: on.some(e => e.kind === 'cloud')}; }
+    out[view] = {same: strip(on) === strip(off), wordless: off.filter(e => e.kind === 'wordless').length, alpha: [...new Set(on.filter(e => e.kind === 'wordless').map(e => e.alpha))], cloud: T.cloudOrder().at >= 0}; }
   const a = last.a - 1, sung = T.score(Array.from({length: 150}, (_, i) => ({songT: a + i * .02, m: T.wordless().raw(a + i * .02)?.m ?? null, confidence: .95, db: -18})), {tolerance: 50, octave: 0, view: 'notes', a}, a + 3);
   return {...out, scored: sung.target}; });
 assert(words.notes.wordless > 0 && words.notes.same && words.notes.cloud, 'notes view: wordless bars are drawn exactly as without the dust ' + JSON.stringify(words.notes));

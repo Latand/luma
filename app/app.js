@@ -1366,7 +1366,7 @@ function missHatch(){if(missPat)return missPat;const c=document.createElement('c
 // is asked for before the window walks off the old one, when the plot or the octave changes, and when the pitch scale
 // moves (at most every DUST.settle ms while it eases, at once when it settles); meanwhile the old one is stretched to fit.
 const DUST={color:'#c3d3f2',alpha:[.22,.26],conf:.5,cover:1.6,ahead:.3,settle:150};
-const cloud={worker:null,failed:false,sig:'',gen:0,done:0,ids:[],n:0,takes:0,layer:null,asked:0,seq:0,fit:false,misses:0,builds:0,layerMs:0,workMs:0,packs:new WeakMap(),serial:0,hidden:false};
+const cloud={worker:null,failed:false,sig:'',gen:0,done:0,ids:[],n:0,takes:0,layer:null,asked:0,seq:0,fit:false,probeAt:-1,misses:0,builds:0,layerMs:0,workMs:0,packs:new WeakMap(),serial:0,hidden:false};
 // Left out: the take on screen in review and a take being re-recorded; the take being sung is not in the list yet.
 function cloudTakes(){const punched=new Set([...s.pending.values()].map(m=>m.punchInto).filter(Boolean));return s.takes.filter(t=>t!==s.trace?.take&&!punched.has(t.id));}
 // Once per take: its confident frames as songT, pitch pairs, the pitch moved back to octave 0 so any octave can draw them.
@@ -1405,7 +1405,7 @@ function drawCloud(b,v,oct){
  // the source rectangle may run past the layer's end after a jump: drawImage clips it and the destination with it
  const y=m=>b.bottom-(m-s.rangeLo)/(s.rangeHi-s.rangeLo)*ph,top=y(L.hi);
  g.drawImage(L.bitmap,(v.a-L.ta)*pxs*L.dpr,0,v.span*pxs*L.dpr,ph*L.dpr,b.left,top,pw,y(L.lo)-top);
- if(probe)probe.push({kind:'cloud',specks:cloud.n});}
+ if(probe)cloud.probeAt=probe.length;}
 function draw(t){
  if(!g)return;const b=bounds(),v=view(t);followRange(v,t);const x=a=>b.left+(a-v.a)/v.span*(b.right-b.left),y=m=>b.bottom-(m-s.rangeLo)/(s.rangeHi-s.rangeLo)*(b.bottom-b.top);const rowH=(b.bottom-b.top)/(s.rangeHi-s.rangeLo);
  const mono=getComputedStyle(document.body).getPropertyValue('--mono'),sans=getComputedStyle(document.body).getPropertyValue('--sans');
@@ -1790,7 +1790,9 @@ window.Luma={diagnostics:()=>({mode:s.mode,busy:s.busy,pending:s.awaitFinish,tim
   setLevel:l=>{document.querySelector('[data-level="'+l+'"]').click();return levelOpt();},viewWindow:t=>view(t),plot:()=>({...bounds()}),dpr:()=>DPR,// one frame drawn with the label rectangles recorded, so a test can read the real canvas pixels behind the type
   noteBoxes:()=>{probe=[];draw(now());const r=probe;probe=null;return r;},
   cloud:()=>({ids:[...cloud.ids],takes:cloud.takes,specks:cloud.n,ready:cloud.done===cloud.gen&&(!cloud.n||cloud.layer?.gen===cloud.gen),fit:cloud.fit,worker:!!cloud.worker,failed:cloud.failed,builds:cloud.builds,misses:cloud.misses,workMs:cloud.workMs,layerMs:cloud.layerMs,layer:cloud.layer?{w:cloud.layer.bitmap.width,h:cloud.layer.bitmap.height,ta:cloud.layer.ta,tb:cloud.layer.tb}:null}),
-  cloudShown:v=>{cloud.hidden=!v;s.dirty=true;},scale:()=>({...SCALE,goalLo:sc.goalLo,goalHi:sc.goalHi}),setRange,clearRange,levelOpt,centsOff,now,punchTarget:()=>punchTarget()?.id??null,gains:()=>s.gains?{back:s.gains.back.gain.value,fore:s.gains.fore.gain.value,vocal:prefs.vocal}:null,takes:()=>s.takes.map(t=>({id:t.id,runId:t.runId,a:t.a,endSong:t.endSong,duration:t.duration,bytes:t.blob?.size||0,hasAudio:!!t.hasAudio,clipped:!!t.clipped,points:t.points.length,punches:t.punches||0,pct:scorePct(t.score),record:t.record?.text||null,historyError:!!t.historyError,restored:!!t.restored})),
+  cloudShown:v=>{cloud.hidden=!v;s.dirty=true;},
+  // how many target boxes one frame had drawn when it blitted the dust (-1: no dust drawn), and how many it drew in all
+  cloudOrder:()=>{probe=[];cloud.probeAt=-1;draw(now());const r={at:cloud.probeAt,boxes:probe.length};probe=null;return r;},scale:()=>({...SCALE,goalLo:sc.goalLo,goalHi:sc.goalHi}),setRange,clearRange,levelOpt,centsOff,now,punchTarget:()=>punchTarget()?.id??null,gains:()=>s.gains?{back:s.gains.back.gain.value,fore:s.gains.fore.gain.value,vocal:prefs.vocal}:null,takes:()=>s.takes.map(t=>({id:t.id,runId:t.runId,a:t.a,endSong:t.endSong,duration:t.duration,bytes:t.blob?.size||0,hasAudio:!!t.hasAudio,clipped:!!t.clipped,points:t.points.length,punches:t.punches||0,pct:scorePct(t.score),record:t.record?.text||null,historyError:!!t.historyError,restored:!!t.restored})),
   state:()=>({mode:s.mode,pos:s.pos,time:now(),trace:s.trace?{id:s.trace.take.id,points:s.trace.points.length,frames:s.trace.score.frames.length,pct:scorePct(s.trace.score),missRuns:missRuns(s.trace.score)}:null,liveScore:s.live?{target:s.live.target,hit:s.live.hit,sung:s.live.sung,pct:scorePct(s.live)}:null,history:s.history.length,matchText:$('matchPct').textContent,matchDetail:$('matchDetail').textContent,reviewHidden:$('reviewBar').hidden,missCount:$('missCount').textContent,lyric:$('lyricNow').textContent,liveNote:$('liveNote').textContent,deviation:$('deviation').textContent,range:{...s.range},rangeId:s.rangeId,rangeText:$('rangeText').textContent,loop:prefs.loop,transportLoop:s.transport?.loop??null,level:prefs.level,tolerance:prefs.tolerance,rangeLo:s.rangeLo,rangeHi:s.rangeHi,lives:livesState()}),
   ctxTime:()=>s.ctx?.currentTime??0,
   fakeSing:({a,b,speed=1})=>{// enter singing mode without audio: transport clock driven by a fake context
