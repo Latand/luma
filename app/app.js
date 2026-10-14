@@ -161,16 +161,31 @@ function placeCountdown(){
 }
 // What the suites read: the engine's numbers and what the corner and the count-in actually show.
 function livesState(){const lv=s.lives;return {on:prefs.lives,size:prefs.livesCount,total:lv?lv.total:null,left:lv?lv.left:null,out:!!lv?.out,retry:s.livesRetry?s.livesRetry.to:null,last:s.livesLast||null,
- shown:!$('lives').hidden,hearts:$('lives').children.length,lost:$('lives').querySelectorAll('.life.lost').length,refill:$('lives').classList.contains('refill'),
+ shown:!$('lives').hidden,hearts:$('lives').children.length,lost:$('lives').querySelectorAll('.life.lost').length,refill:$('lives').classList.contains('refill'),burns:s.burns,burning:$('lives').querySelectorAll('.life-burn').length,
  notice:$('livesNotice').hidden||$('countdown').hidden?null:$('livesFrom').textContent,countdown:!$('countdown').hidden};}
+// A lost life burns (app/burn.js, docs/design/LIFE_BURN.md): a canvas over the heart for LumaBurn.ms, taken out of the
+// layout and pointer-transparent, then the .life.lost outline under it is all that is left. With reduced motion the heart
+// goes straight to that end state. The rebuild of the row or a refill drops the canvas, which ends its frame loop.
+s.burns=0;
+function burnLife(el,i){
+ const B=window.LumaBurn;if(!B||matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+ el.querySelector('.life-burn')?.remove();s.burns++;
+ const size=el.offsetWidth,dpr=devicePixelRatio||1,W=(B.box.l+B.box.r)*size,H=(B.box.t+B.box.b)*size,c=document.createElement('canvas');
+ c.className='life-burn';c.setAttribute('aria-hidden','true');c.width=Math.round(W*dpr);c.height=Math.round(H*dpr);
+ c.style.cssText=`left:${size/2-B.box.l*size}px;top:${size/2-B.box.t*size}px;width:${W}px;height:${H}px`;el.append(c);
+ const g=c.getContext('2d'),t0=performance.now();
+ const frame=now=>{if(!c.isConnected)return;const ms=now-t0;if(ms>=B.ms){c.remove();return;}
+  g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,W,H);B.drawHeart(g,B.box.l*size,B.box.t*size,size,'burn',Math.max(0,ms),i);requestAnimationFrame(frame);};
+ frame(t0);
+}
 // The set of hearts in the corner: rebuilt only when its size changes, so a life lost mid-phrase animates in place.
 function renderLives(ev){
  const box=$('lives');box.hidden=!prefs.lives;if(!prefs.lives)return;
  const total=s.lives?s.lives.total:prefs.livesCount,left=s.lives?s.lives.left:total;
  if(box.children.length!==total){box.replaceChildren();for(let i=0;i<total;i++){const el=document.createElement('span');el.className='life';el.style.setProperty('--i',String(i));el.innerHTML='<svg class="shell"><use href="#i-heart"/></svg><svg class="full"><use href="#i-heart"/></svg>';box.append(el);}}
  [...box.children].forEach((el,i)=>el.classList.toggle('lost',i>=left));
- if(ev==='lose'&&box.children[left]){const el=box.children[left];el.classList.remove('break');void el.offsetWidth;el.classList.add('break');}
- if(ev==='refill'){for(const el of box.children)el.classList.remove('break');box.classList.remove('refill');void box.offsetWidth;box.classList.add('refill');}
+ if(ev==='lose'&&box.children[left])burnLife(box.children[left],left);
+ if(ev==='refill'){for(const c of box.querySelectorAll('.life-burn'))c.remove();box.classList.remove('refill');void box.offsetWidth;box.classList.add('refill');}
  box.setAttribute('aria-label','Життя: '+left+' з '+total);
  box.title='Режим життів: '+left+' з '+total+' · довгі промахи під нотами забирають життя, коли скінчаться — пісня відмотується назад';
 }

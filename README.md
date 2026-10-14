@@ -37,7 +37,8 @@ of your voice, no server after the file is built.
   [docs/design/LATENCY_AUTOCAL.md](docs/design/LATENCY_AUTOCAL.md)
 - **Punch-in.** Seek inside an attempt and "Співати" becomes "Перезаписати з …": the same take is re-recorded from that point. Нова спроба records a separate take; Скасувати перезапис restores the previous version of the last punch.
 - **Lives mode.** An optional switch in the settings, off by default: hearts in the corner of the stage, a life lost only to
-  sustained misses under the notes (never to one short slip or to silence between phrases), and when the last one goes
+  sustained misses under the notes (never to one short slip or to silence between phrases) burns in a short flash of
+  fire ([docs/design/LIFE_BURN.md](docs/design/LIFE_BURN.md)), and when the last one goes
   the attempt is saved, the song rewinds to the start of the phrase and you sing it again after the count-in. Rules and
   constants in [docs/SCORING.md](docs/SCORING.md#lives-mode-режим-життів).
 - **Built-in lessons.** Three warm-ups with exact synthetic targets; progress on them is kept per exercise, with one lamp
@@ -118,7 +119,7 @@ seek and miss navigation, lyrics. `audio.mjs` drives the real audio path with Ch
 seek, vocal toggle, an attempt with the recording switch off and the same with it on, punch-in, review playback.
 `history.mjs` builds a practice history without a microphone and checks that it survives a reload and a rebuilt trainer,
 that a stored trace re-scores to the same numbers, that records stay inside one ruler, and that export and import
-round-trip. `lives.mjs` sings a synthetic voice through lives mode: a short miss costs nothing, a wrong passage loses lives at the cooldown's pace, and losing the last one rewinds, saves the attempt and refills. `progress.mjs` checks the Прогрес tab: trend, weak phrases, the record shadow, the day streak, lesson lamps,
+round-trip. `lives.mjs` sings a synthetic voice through lives mode: a short miss costs nothing, a wrong passage loses lives at the cooldown's pace, each lost life burns once (none with reduced motion) without moving the stage head, and losing the last one rewinds, saves the attempt and refills. `progress.mjs` checks the Прогрес tab: trend, weak phrases, the record shadow, the day streak, lesson lamps,
 and the 390 px layout. `finish.mjs` sings the demo and lesson 1 through the real transport: the pass stops half a second
 after the last note, is stored once and scores the same, the next pass and a Listen after it start from the top, and listening and a fragment
 still run to the end. `session.mjs` drives «Заняття» in Studio at 390 px and 1440 px (the result card with and without
@@ -137,7 +138,8 @@ Chromium build.
 
 ```
 app/       head.html (styles + markup, {{TITLE}} / {{ARTIST}} placeholders), workers.html (AudioWorklet capture + YIN worker), app.js,
-           activity.js (activity log, shared with Studio), latency.js (microphone offset estimate from attempts)
+           activity.js (activity log, shared with Studio), latency.js (microphone offset estimate from attempts),
+           burn.js (the burn of a lost life, one canvas draw function)
 studio/    prepare_song.py (pipeline), build_html.py (package → HTML, --rebuild), studio_server.py + studio.html, covers.py, difficulty.py, luma-studio.sh,
            activity_report.py (digest of the activity log)
 examples/  make_demo.py (synthetic demo song)
