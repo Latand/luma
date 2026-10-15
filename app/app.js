@@ -8,9 +8,9 @@ const GRID=.02;// scoring frame, seconds of song time
 let song=window.LUMA_SONG,assets=window.LUMA_ASSETS,baseNotes=structuredClone(song.notes);
 // Difficulty presets: corridor width, how far in time a sung frame may sit from the grid frame, share of a note's frames needed for ✓, and whether octave errors are forgiven.
 const LEVELS={easy:{tolerance:80,slack:.12,ratio:.35,octaveFree:true,label:'легко'},normal:{tolerance:50,slack:.06,ratio:.5,octaveFree:false,label:'звично'},strict:{tolerance:35,slack:.05,ratio:.65,octaveFree:false,label:'точно'}};
-const prefs={gate:-48,octave:0,tolerance:50,level:'normal',latency:0,back:.75,fore:.45,vocal:true,view:'notes',speed:1,loop:false,mic:'',lyrics:true,takesOpen:true,viewDefault:3,audio:false,shadow:true,tab:'takes',audioNotice:false};
+const prefs={gate:-48,octave:0,tolerance:50,level:'normal',latency:0,back:.75,fore:.45,vocal:true,view:'notes',speed:1,loop:false,mic:'',lyrics:true,takesOpen:true,viewDefault:3,audio:false,tab:'takes',audioNotice:false};
 let hadSettings=false;// an empty profile has nothing to be told about a change it did not live through
-try{const saved=localStorage.getItem('luma.trainer.settings');hadSettings=!!saved;const p=JSON.parse(saved||'{}');for(const [k,a,b]of[['gate',-70,-25],['octave',-12,12],['tolerance',10,100],['latency',-500,1000],['back',0,1],['fore',0,1]])if(Number.isFinite(p[k]))prefs[k]=clamp(p[k],a,b);if(![-12,0,12].includes(prefs.octave))prefs.octave=0;for(const k of ['lyrics','takesOpen','vocal','audio','shadow','audioNotice'])if(typeof p[k]==='boolean')prefs[k]=p[k];if(p.tab==='takes'||p.tab==='progress')prefs.tab=p.tab;if(p.level in LEVELS||p.level==='custom')prefs.level=p.level;if(prefs.level!=='custom')prefs.tolerance=LEVELS[prefs.level].tolerance;
+try{const saved=localStorage.getItem('luma.trainer.settings');hadSettings=!!saved;const p=JSON.parse(saved||'{}');for(const [k,a,b]of[['gate',-70,-25],['octave',-12,12],['tolerance',10,100],['latency',-500,1000],['back',0,1],['fore',0,1]])if(Number.isFinite(p[k]))prefs[k]=clamp(p[k],a,b);if(![-12,0,12].includes(prefs.octave))prefs.octave=0;for(const k of ['lyrics','takesOpen','vocal','audio','audioNotice'])if(typeof p[k]==='boolean')prefs[k]=p[k];if(p.tab==='takes'||p.tab==='progress')prefs.tab=p.tab;if(p.level in LEVELS||p.level==='custom')prefs.level=p.level;if(prefs.level!=='custom')prefs.tolerance=LEVELS[prefs.level].tolerance;
  // notes became the default on 2026-09-12; a choice saved under an older default is not a choice, so it is not carried over
  if(p.viewDefault===3&&(p.view==='notes'||p.view==='contour'))prefs.view=p.view;}catch(_){}
 // Lives mode (docs/SCORING.md, «Режим життів»). A life goes when, over the last `window` seconds of song since the previous
@@ -25,7 +25,7 @@ function levelLabel(opt){return opt.level==='custom'?'свій коридор':(
 // Signed distance in cents; on the easy level the octave is forgiven (distance folds into ±6 semitones).
 function centsOff(m,refM,opt){let d=m-refM;if(opt.octaveFree){d=((d%12)+12)%12;if(d>6)d-=12;}return d*100;}
 const LOOP_LANE=24;
-const s={ctx:null,stream:null,capture:null,micSource:null,worker:null,micGeneration:0,busy:false,cancel:0,mode:'idle',transport:null,sources:[],endTimer:null,nextTimer:null,bufs:new Map(),gains:null,pos:song.initialTime||0,range:{a:0,b:song.duration},rangeId:0,history:[],current:null,takes:[],takeCounter:0,pending:new Map(),awaitFinish:false,trace:null,live:null,verified:[],dirty:true,raf:0,lastDraw:0,lastFrame:0,lastUI:0,rangeLo:48,rangeHi:76,liveSmooth:null,lastSmoothT:0,toastTimer:0,edit:null,computeMs:0,windowMs:0,unsaved:false,undoPunch:null,busyFor:'',scrub:null,lyricKey:'',resumeAt:null,parkedAt:null,hostSing:false,tlDrag:null,seekTimer:0,dense:false,stageH:0,hist:{runs:[],days:[],loaded:false,note:'',persisted:null,stamp:'',stale:false,restored:false},shadow:null,shadowSig:'',progressSig:'',trendScope:'',weakOrder:'song',roomNotice:false,lat:null,latHint:null};
+const s={ctx:null,stream:null,capture:null,micSource:null,worker:null,micGeneration:0,busy:false,cancel:0,mode:'idle',transport:null,sources:[],endTimer:null,nextTimer:null,bufs:new Map(),gains:null,pos:song.initialTime||0,range:{a:0,b:song.duration},rangeId:0,history:[],current:null,takes:[],takeCounter:0,pending:new Map(),awaitFinish:false,trace:null,live:null,verified:[],dirty:true,raf:0,lastDraw:0,lastFrame:0,lastUI:0,rangeLo:48,rangeHi:76,liveSmooth:null,lastSmoothT:0,toastTimer:0,edit:null,computeMs:0,windowMs:0,unsaved:false,undoPunch:null,busyFor:'',scrub:null,lyricKey:'',resumeAt:null,parkedAt:null,hostSing:false,tlDrag:null,seekTimer:0,dense:false,stageH:0,hist:{runs:[],days:[],loaded:false,note:'',persisted:null,stamp:'',stale:false,restored:false},progressSig:'',trendScope:'',weakOrder:'song',roomNotice:false,lat:null,latHint:null};
 const canvas=$('chart'),g=canvas.getContext('2d',{alpha:false}),tl=$('timeline'),tg=tl.getContext('2d',{alpha:false});let W=1,H=1,DPR=1,TW=1,TH=1;
 const reduced=matchMedia('(prefers-reduced-motion: reduce)');
 function fmt(t){t=Math.max(0,Number.isFinite(t)?t:0);return String(Math.floor(t/60)).padStart(2,'0')+':'+String(Math.floor(t%60)).padStart(2,'0');}
@@ -269,7 +269,7 @@ function populateSong(){
  baseNotes=structuredClone(song.notes);loadEdits();invalidateMap();setRangeScale();sync();
 }
 function sync(){
- if(window.LumaActivity)window.LumaActivity.state({mode:s.mode,view:prefs.view,level:prefs.level,tolerance:levelOpt().tolerance,speed:prefs.speed,loop:prefs.loop,tab:prefs.tab,rangeId:s.rangeId,range:[+s.range.a.toFixed(1),+s.range.b.toFixed(1)],octave:prefs.octave,vocal:prefs.vocal,lyrics:prefs.lyrics,shadow:prefs.shadow,audio:prefs.audio,takesOpen:prefs.takesOpen,review:traceShown()?s.trace.take.runId:null});
+ if(window.LumaActivity)window.LumaActivity.state({mode:s.mode,view:prefs.view,level:prefs.level,tolerance:levelOpt().tolerance,speed:prefs.speed,loop:prefs.loop,tab:prefs.tab,rangeId:s.rangeId,range:[+s.range.a.toFixed(1),+s.range.b.toFixed(1)],octave:prefs.octave,vocal:prefs.vocal,lyrics:prefs.lyrics,audio:prefs.audio,takesOpen:prefs.takesOpen,review:traceShown()?s.trace.take.runId:null});
  s.dirty=true;$('lyricBand').hidden=!prefs.lyrics||!song.lyrics.length;
  // nothing recorded and nothing running: one invitation instead of a readout with no reading and a meter with no level
  const intro=!s.takes.length&&s.mode!=='singing'&&!s.stream&&!s.trace&&!s.hostSing;$('invite').hidden=!intro;$('chartWrap').dataset.intro=intro?'1':'0';
@@ -290,8 +290,8 @@ function sync(){
  const ver=rangeVerified();$('qualityPill').textContent=ver?'Фрагмент підтверджений':'Чернетка мелодії';$('qualityBtn').classList.toggle('ok',ver);$('confirmTarget').checked=ver;
  $('micToggle').textContent=s.stream?'Вимкнути мікрофон':'Увімкнути лише мікрофон';$('micToggle').disabled=active||s.busy||s.awaitFinish;$('takesPanel').dataset.open=prefs.takesOpen?'1':'0';$('takesToggle').setAttribute('aria-expanded',String(prefs.takesOpen));$('takesCount').textContent=s.takes.length;
  $('livesMode').checked=prefs.lives;$('livesCount').value=String(prefs.livesCount);$('livesMode').disabled=$('livesCount').disabled=active||s.busy||s.awaitFinish;renderLives('');
- $('lyricsBtn').setAttribute('aria-pressed',String(prefs.lyrics));$('shadowBtn').setAttribute('aria-pressed',String(prefs.shadow));$('recordAudio').checked=prefs.audio;
- refreshShadow();renderProgress();renderLatency();
+ $('lyricsBtn').setAttribute('aria-pressed',String(prefs.lyrics));$('recordAudio').checked=prefs.audio;
+ refreshCloud();renderProgress();renderLatency();
  for(const b of document.querySelectorAll('[data-view]')){b.classList.toggle('active',b.dataset.view===prefs.view);b.setAttribute('aria-pressed',String(b.dataset.view===prefs.view));b.disabled=active||s.busy||s.awaitFinish;}
  const rv=traceShown();$('reviewBar').hidden=$('reviewDivider').hidden=!rv;if(rv){const t=s.trace.take,runs=missRuns(s.trace.score);$('reviewLabel').textContent='Спроба '+String(t.id).padStart(2,'0');const pct=scorePct(s.trace.score);$('reviewPct').textContent=pct===null?'—':pct+'%';$('missCount').textContent=runs.length?runs.length+' '+plural(runs.length,'промах','промахи','промахів'):'без промахів';$('prevMiss').disabled=$('nextMiss').disabled=!runs.length||s.mode!=='idle';}
  $('chartWrap').classList.toggle('scrub',s.mode!=='singing');
@@ -504,7 +504,7 @@ function songHash(){return song.sourceId||song.id;}
 // group; confirming a fragment by ear does not, because targetAt().m never reads `verified`.
 function hash16(text){let a=0x811c9dc5,b=0x1b873593;for(let i=0;i<text.length;i++){const c=text.charCodeAt(i);a=Math.imul(a^c,16777619)>>>0;b=Math.imul(b^(c+i),2246822519)>>>0;}return (a>>>0).toString(16).padStart(8,'0')+(b>>>0).toString(16).padStart(8,'0');}
 let mapVersionCache='',totalsCache=new Map();
-function invalidateMap(){mapVersionCache='';spansCache=null;totalsCache=new Map();s.shadowSig='';s.progressSig='';}
+function invalidateMap(){mapVersionCache='';spansCache=null;totalsCache=new Map();s.progressSig='';}
 // A sung pass ends with the last thing to sing: the latest scored note or lyric line, plus a short release, never past
 // the audio. The outro, a wordless tail and the silence after it are not part of the attempt
 // (docs/design/SESSION_FLOW_RESULTS.md, docs/design/WORDLESS_TARGETS.md). One pass over the notes, read from the song as
@@ -677,7 +677,7 @@ function askPersist(){
 }
 // The whole in-memory view of the history, so importing another song cannot leave the previous song's runs behind it:
 // songHash() would then have moved while s.hist.runs had not, and the next attempt would write the mixed list back.
-function resetHistory(){s.hist={runs:[],days:[],loaded:false,note:'',persisted:s.hist.persisted,stamp:'',stale:false,restored:false};s.shadow=null;s.shadowSig='';s.progressSig='';}
+function resetHistory(){s.hist={runs:[],days:[],loaded:false,note:'',persisted:s.hist.persisted,stamp:'',stale:false,restored:false};s.progressSig='';}
 // A caption is a statement about the history; when the history moves under the cards, every caption is recounted, and
 // an attempt whose row is no longer stored loses it altogether.
 function refreshCaptions(){
@@ -700,7 +700,7 @@ async function loadHistory(){
   s.hist.note='';s.hist.stale=false;
   if(!s.hist.restored)restoreTakes();
  }catch(e){s.hist.note=storeNote(e);s.hist.stale=true;}
- s.hist.stamp=newRunId();refreshShadow();refreshCaptions();renderProgress();sync();
+ s.hist.stamp=newRunId();refreshCaptions();renderProgress();sync();
 }
 // A reopened trainer opens on the lines already sung: the newest attempts whose trace the history keeps come back into
 // the list, up to the same budget the tab keeps while singing. They come back as the tab would score them now, and
@@ -801,7 +801,7 @@ function saveRun(take){
   return idbWrite(ops).then(()=>{
    s.hist.runs=runs;s.hist.stamp=run.id+':'+run.endedAt;take.writing=false;take.historyError=false;markUnsaved();s.hist.note='';
    s.hist.days=[...s.hist.days.filter(d=>d.id!==run.id),{id:run.id,localDay:run.localDay,target:run.target}];
-   askPersist();refreshShadow();s.progressSig='';renderProgress();renderTakes();
+   askPersist();s.progressSig='';renderProgress();renderTakes();
    retryRefused();return true;
   });
  }).catch(e=>{take.writing=false;take.historyError=true;markUnsaved();s.hist.note=storeNote(e);s.progressSig='';renderTakes();renderProgress();return false;});
@@ -810,28 +810,6 @@ function saveRun(take){
 // Whatever the store refused is tried again whenever it may take writes: after any write it accepted, and on every
 // «Співати» the refused ones hold back. Nobody is asked to do it.
 function retryRefused(){for(const t of s.takes)if(t.historyError&&!t.writing)saveRun(t);}
-// The shadow of the personal best for what is framed now: one dim line under the live trace, so «how am I moving»
-// has an answer while singing and not only afterwards.
-function refreshShadow(){
- const sig=prefs.shadow?[currentKey(),s.trendScope||'',s.range.a.toFixed(2),s.range.b.toFixed(2),s.hist.stamp||'',s.trace?.take?.runId||''].join('|'):'off';
- if(sig===s.shadowSig)return;s.shadowSig=sig;
- if(!prefs.shadow){s.shadow=null;s.dirty=true;requestDraw();return;}
- const key=currentKey(),skip=s.trace?.take?.runId;
- // Same population as the numbers above the graph: under a fragment the best line is the best pass of that fragment,
- // never a whole-song pass that happened to cover it.
- let entry=null;
- for(const e of scopeEntries(s.hist.runs.filter(r=>r.cmpKey===key&&r.hasTrace&&r.id!==skip)))if(better(e,entry))entry=e;
- if(!entry){s.shadow=null;s.dirty=true;requestDraw();return;}
- const best=entry.run;
- if(s.shadow?.id===best.id)return;
- idbGet('traces',best.id).then(tr=>{
-  if(s.shadowSig!==sig||!tr)return;
-  // The octave is out of the comparison key because it moves the target and leaves the difficulty alone; the shadow
-  // has to move with it, or a record sung an octave away silently falls off the plot.
-  s.shadow={id:best.id,match:entry.match,octave:best.octave||0,points:unpackTrace(tr).map(p=>({songT:best.a+p.t*best.speed,m:p.f?69+12*Math.log2(p.f/440):null,confidence:p.confidence}))};
-  s.dirty=true;requestDraw();
- }).catch(()=>{});
-}
 function optOfRun(r){const L=LEVELS[r.level]||LEVELS.normal;return {a:r.a,octave:r.octave,view:r.view,tolerance:r.tolerance,slack:L.slack,ratio:L.ratio,octaveFree:L.octaveFree,level:r.level};}
 
 // ── export, import, clearing ────────────────────────────────────────────────────────────────────────────────────
@@ -902,7 +880,7 @@ async function clearSongHistory(){
  // The singer deleted these rows himself, so an attempt still in the tab is his to lose: the tab may drop it to make
  // room, and × stops promising that the history keeps it.
  const gone=new Set(runs.map(r=>r.id));for(const t of s.takes)if(gone.has(t.runId))t.cleared=true;
- s.shadow=null;s.shadowSig='';await loadHistory();// loadHistory ends in refreshCaptions(), which drops the caption of an attempt whose row is gone
+ await loadHistory();// loadHistory ends in refreshCaptions(), which drops the caption of an attempt whose row is gone
  // Clearing is what the quota message asks for, so an attempt the full store refused gets its write now that there is room.
  await Promise.all(s.takes.filter(t=>t.historyError).map(saveRun));
  return runs.length;
@@ -1001,7 +979,7 @@ function rescoreTake(t,patch){
  catch(_){t.summary=null;t.record=null;}
  if(s.trace?.take===t)s.trace={take:t,points:t.points,score:t.score};renderTakes();
 }
-function renderTakes(){const root=$('takesList');root.replaceChildren();for(const t of s.takes){
+function renderTakes(){refreshCloud();const root=$('takesList');root.replaceChildren();for(const t of s.takes){
  const el=document.createElement('div');el.className='take'+(s.trace?.take===t?' current':'');const playing=s.trace?.take===t&&s.mode==='review';const play=document.createElement('button');play.className='play';play.innerHTML=icon(playing?'pause':'play');play.ariaLabel=(playing?'Зупинити':t.hasAudio?'Прослухати':'Слухати з мінусом')+' спробу '+t.id;play.title=playing?'Зупинити':t.hasAudio?'Прослухати свій голос поверх мінусу':'Слухати з мінусом: голосу в цій спробі немає, лінія йде синхронно';play.onclick=()=>playTake(t);
  // an attempt brought back from the history says when it was sung: the proof that the line outlived the tab
  const d=new Date(t.startedAt),two=n=>String(n).padStart(2,'0'),when=t.restored&&!isNaN(d)?two(d.getDate())+'.'+two(d.getMonth()+1)+' '+two(d.getHours())+':'+two(d.getMinutes())+' · ':'';
@@ -1180,7 +1158,7 @@ function exerciseRows(){
  return rows;
 }
 function progressSignature(){
- return [prefs.tab,prefs.shadow,currentKey(),s.trendScope||'',s.rangeId,s.range.a.toFixed(2),s.range.b.toFixed(2),
+ return [prefs.tab,currentKey(),s.trendScope||'',s.rangeId,s.range.a.toFixed(2),s.range.b.toFixed(2),
   s.hist.runs.length,s.hist.stamp||'',s.hist.note,s.hist.persisted,s.takes.length,s.weakOrder].join('|');
 }
 function renderProgress(){
@@ -1399,6 +1377,58 @@ let missPat=null,probe=null;
 const WORDLESS_ALPHA=.35;// how far a wordless target steps back
 function missHatch(){if(missPat)return missPat;const c=document.createElement('canvas');c.width=c.height=7;const h=c.getContext('2d');
  h.strokeStyle='#dd8f9759';h.lineWidth=1.2;h.beginPath();h.moveTo(-2,7);h.lineTo(7,-2);h.moveTo(1,10);h.lineTo(10,1);h.stroke();missPat=g.createPattern(c,'repeat');return missPat;}
+// ── past takes as dust behind the target (docs/design/TAKE_CLOUD.md) ──────────────────────────────────────────────
+// Every confident frame of the takes in the tab is one faint speck where the voice was, so the stage shows roughly how
+// this song has been sung so far. The worker scatters the specks and also paints them, into a layer a little wider than
+// the visible window at the current pitch scale; a frame on the main thread only blits the part on screen. A new layer
+// is asked for before the window walks off the old one, when the plot or the octave changes, and when the pitch scale
+// moves (at most every DUST.settle ms while it eases, at once when it settles); meanwhile the old one is stretched to fit.
+const DUST={color:'#c3d3f2',alpha:[.22,.26],conf:.5,cover:1.6,ahead:.3,settle:150};
+const cloud={worker:null,failed:false,sig:'',gen:0,done:0,ids:[],n:0,takes:0,layer:null,asked:0,seq:0,fit:false,probeAt:-1,probeHoles:[],misses:0,builds:0,layerMs:0,workMs:0,packs:new WeakMap(),serial:0,hidden:false};
+// Left out: the take on screen in review and a take being re-recorded; the take being sung is not in the list yet.
+function cloudTakes(){const punched=new Set([...s.pending.values()].map(m=>m.punchInto).filter(Boolean));return s.takes.filter(t=>t!==s.trace?.take&&!punched.has(t.id));}
+// Once per take: its confident frames as songT, pitch pairs, the pitch moved back to octave 0 so any octave can draw them.
+function packTake(t){let p=cloud.packs.get(t.points);if(p)return p;const o=t.octave||0;let n=0;
+ for(const q of t.points)if(Number.isFinite(q.m)&&q.confidence>=DUST.conf)n++;
+ const buf=new Float32Array(n*2);let j=0;for(const q of t.points)if(Number.isFinite(q.m)&&q.confidence>=DUST.conf){buf[j++]=q.songT;buf[j++]=q.m-o;}
+ p={buf,id:++cloud.serial,seed:parseInt(hash16(String(t.startedAt)+':'+t.a).slice(0,8),16)};cloud.packs.set(t.points,p);return p;}
+function cloudWorker(){
+ if(cloud.worker||cloud.failed)return cloud.worker;
+ try{let url=URL.createObjectURL(new Blob([$('cloud-source').textContent],{type:'text/javascript'}));const w=new Worker(url),drop=()=>{if(url)URL.revokeObjectURL(url);url='';};cloud.worker=w;
+  w.onmessage=e=>{drop();const d=e.data;
+   if(d.type==='specks'){if(d.gen!==cloud.gen)return;if(!d.draws){cloudOff();return;}cloud.done=d.gen;cloud.n=d.n;cloud.takes=d.takes;cloud.workMs=d.ms;}
+   else if(d.type==='layer'){if(d.id===cloud.asked)cloud.asked=0;if(!d.bitmap)return;
+    if(d.gen!==cloud.gen&&cloud.layer?.gen===cloud.gen){d.bitmap.close();return;}
+    cloud.layer?.bitmap.close();cloud.layer={...d,at:performance.now()};cloud.builds++;cloud.layerMs=d.ms;}
+   s.dirty=true;requestDraw();};
+  w.onerror=()=>{drop();cloudOff();};
+ }catch(_){cloud.failed=true;}
+ return cloud.worker;}
+// A browser whose workers cannot paint gets no dust; singing goes on exactly as before.
+function cloudOff(){cloud.failed=true;cloud.worker?.terminate();cloud.worker=null;cloud.layer?.bitmap.close();cloud.layer=null;cloud.n=0;cloud.asked=0;s.dirty=true;requestDraw();}
+function refreshCloud(){
+ const list=cloudTakes(),packs=list.map(packTake),sig=packs.map(p=>p.id).join(',');if(sig===cloud.sig)return;
+ cloud.sig=sig;cloud.ids=list.map(t=>t.id);const gen=++cloud.gen;
+ if(!packs.length){cloud.done=gen;cloud.n=0;cloud.takes=0;cloud.layer?.bitmap.close();cloud.layer=null;s.dirty=true;requestDraw();return;}
+ cloudWorker()?.postMessage({type:'takes',gen,takes:packs.map(p=>({seed:p.seed,buf:p.buf}))});}
+function askLayer(v,pxs,ph,oct){
+ const ta=v.a-.1*v.span;cloud.asked=++cloud.seq;
+ cloud.worker.postMessage({type:'layer',id:cloud.asked,gen:cloud.gen,ta,tb:ta+DUST.cover*v.span,pxs,ph,lo:s.rangeLo,hi:s.rangeHi,oct,dpr:DPR,size:W<720?1.6:1.9,color:DUST.color,alpha:DUST.alpha});}
+// Bars that overlap each other go to separate clips: an even-odd clip would let the dust back in where two bars overlap.
+function holeLayers(h){const L=[];for(const r of h){const hit=q=>r[0]<q[0]+q[2]&&q[0]<r[0]+r[2]&&r[1]<q[1]+q[3]&&q[1]<r[1]+r[3];let l=L.find(l=>!l.some(hit));if(!l)L.push(l=[]);l.push(r);}return L;}
+function drawCloud(b,v,oct,holes){
+ const pw=b.right-b.left,ph=b.bottom-b.top;cloud.fit=false;if(probe)cloud.probeHoles=holes||[];if(!cloud.n||cloud.hidden||!cloud.worker||pw<1||ph<1)return;
+ const pxs=pw/v.span,L=cloud.layer,same=!!L&&L.pxs===pxs&&L.ph===ph&&L.dpr===DPR&&L.oct===oct,covers=same&&v.a>=L.ta&&v.b<=L.tb;
+ const fresh=covers&&L.gen===cloud.gen&&L.lo===s.rangeLo&&L.hi===s.rangeHi,easing=s.rangeLo!==sc.goalLo||s.rangeHi!==sc.goalHi;
+ if(!cloud.asked&&(!covers||v.b>L.tb-DUST.ahead*v.span||(!fresh&&(L.gen!==cloud.gen||!easing||performance.now()-L.at>=DUST.settle))))askLayer(v,pxs,ph,oct);
+ cloud.fit=fresh;if(!covers)cloud.misses++;if(!same)return;
+ // the source rectangle may run past the layer's end after a jump: drawImage clips it and the destination with it
+ const y=m=>b.bottom-(m-s.rangeLo)/(s.rangeHi-s.rangeLo)*ph,top=y(L.hi);
+ // the target bars have see-through fills: the dust stays out of them so a bar reads as flat as it does with no dust
+ if(holes?.length){g.save();for(const layer of holeLayers(holes)){const P=new Path2D();P.rect(b.left,b.top,pw,ph);for(const [hx,hy,hw,hh] of layer)P.roundRect(hx,hy,hw,hh,Math.min(4,hw/2,hh/2));g.clip(P,'evenodd');}}
+ g.drawImage(L.bitmap,(v.a-L.ta)*pxs*L.dpr,0,v.span*pxs*L.dpr,ph*L.dpr,b.left,top,pw,y(L.lo)-top);
+ if(holes?.length)g.restore();
+ if(probe)cloud.probeAt=probe.length;}
 function draw(t){
  if(!g)return;const b=bounds(),v=view(t);followRange(v,t);const x=a=>b.left+(a-v.a)/v.span*(b.right-b.left),y=m=>b.bottom-(m-s.rangeLo)/(s.rangeHi-s.rangeLo)*(b.bottom-b.top);const rowH=(b.bottom-b.top)/(s.rangeHi-s.rangeLo);
  const mono=getComputedStyle(document.body).getPropertyValue('--mono'),sans=getComputedStyle(document.body).getPropertyValue('--sans');
@@ -1424,6 +1454,9 @@ function draw(t){
   g.fillStyle='#b4a2eb0c';const xa=clamp(x(s.range.a),b.left,b.right),xb=clamp(x(s.range.b),b.left,b.right);if(xb>xa)g.fillRect(xa,b.top,xb-xa,b.bottom-b.top);}
  g.save();g.beginPath();g.rect(b.left,b.top,b.right-b.left,b.bottom-b.top);g.clip();const opt=effective(),sc=activeScore(),pts=activePoints();
  const tolH=Math.max(4,opt.tolerance/100*rowH*2),barH=clamp(rowH*.74,7,26);
+ // past takes as dust, under everything the target and the voice draw; in the notes view it keeps out of the bars
+ let holes=null;if(opt.view==='notes'){holes=[];for(const n of song.notes){if(n.a>v.b)break;if(n.b<v.a)continue;const xx=x(n.a);holes.push([xx,y(n.m+opt.octave)-barH/2,Math.max(2,x(n.b)-xx),barH]);}}
+ drawCloud(b,v,opt.octave,holes);
  if(opt.view==='notes'){
   for(const n of song.notes){if(n.a>v.b)break;if(n.b<v.a)continue;const xx=x(n.a),ww=Math.max(2,x(n.b)-xx),yy=y(n.m+opt.octave);const ok=(n.ok||n.manual)&&!n.ignored;
    const kind=n.ignored?null:noteKind(sc,n.id),missed=kind==='miss'||kind==='silent';const cur=t>=n.a&&t<n.b,curState=cur?frameState(sc,t-.03):0;
@@ -1468,13 +1501,6 @@ function draw(t){
    else{g.fillStyle='#0d121b';g.fill();g.strokeStyle='#dd8f97';g.lineWidth=1.3;g.setLineDash([3,2.4]);g.stroke();g.setLineDash([]);}
    g.font='600 11px '+sans;g.fillStyle=hit?'#0d2620':'#f0b5bb';g.fillText(hit?'✓':'×',xx,yy+.5);}
  }
- // shadow of the personal best for this fragment: 1 px, no halo, under everything the current attempt draws
- if(prefs.shadow&&s.shadow&&s.shadow.points.length){const path=new Path2D();let last=null;const shift=opt.octave-s.shadow.octave;
-  for(const p of s.shadow.points){if(p.songT>v.b)break;
-   if(p.m===null||p.confidence<.8){last=null;continue;}
-   if(last&&p.songT>=v.a-.3&&p.songT-last.songT<=.11&&Math.abs(p.m-last.m)<=3.5){path.moveTo(x(last.songT),y(last.m+shift));path.lineTo(x(p.songT),y(p.m+shift));}
-   last=p;}
-  g.lineWidth=1;g.lineJoin='round';g.lineCap='round';g.strokeStyle='#95a3b899';g.stroke(path);}
  // sung trace: a soft halo around the voice, crisp core on top; mint inside the corridor, subdued red outside, dim with no target
  if(pts.length){const review=s.mode!=='singing';const upTo=review?v.b+.1:t+.03;const paths=tracePaths(pts,x,y,sc,upTo);
   g.lineJoin='round';g.lineCap='round';
@@ -1562,7 +1588,6 @@ $('repeatMissBtn').onclick=()=>{if(!traceShown()||s.mode!=='idle'||s.busy||s.awa
 function markRange(which){if(s.busy||s.awaitFinish)return;const t=now();const ok=which==='a'?setRange(t,Math.max(s.range.b,t+.5)):setRange(Math.min(s.range.a,t-.5),t);if(ok)toast((which==='a'?'Фрагмент від':'Фрагмент до')+' '+fmt(t));}
 $('markA').onclick=()=>markRange('a');$('markB').onclick=()=>markRange('b');$('rangeSettings').onclick=()=>{modal('settingsDialog');$('rangeA').focus();};$('prevMiss').onclick=()=>jumpMiss(-1);$('nextMiss').onclick=()=>jumpMiss(1);$('closeReview').onclick=closeTrace;$('takesToggle').onclick=()=>{prefs.takesOpen=!prefs.takesOpen;savePrefs();sync();};
 for(const [id,tab]of [['tabTakes','takes'],['tabProgress','progress']])$(id).onclick=()=>{prefs.tab=tab;savePrefs();s.progressSig='';renderProgress();};
-$('shadowBtn').onclick=()=>{prefs.shadow=!prefs.shadow;savePrefs();s.shadowSig='';refreshShadow();sync();toast(prefs.shadow?'Тінь особистого рекорду увімкнена.':'Тінь особистого рекорду вимкнена.');};
 $('recordAudio').onchange=()=>{prefs.audio=$('recordAudio').checked;savePrefs();sync();toast(prefs.audio?'Голос записується у WAV: спробу можна буде переслухати.':'Запис голосу вимкнено. Лінія й оцінка зберігаються як завжди.');};
 $('livesMode').onchange=()=>{prefs.lives=$('livesMode').checked;if(!prefs.lives){s.lives=null;$('livesNotice').hidden=true;}savePrefs();sync();toast(prefs.lives?'Режим життів увімкнено: '+prefs.livesCount+' '+plural(prefs.livesCount,'життя','життя','життів')+' на спробу.':'Режим життів вимкнено.');};
 $('livesCount').onchange=()=>{const n=+$('livesCount').value;if(LIVES.sizes.includes(n))prefs.livesCount=n;s.lives=null;savePrefs();sync();};
@@ -1756,7 +1781,6 @@ const historyHooks={
   return {points:pts.length,target:sc.target,hit:sc.hit,stored:{target:run.target,hit:run.hit}};},
  exportPayload:all=>exportPayload(all),importPayload:d=>importHistory(d),clearSong:()=>clearSongHistory(),draft:()=>scopeDraft(prefs.view),
  takeJSON:id=>{const t=s.takes.find(x=>x.id===id);return t?takePayload(t):null;},
- shadow:()=>s.shadow?{id:s.shadow.id,match:s.shadow.match,points:s.shadow.points.length}:null,
  streak:streakDays,trend:()=>trendRuns(s.hist.runs.filter(r=>r.cmpKey===currentKey())).map(r=>r.match),
  totals:()=>({song:targetTotals(prefs.view).song,draft:targetTotals(prefs.view).draft}),
  weak:()=>weakRows(s.hist.runs.filter(r=>r.cmpKey===currentKey())),map:()=>phraseMap(s.hist.runs.filter(r=>r.cmpKey===currentKey())),exercises:exerciseRows,
@@ -1788,7 +1812,12 @@ window.Luma={diagnostics:()=>({mode:s.mode,busy:s.busy,pending:s.awaitFinish,tim
   livePush:(p)=>{handleWorker({type:'pitch',computeMs:0,windowMs:64,...p});},
   seek:t=>seekTo(t,true),applySeek,selectTake:id=>{const t=s.takes.find(t=>t.id===id);if(t)selectTrace(t);},closeTrace,jumpMiss,draw:()=>{draw(now());updateReadout(now());},
   setLevel:l=>{document.querySelector('[data-level="'+l+'"]').click();return levelOpt();},viewWindow:t=>view(t),plot:()=>({...bounds()}),dpr:()=>DPR,// one frame drawn with the label rectangles recorded, so a test can read the real canvas pixels behind the type
-  noteBoxes:()=>{probe=[];draw(now());const r=probe;probe=null;return r;},scale:()=>({...SCALE,goalLo:sc.goalLo,goalHi:sc.goalHi}),setRange,clearRange,levelOpt,centsOff,now,punchTarget:()=>punchTarget()?.id??null,gains:()=>s.gains?{back:s.gains.back.gain.value,fore:s.gains.fore.gain.value,vocal:prefs.vocal}:null,takes:()=>s.takes.map(t=>({id:t.id,runId:t.runId,a:t.a,endSong:t.endSong,duration:t.duration,bytes:t.blob?.size||0,hasAudio:!!t.hasAudio,clipped:!!t.clipped,points:t.points.length,punches:t.punches||0,pct:scorePct(t.score),record:t.record?.text||null,historyError:!!t.historyError,restored:!!t.restored})),
+  noteBoxes:()=>{probe=[];draw(now());const r=probe;probe=null;return r;},
+  cloud:()=>({ids:[...cloud.ids],takes:cloud.takes,specks:cloud.n,ready:cloud.done===cloud.gen&&(!cloud.n||cloud.layer?.gen===cloud.gen),fit:cloud.fit,worker:!!cloud.worker,failed:cloud.failed,builds:cloud.builds,misses:cloud.misses,workMs:cloud.workMs,layerMs:cloud.layerMs,layer:cloud.layer?{w:cloud.layer.bitmap.width,h:cloud.layer.bitmap.height,ta:cloud.layer.ta,tb:cloud.layer.tb}:null}),
+  cloudShown:v=>{cloud.hidden=!v;s.dirty=true;},
+  // how many target boxes one frame had drawn when it blitted the dust (-1: no dust drawn), how many it drew in all, and
+  // the bar rectangles the dust was kept out of
+  cloudOrder:()=>{probe=[];cloud.probeAt=-1;cloud.probeHoles=[];draw(now());const r={at:cloud.probeAt,boxes:probe.length,holes:cloud.probeHoles};probe=null;return r;},scale:()=>({...SCALE,goalLo:sc.goalLo,goalHi:sc.goalHi}),setRange,clearRange,levelOpt,centsOff,now,punchTarget:()=>punchTarget()?.id??null,gains:()=>s.gains?{back:s.gains.back.gain.value,fore:s.gains.fore.gain.value,vocal:prefs.vocal}:null,takes:()=>s.takes.map(t=>({id:t.id,runId:t.runId,a:t.a,endSong:t.endSong,duration:t.duration,bytes:t.blob?.size||0,hasAudio:!!t.hasAudio,clipped:!!t.clipped,points:t.points.length,punches:t.punches||0,pct:scorePct(t.score),record:t.record?.text||null,historyError:!!t.historyError,restored:!!t.restored})),
   state:()=>({mode:s.mode,pos:s.pos,time:now(),trace:s.trace?{id:s.trace.take.id,points:s.trace.points.length,frames:s.trace.score.frames.length,pct:scorePct(s.trace.score),missRuns:missRuns(s.trace.score)}:null,liveScore:s.live?{target:s.live.target,hit:s.live.hit,sung:s.live.sung,pct:scorePct(s.live)}:null,history:s.history.length,matchText:$('matchPct').textContent,matchDetail:$('matchDetail').textContent,reviewHidden:$('reviewBar').hidden,missCount:$('missCount').textContent,lyric:$('lyricNow').textContent,liveNote:$('liveNote').textContent,deviation:$('deviation').textContent,range:{...s.range},rangeId:s.rangeId,rangeText:$('rangeText').textContent,loop:prefs.loop,transportLoop:s.transport?.loop??null,level:prefs.level,tolerance:prefs.tolerance,rangeLo:s.rangeLo,rangeHi:s.rangeHi,lives:livesState()}),
   ctxTime:()=>s.ctx?.currentTime??0,
   fakeSing:({a,b,speed=1})=>{// enter singing mode without audio: transport clock driven by a fake context
@@ -1799,6 +1828,9 @@ window.Luma={diagnostics:()=>({mode:s.mode,busy:s.busy,pending:s.awaitFinish,tim
   wordless:()=>{const w=scoredSpans();return {on:w.on,spans:w.spans.map(x=>[...x]),last:w.last,raw:t=>targetAt(t,effective(),true)};},
   history:historyHooks}};
 populateSong();fitStage();resize();setRangeScale();updateReadout(s.pos);loadHistory();
+// The record line («Рекорд») gave way to the dust of past takes, which has no switch: a saved `shadow` is dropped, never
+// read as «cloud off», which nothing could turn back on (docs/design/TAKE_CLOUD.md).
+try{if('shadow' in JSON.parse(localStorage.getItem('luma.trainer.settings')||'{}'))savePrefs();}catch(_){}
 // A profile that has never opened Luma before did not live through the change, so it is told nothing; the flag is set
 // either way, so the notice can never surface later.
 if(!prefs.audioNotice){const upgrade=hadSettings;prefs.audioNotice=true;savePrefs();

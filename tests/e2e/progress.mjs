@@ -1,5 +1,5 @@
-// The Прогрес tab: the trend follows the ruler, the phrase map shows every phrase in song order and moves the loop, the record shadow
-// appears only where a record exists, and the day streak counts days, not open tabs. Lessons show exercises, not keys.
+// The Прогрес tab: the trend follows the ruler, the phrase map shows every phrase in song order and moves the loop, and the
+// day streak counts days, not open tabs. Lessons show exercises, not keys.
 import {execFileSync} from 'node:child_process';
 import {launch, open, window_, assert, url} from './lib.mjs';
 const py = process.env.LUMA_PY || '.venv/bin/python';
@@ -109,53 +109,15 @@ assert((await hist('H.trend()')).length === 0, 'a free A–B takes no whole-song
 await p.evaluate(q => window.Luma.test.setRange(q.a, q.b, q.id), target0);
 await p.waitForTimeout(250);
 
-// ── 3 · the record shadow: only where a record exists, and gone with the switch ────────────────────────────────
+// ── 3 · a stored whole-song pass sung at the target (the record line it once drew is gone: tests/e2e/cloud.mjs) ──
 await p.evaluate(() => { const T = window.Luma.test; T.closeTrace(); T.clearRange(); });
 await p.waitForTimeout(150);
-assert((await hist('H.shadow()')) === null, 'no shadow while no stored attempt covers what is framed');
 const dur = await p.evaluate(() => window.LUMA_SONG.duration);
 const SING = `async ({a, b, off}) => { const L = window.Luma, T = L.test, midiF = m => 440 * Math.pow(2, (m - 69) / 12), pts = [];
   for (let t = 0; t < b - a; t += .02) { const ref = L.targetAt(a + t); pts.push({t, f: ref ? midiF(ref.m + off) : null, confidence: .95, db: -20}); }
   T.closeTrace(); const r = T.injectTake({a, b, points: pts}); await new Promise(r => setTimeout(r, 300)); T.closeTrace(); return r; }`;
 await p.evaluate(`(${SING})({a: 0, b: ${dur}, off: 0})`);
 await p.waitForTimeout(400);
-const shadow = await hist('H.shadow()');
-assert(shadow && shadow.points > 100, 'a stored attempt becomes the shadow of the personal best ' + JSON.stringify(shadow));
-await p.locator('#shadowBtn').click(); await p.waitForTimeout(200);
-assert((await hist('H.shadow()')) === null && (await p.locator('#shadowBtn').getAttribute('aria-pressed')) === 'false', 'the switch turns the shadow off');
-await p.locator('#shadowBtn').click(); await p.waitForTimeout(300);
-assert((await hist('H.shadow()')) !== null, 'the switch turns it back on');
-// The octave is out of the comparison key, so a record sung an octave away has to follow the target, not stay behind.
-// Measured as light added inside the plot rectangle with the switch on against the same frame with it off.
-const plotLight = () => p.evaluate(() => {
-  const T = window.Luma.test, pl = T.plot(), chart = document.getElementById('chart'), DPR = T.dpr();
-  T.draw();
-  const copy = document.createElement('canvas'); copy.width = chart.width; copy.height = chart.height;
-  const g = copy.getContext('2d', {willReadFrequently: true}); g.drawImage(chart, 0, 0);
-  const d = g.getImageData(Math.round(pl.left * DPR), Math.round(pl.top * DPR),
-    Math.max(1, Math.round((pl.right - pl.left) * DPR)), Math.max(1, Math.round((pl.bottom - pl.top) * DPR))).data;
-  let sum = 0; for (let i = 0; i < d.length; i += 4) sum += d[i] + d[i + 1] + d[i + 2];
-  return sum;
-});
-const shadowInk = async () => {
-  await p.waitForFunction(() => window.Luma.test.history.shadow() !== null, null, {timeout: 5000});
-  const on = await plotLight();
-  await p.locator('#shadowBtn').click(); await p.waitForTimeout(200);
-  const off = await plotLight();
-  await p.locator('#shadowBtn').click();
-  await p.waitForFunction(() => window.Luma.test.history.shadow() !== null, null, {timeout: 5000});
-  return on - off;
-};
-const straight = await shadowInk();
-assert(straight > 0, 'the shadow puts ink on the plot at the octave it was sung in (' + straight + ')');
-for (const oct of [-12, 12]) {
-  await p.evaluate(o => { const sel = document.getElementById('octave'); sel.value = String(o); sel.dispatchEvent(new Event('change')); }, oct);
-  await p.waitForTimeout(400);
-  const shifted = await shadowInk();
-  assert(shifted > 0, 'the shadow follows the vocal octave to ' + oct + ' instead of falling off the plot (' + shifted + ')');
-}
-await p.evaluate(() => { const sel = document.getElementById('octave'); sel.value = '0'; sel.dispatchEvent(new Event('change')); });
-await p.waitForTimeout(300);
 
 // ── 4 · days, not open tabs: the streak needs two minutes under a target, and the day ends at 04:00 ────────────
 await p.evaluate(() => window.Luma.test.history.clearSong());

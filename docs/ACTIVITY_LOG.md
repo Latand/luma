@@ -103,7 +103,7 @@ Opening a song or a lesson from Studio is a `click` whose `href` is `song:<file>
 
 | type | data |
 |---|---|
-| `state` | what changed since the previous `state` of the session; the first one is the full starting state. Keys: `mode` (`idle`, `listen` = playing, `singing` = recording, `review` = playing an attempt back), `view` (`notes` / `contour`), `level` (`easy` / `normal` / `strict` / `custom`), `tolerance` ¢, `speed`, `loop`, `tab` (`takes` / `progress`), `rangeId` (phrase id; `0` whole song, `-1` own range), `range` [a, b] s, `octave`, `vocal`, `lyrics`, `shadow`, `audio` (WAV recording switch), `takesOpen`, `review` (run id of the attempt on screen or `null`) |
+| `state` | what changed since the previous `state` of the session; the first one is the full starting state. Keys: `mode` (`idle`, `listen` = playing, `singing` = recording, `review` = playing an attempt back), `view` (`notes` / `contour`), `level` (`easy` / `normal` / `strict` / `custom`), `tolerance` ¢, `speed`, `loop`, `tab` (`takes` / `progress`), `rangeId` (phrase id; `0` whole song, `-1` own range), `range` [a, b] s, `octave`, `vocal`, `lyrics`, `audio` (WAV recording switch), `takesOpen`, `review` (run id of the attempt on screen or `null`) |
 | `seek` | `from`, `to` s, `mode` at the time; a scrub or a run of arrow keys is one event, written 0.6 s after it settles |
 | `toast` | `text` of the toast shown |
 | `error` | `text` of the error banner, `kind` (`mic` for microphone trouble) |
