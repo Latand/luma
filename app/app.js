@@ -1366,7 +1366,7 @@ function missHatch(){if(missPat)return missPat;const c=document.createElement('c
 // is asked for before the window walks off the old one, when the plot or the octave changes, and when the pitch scale
 // moves (at most every DUST.settle ms while it eases, at once when it settles); meanwhile the old one is stretched to fit.
 const DUST={color:'#c3d3f2',alpha:[.22,.26],conf:.5,cover:1.6,ahead:.3,settle:150};
-const cloud={worker:null,failed:false,sig:'',gen:0,done:0,ids:[],n:0,takes:0,layer:null,asked:0,seq:0,fit:false,probeAt:-1,misses:0,builds:0,layerMs:0,workMs:0,packs:new WeakMap(),serial:0,hidden:false};
+const cloud={worker:null,failed:false,sig:'',gen:0,done:0,ids:[],n:0,takes:0,layer:null,asked:0,seq:0,fit:false,probeAt:-1,probeHoles:[],misses:0,builds:0,layerMs:0,workMs:0,packs:new WeakMap(),serial:0,hidden:false};
 // Left out: the take on screen in review and a take being re-recorded; the take being sung is not in the list yet.
 function cloudTakes(){const punched=new Set([...s.pending.values()].map(m=>m.punchInto).filter(Boolean));return s.takes.filter(t=>t!==s.trace?.take&&!punched.has(t.id));}
 // Once per take: its confident frames as songT, pitch pairs, the pitch moved back to octave 0 so any octave can draw them.
@@ -1396,15 +1396,20 @@ function refreshCloud(){
 function askLayer(v,pxs,ph,oct){
  const ta=v.a-.1*v.span;cloud.asked=++cloud.seq;
  cloud.worker.postMessage({type:'layer',id:cloud.asked,gen:cloud.gen,ta,tb:ta+DUST.cover*v.span,pxs,ph,lo:s.rangeLo,hi:s.rangeHi,oct,dpr:DPR,size:W<720?1.6:1.9,color:DUST.color,alpha:DUST.alpha});}
-function drawCloud(b,v,oct){
- const pw=b.right-b.left,ph=b.bottom-b.top;cloud.fit=false;if(!cloud.n||cloud.hidden||!cloud.worker||pw<1||ph<1)return;
+// Bars that overlap each other go to separate clips: an even-odd clip would let the dust back in where two bars overlap.
+function holeLayers(h){const L=[];for(const r of h){const hit=q=>r[0]<q[0]+q[2]&&q[0]<r[0]+r[2]&&r[1]<q[1]+q[3]&&q[1]<r[1]+r[3];let l=L.find(l=>!l.some(hit));if(!l)L.push(l=[]);l.push(r);}return L;}
+function drawCloud(b,v,oct,holes){
+ const pw=b.right-b.left,ph=b.bottom-b.top;cloud.fit=false;if(probe)cloud.probeHoles=holes||[];if(!cloud.n||cloud.hidden||!cloud.worker||pw<1||ph<1)return;
  const pxs=pw/v.span,L=cloud.layer,same=!!L&&L.pxs===pxs&&L.ph===ph&&L.dpr===DPR&&L.oct===oct,covers=same&&v.a>=L.ta&&v.b<=L.tb;
  const fresh=covers&&L.gen===cloud.gen&&L.lo===s.rangeLo&&L.hi===s.rangeHi,easing=s.rangeLo!==sc.goalLo||s.rangeHi!==sc.goalHi;
  if(!cloud.asked&&(!covers||v.b>L.tb-DUST.ahead*v.span||(!fresh&&(L.gen!==cloud.gen||!easing||performance.now()-L.at>=DUST.settle))))askLayer(v,pxs,ph,oct);
  cloud.fit=fresh;if(!covers)cloud.misses++;if(!same)return;
  // the source rectangle may run past the layer's end after a jump: drawImage clips it and the destination with it
  const y=m=>b.bottom-(m-s.rangeLo)/(s.rangeHi-s.rangeLo)*ph,top=y(L.hi);
+ // the target bars have see-through fills: the dust stays out of them so a bar reads as flat as it does with no dust
+ if(holes?.length){g.save();for(const layer of holeLayers(holes)){const P=new Path2D();P.rect(b.left,b.top,pw,ph);for(const [hx,hy,hw,hh] of layer)P.roundRect(hx,hy,hw,hh,Math.min(4,hw/2,hh/2));g.clip(P,'evenodd');}}
  g.drawImage(L.bitmap,(v.a-L.ta)*pxs*L.dpr,0,v.span*pxs*L.dpr,ph*L.dpr,b.left,top,pw,y(L.lo)-top);
+ if(holes?.length)g.restore();
  if(probe)cloud.probeAt=probe.length;}
 function draw(t){
  if(!g)return;const b=bounds(),v=view(t);followRange(v,t);const x=a=>b.left+(a-v.a)/v.span*(b.right-b.left),y=m=>b.bottom-(m-s.rangeLo)/(s.rangeHi-s.rangeLo)*(b.bottom-b.top);const rowH=(b.bottom-b.top)/(s.rangeHi-s.rangeLo);
@@ -1431,8 +1436,9 @@ function draw(t){
   g.fillStyle='#b4a2eb0c';const xa=clamp(x(s.range.a),b.left,b.right),xb=clamp(x(s.range.b),b.left,b.right);if(xb>xa)g.fillRect(xa,b.top,xb-xa,b.bottom-b.top);}
  g.save();g.beginPath();g.rect(b.left,b.top,b.right-b.left,b.bottom-b.top);g.clip();const opt=effective(),sc=activeScore(),pts=activePoints();
  const tolH=Math.max(4,opt.tolerance/100*rowH*2),barH=clamp(rowH*.74,7,26);
- // past takes as dust, under everything the target and the voice draw
- drawCloud(b,v,opt.octave);
+ // past takes as dust, under everything the target and the voice draw; in the notes view it keeps out of the bars
+ let holes=null;if(opt.view==='notes'){holes=[];for(const n of song.notes){if(n.a>v.b)break;if(n.b<v.a)continue;const xx=x(n.a);holes.push([xx,y(n.m+opt.octave)-barH/2,Math.max(2,x(n.b)-xx),barH]);}}
+ drawCloud(b,v,opt.octave,holes);
  if(opt.view==='notes'){
   for(const n of song.notes){if(n.a>v.b)break;if(n.b<v.a)continue;const xx=x(n.a),ww=Math.max(2,x(n.b)-xx),yy=y(n.m+opt.octave);const ok=(n.ok||n.manual)&&!n.ignored;
    const kind=n.ignored?null:noteKind(sc,n.id),missed=kind==='miss'||kind==='silent';const cur=t>=n.a&&t<n.b,curState=cur?frameState(sc,t-.03):0;
@@ -1791,8 +1797,9 @@ window.Luma={diagnostics:()=>({mode:s.mode,busy:s.busy,pending:s.awaitFinish,tim
   noteBoxes:()=>{probe=[];draw(now());const r=probe;probe=null;return r;},
   cloud:()=>({ids:[...cloud.ids],takes:cloud.takes,specks:cloud.n,ready:cloud.done===cloud.gen&&(!cloud.n||cloud.layer?.gen===cloud.gen),fit:cloud.fit,worker:!!cloud.worker,failed:cloud.failed,builds:cloud.builds,misses:cloud.misses,workMs:cloud.workMs,layerMs:cloud.layerMs,layer:cloud.layer?{w:cloud.layer.bitmap.width,h:cloud.layer.bitmap.height,ta:cloud.layer.ta,tb:cloud.layer.tb}:null}),
   cloudShown:v=>{cloud.hidden=!v;s.dirty=true;},
-  // how many target boxes one frame had drawn when it blitted the dust (-1: no dust drawn), and how many it drew in all
-  cloudOrder:()=>{probe=[];cloud.probeAt=-1;draw(now());const r={at:cloud.probeAt,boxes:probe.length};probe=null;return r;},scale:()=>({...SCALE,goalLo:sc.goalLo,goalHi:sc.goalHi}),setRange,clearRange,levelOpt,centsOff,now,punchTarget:()=>punchTarget()?.id??null,gains:()=>s.gains?{back:s.gains.back.gain.value,fore:s.gains.fore.gain.value,vocal:prefs.vocal}:null,takes:()=>s.takes.map(t=>({id:t.id,runId:t.runId,a:t.a,endSong:t.endSong,duration:t.duration,bytes:t.blob?.size||0,hasAudio:!!t.hasAudio,clipped:!!t.clipped,points:t.points.length,punches:t.punches||0,pct:scorePct(t.score),record:t.record?.text||null,historyError:!!t.historyError,restored:!!t.restored})),
+  // how many target boxes one frame had drawn when it blitted the dust (-1: no dust drawn), how many it drew in all, and
+  // the bar rectangles the dust was kept out of
+  cloudOrder:()=>{probe=[];cloud.probeAt=-1;cloud.probeHoles=[];draw(now());const r={at:cloud.probeAt,boxes:probe.length,holes:cloud.probeHoles};probe=null;return r;},scale:()=>({...SCALE,goalLo:sc.goalLo,goalHi:sc.goalHi}),setRange,clearRange,levelOpt,centsOff,now,punchTarget:()=>punchTarget()?.id??null,gains:()=>s.gains?{back:s.gains.back.gain.value,fore:s.gains.fore.gain.value,vocal:prefs.vocal}:null,takes:()=>s.takes.map(t=>({id:t.id,runId:t.runId,a:t.a,endSong:t.endSong,duration:t.duration,bytes:t.blob?.size||0,hasAudio:!!t.hasAudio,clipped:!!t.clipped,points:t.points.length,punches:t.punches||0,pct:scorePct(t.score),record:t.record?.text||null,historyError:!!t.historyError,restored:!!t.restored})),
   state:()=>({mode:s.mode,pos:s.pos,time:now(),trace:s.trace?{id:s.trace.take.id,points:s.trace.points.length,frames:s.trace.score.frames.length,pct:scorePct(s.trace.score),missRuns:missRuns(s.trace.score)}:null,liveScore:s.live?{target:s.live.target,hit:s.live.hit,sung:s.live.sung,pct:scorePct(s.live)}:null,history:s.history.length,matchText:$('matchPct').textContent,matchDetail:$('matchDetail').textContent,reviewHidden:$('reviewBar').hidden,missCount:$('missCount').textContent,lyric:$('lyricNow').textContent,liveNote:$('liveNote').textContent,deviation:$('deviation').textContent,range:{...s.range},rangeId:s.rangeId,rangeText:$('rangeText').textContent,loop:prefs.loop,transportLoop:s.transport?.loop??null,level:prefs.level,tolerance:prefs.tolerance,rangeLo:s.rangeLo,rangeHi:s.rangeHi,lives:livesState()}),
   ctxTime:()=>s.ctx?.currentTime??0,
   fakeSing:({a,b,speed=1})=>{// enter singing mode without audio: transport clock driven by a fake context

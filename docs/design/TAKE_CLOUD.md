@@ -143,14 +143,19 @@ setting) is replaced by this one for Пил.
    the take set changes, and when the pitch scale moves: at once when it has settled, at most every 150 ms while it
    eases. One request is in flight at a time. Until the answer arrives the old layer is drawn, stretched to the
    current pitch scale. A browser whose workers cannot paint gets no dust, and the trainer runs as before.
+   The target bars have see-through fills, so in the notes view the blit is clipped to the plot minus every visible
+   bar (even-odd, with overlapping bars in separate clips): a bar's inside looks the same with or without dust, and the
+   dust still shows around and between the bars. The contour view keeps the whole layer.
 6. **Prefs and log.** `prefs.shadow` and the activity `state` key `shadow` are gone; see the decisions above.
 7. **Tests.** `tests/e2e/cloud.mjs` covers the following:
    - the record line, its button, its legend entry, its saved pref and its log key are gone;
    - seeded takes become specks built and painted in the worker, drawn before the first target bar;
    - the dust is faint: at most +110 of 255 on any pixel, measured +88 to +90;
    - every core pixel of the live line is the same with the dust on and off;
+   - with 20 takes on the melody, while singing at 390 px and 1440 px, every pixel inside the target, hit and missed
+     bars is the same with the dust on and off, the dust still shows around them, and the contour view keeps it all;
    - the take under review and a punched take are left out, and come back afterwards;
-   - wordless notes keep their alpha and stay unscored in both views;
+   - wordless notes keep their alpha and stay unscored in both views, and their bars stay clear of the dust;
    - frame time with 20 takes at 390 px and 1440 px (2×), 1× and 4× CPU throttle: p95 within +25 % or +1.5 ms, median
      within +1 ms;
    - twenty 4:30 takes (253 140 specks) build in the worker.
