@@ -83,6 +83,65 @@ assert(off.losses.length >= 3 && off.lives.left === 10 - off.losses.length, 'a p
 assert(off.losses[0].t >= 2.02 + 1.5 && gaps.every(g => g >= 2.5 - .05), 'not before 1.5 s of missed notes, then at most one life per 2.5 s ' + JSON.stringify({first: off.losses[0], gaps}));
 const ui = await p.evaluate(() => window.Luma.test.state().lives);
 assert(ui.hearts === 10 && ui.lost === off.losses.length, 'the corner shows the broken hearts of that attempt ' + JSON.stringify(ui));
+assert(ui.burns === off.losses.length, 'each lost life burned exactly once ' + JSON.stringify({burns: ui.burns, losses: off.losses.length}));
+await p.waitForTimeout(1000);
+const cooled = await p.evaluate(() => { window.Luma.test.draw(); return window.Luma.test.state().lives; });
+assert(cooled.burning === 0 && cooled.burns === off.losses.length && cooled.lost === off.losses.length, 'after 0.8 s no burn is left, only the lost outlines, and redrawing burns nothing again ' + JSON.stringify(cooled));
+
+// ── the burn fades out inside its box: no edge of a canvas cut to LumaBurn.box is ever painted, so nothing ends flat ─
+const edges = await p.evaluate(() => {
+  const B = window.LumaBurn, hits = [];
+  for (const size of [13, 14]) for (const dpr of [1, 2, 3]) {
+    const W = Math.round((B.box.l + B.box.r) * size * dpr), H = Math.round((B.box.t + B.box.b) * size * dpr), c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d', {willReadFrequently: true});
+    for (let ms = 0; ms <= B.ms; ms += 5) for (const seed of [0, 4, 9]) {
+      g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H); B.drawHeart(g, B.box.l * size, B.box.t * size, size, 'burn', ms, seed);
+      const side = {top: g.getImageData(0, 0, W, 1), bottom: g.getImageData(0, H - 1, W, 1), left: g.getImageData(0, 0, 1, H), right: g.getImageData(W - 1, 0, 1, H)};
+      for (const [k, d] of Object.entries(side)) { let a = 0; for (let i = 3; i < d.data.length; i += 4) a = Math.max(a, d.data[i]); if (a) hits.push({size, dpr, ms, seed, side: k, alpha: a}); }
+    }
+  }
+  return hits;
+});
+assert(edges.length === 0, 'the burn fades out before every edge of its box, at every frame ' + JSON.stringify(edges.slice(0, 8)));
+
+// ── the burn (docs/design/LIFE_BURN.md): over the lost heart, above the piano roll, no layout jump, gone after 0.8 s ─
+for (const vp of [{width: 390, height: 844}, {width: 1440, height: 900}]) {
+  await p.setViewportSize(vp); await p.waitForTimeout(250);
+  // where the hearts, the stage head and the match sit; read while singing, before the loss, during the burn and after it
+  const HEAD = `(() => { const r = document.getElementById('lives').getBoundingClientRect(), h = document.querySelector('.stage-head').getBoundingClientRect(), pct = document.getElementById('matchPct').getBoundingClientRect();
+    return [r.left, r.top, r.width, r.height, h.height, pct.left, pct.top].map(Math.round).join(','); })()`;
+  await setLives(p, true, 5);
+  const burn = await p.evaluate(HEAD => {
+    const T = window.Luma.test; T.closeTrace(); T.seek(1.5); const st = T.fakeSing({a: 1.5, b: 16}); const before = T.state().lives.burns; let pre = null;
+    for (let t = 0; t <= 14; t += .02) {
+      const ref = window.Luma.targetAt(1.5 + t);
+      T.livePush(ref ? {t: st.when + t, f: 440 * Math.pow(2, (ref.m + 2 - 69) / 12), confidence: .95, db: -20, rms: .1, peak: .3} : {t: st.when + t, f: null, confidence: 0, db: -60, rms: 0, peak: 0});
+      if (Math.round(t * 50) % 5 === 0) { T.fakeTick(st.when + t); if (T.state().lives.left < 5) break; pre = eval(HEAD); }// the head one tick before the loss
+    }
+    const l = T.state().lives, c = document.querySelector('#lives .life-burn'), heart = document.querySelectorAll('#lives .life')[l.left];
+    const q = c && c.getBoundingClientRect(), hr = heart.getBoundingClientRect(), plot = document.getElementById('chartWrap').getBoundingClientRect().top + T.plot().top;
+    const px = c ? c.getContext('2d').getImageData(0, 0, c.width, c.height).data.filter((v, i) => i % 4 === 3 && v > 0).length : 0;
+    return {lives: l, pre, during: eval(HEAD), started: l.burns - before, inHeart: !!c && c.parentElement === heart, covers: !!q && q.left < hr.left && q.right > hr.right && q.top < hr.top && q.bottom > hr.bottom,
+      abovePlot: !!q && q.bottom <= plot, clicks: c ? getComputedStyle(c).pointerEvents : null, painted: px};
+  }, HEAD);
+  assert(burn.started === 1 && burn.lives.burning === 1 && burn.inHeart && burn.covers && burn.painted > 50 && burn.clicks === 'none',
+    `at ${vp.width}px one burn plays on the heart that was lost, drawn over it and click-through ` + JSON.stringify(burn));
+  assert(burn.abovePlot, `at ${vp.width}px the burn stays above the piano roll, so it covers no note ` + JSON.stringify(burn));
+  if (process.env.LUMA_SHOT) await p.screenshot({path: process.env.LUMA_SHOT.replace(/\.png$/, `_burn_${vp.width}.png`)});
+  await p.waitForTimeout(1000);
+  const end = await p.evaluate(() => window.Luma.test.state().lives), after = await p.evaluate(HEAD);
+  assert(end.burning === 0 && end.lost === 1 && end.burns === burn.lives.burns, `at ${vp.width}px the burn is over within a second and the outline is left ` + JSON.stringify(end));
+  assert(burn.pre === burn.during && burn.during === after, `at ${vp.width}px the burn moves nothing in the stage head ` + JSON.stringify({pre: burn.pre, during: burn.during, after}));
+  await p.evaluate(() => window.Luma.test.fakeFinish());
+}
+// with reduced motion a lost life goes straight to its outline: no burn at all
+await p.emulateMedia({reducedMotion: 'reduce'});
+const still = await sing(p, {a: 1.5, b: 16.5, level: 'easy', voice: '()=>200'});
+const stillUi = await p.evaluate(() => window.Luma.test.state().lives);
+assert(still.losses.length >= 3 && stillUi.lost === still.losses.length && stillUi.burning === 0 && stillUi.burns === cooled.burns + 2,
+  'with reduced motion lives are lost exactly as before and nothing burns ' + JSON.stringify({losses: still.losses.length, ui: stillUi}));
+await p.emulateMedia({reducedMotion: null});
+await setLives(p, true, 10);
 
 // ── phone and desktop: the hearts fit in the head and cover nothing ──────────────────────────────────────────────
 for (const vp of [{width: 390, height: 844}, {width: 1440, height: 900}]) {
@@ -127,6 +186,14 @@ const b2 = await launch(['--use-fake-device-for-media-stream', '--use-fake-ui-fo
 const {page: q, logs: qlogs} = await open(b2, {width: 390, height: 844});
 await setLives(q, true, 3);
 // the voice: a semitone and a half above every target, pushed in step with the audio clock
+// every burn canvas with the times it came and went and how much of its heart's rose shows as it goes, and the refills
+await q.evaluate(() => { const box = document.getElementById('lives'), log = window.__burns = [], refills = window.__refills = [];
+  new MutationObserver(ms => { const t = performance.now(); for (const m of ms) {
+    for (const n of m.addedNodes) if (n.classList?.contains('life-burn')) log.push({el: n, heart: [...box.children].indexOf(n.parentNode), add: t, rm: null});
+    for (const n of m.removedNodes) { const e = log.find(e => e.el === n); if (e && e.rm === null) { e.rm = t; e.rose = m.target.isConnected ? +getComputedStyle(m.target.querySelector('.full')).opacity : null; } }
+    if (m.type === 'attributes' && box.classList.contains('refill') && !m.oldValue?.includes('refill'))
+      refills.push({t, burning: [...box.children].filter(h => h.querySelector('.life-burn')).map(h => [...box.children].indexOf(h))});
+  } }).observe(box, {childList: true, subtree: true, attributes: true, attributeFilter: ['class'], attributeOldValue: true}); });
 await q.evaluate(() => { const T = window.Luma.test; T.clearRange(); T.seek(0); window.__off = 1.5;
   window.__voice = setInterval(() => { const s = T.state(); if (s.mode !== 'singing') return; const ref = window.Luma.targetAt(s.time);
     T.livePush(ref ? {t: T.ctxTime(), f: 440 * Math.pow(2, (ref.m + window.__off - 69) / 12), confidence: .95, db: -20, rms: .1, peak: .3} : {t: T.ctxTime(), f: null, confidence: 0, db: -70, rms: 0, peak: 0}); }, 20);
@@ -147,6 +214,19 @@ assert(Math.abs(re.time - re.lives.last.to) < .05, 'the new attempt starts from 
 const fmt = t => String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(Math.floor(t % 60)).padStart(2, '0');
 assert(re.lives.notice === 'Ще раз з ' + fmt(re.lives.last.to) && re.lives.countdown, 'the count-in says where it starts again: ' + re.lives.notice);
 assert(re.lives.left === 3 && re.lives.lost === 0 && re.lives.refill && !re.lives.out, 'the lives are full again, with the refill animation ' + JSON.stringify(re.lives));
+// the last life burns into the count-in: the refill lets it play out, that heart's rose comes back when it ends, and then
+// no burn is left
+await q.waitForFunction(() => window.Luma.test.state().lives.burning === 0 && window.__burns.every(e => e.rm !== null), null, {timeout: 3000});
+await q.waitForTimeout(600);// the refill pop of the heart that burned last
+const burnt = await q.evaluate(() => ({burns: window.__burns.map(e => ({heart: e.heart, add: Math.round(e.add), ms: Math.round(e.rm - e.add), rose: e.rose})), refills: window.__refills,
+  lives: window.Luma.test.state().lives, rose: [...document.getElementById('lives').children].map(h => +getComputedStyle(h.querySelector('.full')).opacity)}));
+const lastBurn = burnt.burns.at(-1), refill = burnt.refills.at(-1);
+assert(burnt.lives.burns === 3 && burnt.burns.length === 3 && burnt.burns.every(e => e.ms >= 780 && e.ms < 1500),
+  'each of the three lives burned once, the last one too, and each burn played its full 0.8 s ' + JSON.stringify(burnt.burns));
+assert(refill && refill.t - lastBurn.add < 780 && refill.burning.length === 1 && refill.burning[0] === lastBurn.heart && lastBurn.rose < .3,
+  'the refill came while the last burn was still on and kept it, and that heart\'s rose waited for the burn to end ' + JSON.stringify({refill, lastBurn}));
+assert(burnt.lives.burning === 0 && burnt.lives.lost === 0 && burnt.lives.left === 3 && burnt.lives.refill && burnt.rose.every(o => o === 1),
+  'after the last burn no burn is left and the hearts are full again ' + JSON.stringify({lives: burnt.lives, rose: burnt.rose}));
 assert(re.takes.length === 1 && re.takes[0].a === 0 && Math.abs(re.takes[0].endSong - at) < .6, 'the interrupted attempt is finished and kept, ending where the last life went ' + JSON.stringify(re.takes));
 await q.waitForFunction(to => window.Luma.test.state().time > to + 1.5, re.lives.last.to, {timeout: 8000});
 const tuned = await q.evaluate(() => window.Luma.test.state().lives);
