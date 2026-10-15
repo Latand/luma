@@ -62,6 +62,8 @@ function flames(ctx, y0, ms, seed, h) {
 // 0–90 ms a white-hot flash swells the heart to 2.4×, it shakes until 300 ms; 70–560 ms fire takes it from the tip up
 // (a glowing char line climbs, ash below it, three flame tongues ride it); 140–800 ms eight embers rise and fade;
 // 480–760 ms it shrinks back and the outline of a lost heart is left.
+// shadowBlur is in device pixels and ignores the transform, so the char line's glow takes the transform's scale: the
+// same glow at every devicePixelRatio and in any caller's units.
 function burn(ctx, x, y, size, ms, seed) {
   const u = size / 24;
   const pop = ms < 90 ? 1 + 1.4 * easeOut(ms / 90) : 2.4 - .3 * seg(ms, 90, 480) - 1.1 * easeIn(seg(ms, 480, 760));
@@ -78,7 +80,7 @@ function burn(ctx, x, y, size, ms, seed) {
   if (white > 0) { ctx.globalAlpha = (1 - out) * white; ctx.fillStyle = HOT; ctx.fillRect(-14, -14, 28, 28); ctx.globalAlpha = 1 - out; }
   const R = rng(seed + 3); ctx.beginPath(); ctx.moveTo(-14, charY);
   for (let k = 0; k <= 8; k++) ctx.lineTo(-12 + k * 3, charY + (R() - .5) * 2.2 + Math.sin(ms / 30 + k) * .4);
-  ctx.lineWidth = 1.8; ctx.strokeStyle = GOLD; ctx.shadowColor = FLAME; ctx.shadowBlur = 6 * u * pop; ctx.stroke(); ctx.shadowBlur = 0;
+  ctx.lineWidth = 1.8; ctx.strokeStyle = GOLD; ctx.shadowColor = FLAME; const m = ctx.getTransform(); ctx.shadowBlur = 6 * Math.hypot(m.a, m.b); ctx.stroke(); ctx.shadowBlur = 0;
   ctx.restore();
   shape(ctx, null, ms < 200 ? HOT : RIM);
   flames(ctx, charY, ms, seed, seg(ms, 60, 160) * (1 - seg(ms, 520, 760)));

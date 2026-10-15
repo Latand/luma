@@ -292,7 +292,7 @@ dialog details{font-size:13px;color:var(--ink-3)}
 .life .shell{fill:none;stroke:#76839b}
 .life .full{fill:var(--rose);stroke:var(--rose);transform-origin:50% 60%}
 .life.lost .full{opacity:0}
-.lives.refill .life .full{animation:lifeRefill .45s var(--ease) backwards;animation-delay:calc(var(--i)*45ms)}
+.lives.refill .life .full{animation:lifeRefill .45s var(--ease) backwards;animation-delay:calc(var(--i)*45ms + var(--wait,0ms))}
 .life-burn{position:absolute;z-index:3;pointer-events:none}
 @keyframes lifeRefill{0%{opacity:0;transform:scale(.3)}70%{opacity:1;transform:scale(1.25)}100%{opacity:1;transform:none}}
 .lives-notice{margin:0 0 6px;display:flex;flex-direction:column;gap:3px;align-items:center}

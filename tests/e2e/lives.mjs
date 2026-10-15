@@ -170,6 +170,14 @@ const b2 = await launch(['--use-fake-device-for-media-stream', '--use-fake-ui-fo
 const {page: q, logs: qlogs} = await open(b2, {width: 390, height: 844});
 await setLives(q, true, 3);
 // the voice: a semitone and a half above every target, pushed in step with the audio clock
+// every burn canvas with the times it came and went and how much of its heart's rose shows as it goes, and the refills
+await q.evaluate(() => { const box = document.getElementById('lives'), log = window.__burns = [], refills = window.__refills = [];
+  new MutationObserver(ms => { const t = performance.now(); for (const m of ms) {
+    for (const n of m.addedNodes) if (n.classList?.contains('life-burn')) log.push({el: n, heart: [...box.children].indexOf(n.parentNode), add: t, rm: null});
+    for (const n of m.removedNodes) { const e = log.find(e => e.el === n); if (e && e.rm === null) { e.rm = t; e.rose = m.target.isConnected ? +getComputedStyle(m.target.querySelector('.full')).opacity : null; } }
+    if (m.type === 'attributes' && box.classList.contains('refill') && !m.oldValue?.includes('refill'))
+      refills.push({t, burning: [...box.children].filter(h => h.querySelector('.life-burn')).map(h => [...box.children].indexOf(h))});
+  } }).observe(box, {childList: true, subtree: true, attributes: true, attributeFilter: ['class'], attributeOldValue: true}); });
 await q.evaluate(() => { const T = window.Luma.test; T.clearRange(); T.seek(0); window.__off = 1.5;
   window.__voice = setInterval(() => { const s = T.state(); if (s.mode !== 'singing') return; const ref = window.Luma.targetAt(s.time);
     T.livePush(ref ? {t: T.ctxTime(), f: 440 * Math.pow(2, (ref.m + window.__off - 69) / 12), confidence: .95, db: -20, rms: .1, peak: .3} : {t: T.ctxTime(), f: null, confidence: 0, db: -70, rms: 0, peak: 0}); }, 20);
@@ -190,7 +198,19 @@ assert(Math.abs(re.time - re.lives.last.to) < .05, 'the new attempt starts from 
 const fmt = t => String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(Math.floor(t % 60)).padStart(2, '0');
 assert(re.lives.notice === 'Ще раз з ' + fmt(re.lives.last.to) && re.lives.countdown, 'the count-in says where it starts again: ' + re.lives.notice);
 assert(re.lives.left === 3 && re.lives.lost === 0 && re.lives.refill && !re.lives.out, 'the lives are full again, with the refill animation ' + JSON.stringify(re.lives));
-assert(re.lives.burns === 3 && re.lives.burning === 0, 'each of the three lives burned once, the last one too, and the refill leaves no burn behind ' + JSON.stringify(re.lives));
+// the last life burns into the count-in: the refill lets it play out, that heart's rose comes back when it ends, and then
+// no burn is left
+await q.waitForFunction(() => window.Luma.test.state().lives.burning === 0 && window.__burns.every(e => e.rm !== null), null, {timeout: 3000});
+await q.waitForTimeout(600);// the refill pop of the heart that burned last
+const burnt = await q.evaluate(() => ({burns: window.__burns.map(e => ({heart: e.heart, add: Math.round(e.add), ms: Math.round(e.rm - e.add), rose: e.rose})), refills: window.__refills,
+  lives: window.Luma.test.state().lives, rose: [...document.getElementById('lives').children].map(h => +getComputedStyle(h.querySelector('.full')).opacity)}));
+const lastBurn = burnt.burns.at(-1), refill = burnt.refills.at(-1);
+assert(burnt.lives.burns === 3 && burnt.burns.length === 3 && burnt.burns.every(e => e.ms >= 780 && e.ms < 1500),
+  'each of the three lives burned once, the last one too, and each burn played its full 0.8 s ' + JSON.stringify(burnt.burns));
+assert(refill && refill.t - lastBurn.add < 780 && refill.burning.length === 1 && refill.burning[0] === lastBurn.heart && lastBurn.rose < .3,
+  'the refill came while the last burn was still on and kept it, and that heart\'s rose waited for the burn to end ' + JSON.stringify({refill, lastBurn}));
+assert(burnt.lives.burning === 0 && burnt.lives.lost === 0 && burnt.lives.left === 3 && burnt.lives.refill && burnt.rose.every(o => o === 1),
+  'after the last burn no burn is left and the hearts are full again ' + JSON.stringify({lives: burnt.lives, rose: burnt.rose}));
 assert(re.takes.length === 1 && re.takes[0].a === 0 && Math.abs(re.takes[0].endSong - at) < .6, 'the interrupted attempt is finished and kept, ending where the last life went ' + JSON.stringify(re.takes));
 await q.waitForFunction(to => window.Luma.test.state().time > to + 1.5, re.lives.last.to, {timeout: 8000});
 const tuned = await q.evaluate(() => window.Luma.test.state().lives);

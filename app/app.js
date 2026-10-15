@@ -165,7 +165,8 @@ function livesState(){const lv=s.lives;return {on:prefs.lives,size:prefs.livesCo
  notice:$('livesNotice').hidden||$('countdown').hidden?null:$('livesFrom').textContent,countdown:!$('countdown').hidden};}
 // A lost life burns (app/burn.js, docs/design/LIFE_BURN.md): a canvas over the heart for LumaBurn.ms, taken out of the
 // layout and pointer-transparent, then the .life.lost outline under it is all that is left. With reduced motion the heart
-// goes straight to that end state. The rebuild of the row or a refill drops the canvas, which ends its frame loop.
+// goes straight to that end state. A rebuild of the row drops the canvas, which ends its frame loop. A refill lets a burn
+// still running play out (the last life burns into the count-in), and that heart's refill pop waits for its end.
 s.burns=0;
 function burnLife(el,i){
  const B=window.LumaBurn;if(!B||matchMedia('(prefers-reduced-motion: reduce)').matches)return;
@@ -173,7 +174,7 @@ function burnLife(el,i){
  const size=el.offsetWidth,dpr=devicePixelRatio||1,W=(B.box.l+B.box.r)*size,H=(B.box.t+B.box.b)*size,c=document.createElement('canvas');
  c.className='life-burn';c.setAttribute('aria-hidden','true');c.width=Math.round(W*dpr);c.height=Math.round(H*dpr);
  c.style.cssText=`left:${size/2-B.box.l*size}px;top:${size/2-B.box.t*size}px;width:${W}px;height:${H}px`;el.append(c);
- const g=c.getContext('2d'),t0=performance.now();
+ const g=c.getContext('2d'),t0=c.t0=performance.now();
  const frame=now=>{if(!c.isConnected)return;const ms=now-t0;if(ms>=B.ms){c.remove();return;}
   g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,W,H);B.drawHeart(g,B.box.l*size,B.box.t*size,size,'burn',Math.max(0,ms),i);requestAnimationFrame(frame);};
  frame(t0);
@@ -185,7 +186,9 @@ function renderLives(ev){
  if(box.children.length!==total){box.replaceChildren();for(let i=0;i<total;i++){const el=document.createElement('span');el.className='life';el.style.setProperty('--i',String(i));el.innerHTML='<svg class="shell"><use href="#i-heart"/></svg><svg class="full"><use href="#i-heart"/></svg>';box.append(el);}}
  [...box.children].forEach((el,i)=>el.classList.toggle('lost',i>=left));
  if(ev==='lose'&&box.children[left])burnLife(box.children[left],left);
- if(ev==='refill'){for(const c of box.querySelectorAll('.life-burn'))c.remove();box.classList.remove('refill');void box.offsetWidth;box.classList.add('refill');}
+ if(ev==='refill'){const t=performance.now(),B=window.LumaBurn;
+  for(const el of box.children){const c=el.querySelector('.life-burn');el.style.setProperty('--wait',c&&B?Math.max(0,Math.ceil(B.ms-(t-c.t0)))+'ms':'0ms');}
+  box.classList.remove('refill');void box.offsetWidth;box.classList.add('refill');}
  box.setAttribute('aria-label','Життя: '+left+' з '+total);
  box.title='Режим життів: '+left+' з '+total+' · довгі промахи під нотами забирають життя, коли скінчаться — пісня відмотується назад';
 }

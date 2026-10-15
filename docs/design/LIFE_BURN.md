@@ -51,7 +51,9 @@ window.LumaBurn = {
 
 The function is pure. It reads no clock, no DOM and no `Math.random`, and nothing outside its arguments changes its
 pixels. The same `(state, ms, seed, size)` gives the same frame in any browser and at any frame rate. It does not clear:
-the caller clears its own region, at least `box` × `size` around the centre. Colours are the trainer's own: rose
+the caller clears its own region, at least `box` × `size` around the centre. The char line's glow (`shadowBlur`,
+which a canvas measures in device pixels) is scaled by the context's transform too, so it is the same at any
+`devicePixelRatio`. Colours are the trainer's own: rose
 `#f3a1b5` for a full heart, `#76839b` for an outline. The fire adds its own warm range (`#fff4dc`, `#ffd27a`,
 `#ff9a3c`, `#ff6a2b`) and ash `#1b1a22`.
 
@@ -66,11 +68,16 @@ the caller clears its own region, at least `box` × `size` around the centre. Co
 3. Each animation frame clears it and calls `drawHeart(ctx, box.l·size, box.t·size, size, 'burn', now − t0, index)`.
    `t0` is the `performance.now()` of the loss. At `ms ≥ 800` the canvas is removed and the outline under it is what
    is left: `drawHeart`'s `'lost'` state is that same outline, so the end is seamless.
-4. A rebuild of the row (another number of lives) or a refill removes any canvas still burning. A canvas no longer in
-   the document ends its own frame loop.
+4. A rebuild of the row (another number of lives) removes any canvas still burning. A canvas no longer in the document
+   ends its own frame loop.
+5. A refill leaves a burn that is still running on screen to play out and remove itself at `ms ≥ 800`. The refill
+   pop of that heart (`lifeRefill` in `app/head.html`) waits for it: `renderLives('refill')` sets the heart's `--wait`
+   to the burn's remaining milliseconds, which is added to the pop's `animation-delay`. The heart shows only its outline
+   under the burn until then, so the burn ends on the outline as it always does, and then the rose pops back in.
 
-The last life burns the same way. The attempt stops on it, the burn plays out during the stop, and the refill comes
-after the count-in, more than 0.8 s later.
+The last life burns the same way, and it is the one a refill meets. The attempt stops on it, and the new attempt's
+count-in, which brings the refill, starts within about 0.1 s, while the burn is still at its start. The burn plays its
+full 0.8 s over the count-in, and the hearts refill when it is done.
 
 `Luma.test.state().lives` reports `burns` (burns started in this page) and `burning` (canvases on screen now) for the
 suites.
@@ -78,7 +85,7 @@ suites.
 ## 4. How the camera video reproduces it
 
 The render mode (CAMERA_VIDEO.md §5.2) replays the take through the live path with a virtual clock. It draws the hearts
-on the game canvas itself, after `draw(t)`:
+onto the game canvas after `draw(t)`, through a transparent layer (**Compositing** below):
 
 ```js
 // for each heart i of the row: lossAt[i] is the virtual time (ms) at which livesStep() took that life, or undefined
@@ -103,6 +110,11 @@ for (let i = 0; i < total; i++) {
 - **Reduced motion.** The trainer's preference does not apply to the video, which is watched elsewhere: the video always
   burns (CAMERA_VIDEO.md §5.6).
 
+- **Compositing.** The glows and embers use `'lighter'`. The trainer draws them on a transparent canvas, which the page
+  then lays over the stage head; drawn straight onto the opaque video frame they would add light to it instead, and
+  come out brighter. For the trainer's pixels, draw the row into a transparent canvas the size of `box` around it
+  (cleared each frame) and `drawImage` that onto the frame.
+
 The only difference from the trainer is when frames are sampled: the trainer draws at its display rate, the video at
 30 fps. Any one frame is the same function of the same arguments.
 
@@ -115,8 +127,9 @@ The only difference from the trainer is when frames are sampled: the trainer dra
   the heart and ending above the piano roll; the hearts, the stage head and the match keep their boxes before, during
   and after it; within a second the canvas is gone and the outline is left;
 - with reduced motion lives are lost exactly as before and nothing burns;
-- through the real transport, losing all three lives starts three burns (the last one too), and the refill after the
-  rewind leaves no burn on screen.
+- through the real transport, losing all three lives starts three burns (the last one too), and each canvas stays for
+  its full 0.8 s; the refill comes while the last one is still on and keeps it, that heart's rose is still hidden when
+  the burn ends, and after that no burn is left and all three hearts are full.
 
 The rest of `lives.mjs` and every other suite in `tests/e2e/run.sh` pass unchanged, so the lives rule, the rewind and
 the scoring do not change.
