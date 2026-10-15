@@ -34,7 +34,7 @@ Every trainer embeds `app/burn.js` before `app/app.js` (`studio/build_html.py`),
 ```js
 window.LumaBurn = {
   ms: 800,                                  // length of the burn
-  box: {l: 3, r: 3, t: 5.6, b: 1.8},        // how far it paints around the heart's centre, in heart sizes
+  box: {l: 3, r: 3, t: 5.6, b: 2.6},        // how far it paints around the heart's centre, in heart sizes
   drawHeart(ctx, x, y, size, state, ms = 0, seed = 0),
 }
 ```
@@ -51,11 +51,11 @@ window.LumaBurn = {
 
 The function is pure. It reads no clock, no DOM and no `Math.random`, and nothing outside its arguments changes its
 pixels. The same `(state, ms, seed, size)` gives the same frame in any browser and at any frame rate. It does not clear:
-the caller clears its own region, at least `box` × `size` around the centre. The char line's glow (`shadowBlur`,
-which a canvas measures in device pixels) is scaled by the context's transform too, so it is the same at any
-`devicePixelRatio`. Colours are the trainer's own: rose
-`#f3a1b5` for a full heart, `#76839b` for an outline. The fire adds its own warm range (`#fff4dc`, `#ffd27a`,
-`#ff9a3c`, `#ff6a2b`) and ash `#1b1a22`.
+the caller clears its own region, at least `box` × `size` around the centre. Nothing reaches the edge of that box:
+the glow, the widest part, fades out 2.4 sizes from the centre, so a canvas cut to `box` shows no flat edge. The char
+line's glow (`shadowBlur`, which a canvas measures in device pixels) is scaled by the context's transform too, so it is
+the same at any `devicePixelRatio`. Colours are the trainer's own: rose `#f3a1b5` for a full heart, `#76839b` for an
+outline. The fire adds its own warm range (`#fff4dc`, `#ffd27a`, `#ff9a3c`, `#ff6a2b`) and ash `#1b1a22`.
 
 ## 3. How the trainer uses it
 
@@ -126,6 +126,8 @@ The only difference from the trainer is when frames are sampled: the trainer dra
 - at 390 px and 1440 px a single loss puts one burn canvas on the heart that was lost, painted, click-through, covering
   the heart and ending above the piano roll; the hearts, the stage head and the match keep their boxes before, during
   and after it; within a second the canvas is gone and the outline is left;
+- `drawHeart` into a canvas cut to `box` leaves every edge pixel transparent at every 5 ms of the burn, for sizes 13
+  and 14 at 1×, 2× and 3×;
 - with reduced motion lives are lost exactly as before and nothing burns;
 - through the real transport, losing all three lives starts three burns (the last one too), and each canvas stays for
   its full 0.8 s; the refill comes while the last one is still on and keeps it, that heart's rose is still hidden when

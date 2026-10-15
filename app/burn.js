@@ -10,9 +10,9 @@
 //   ms     for 'burn': milliseconds since the life was lost; below 0 draws 'full', from BURN.ms on draws 'lost'
 //   seed   the heart's index in its row, so neighbouring hearts burn differently and a replay burns the same
 // BURN.box: how far the burn paints around the centre, in heart sizes (left, right, up, down): a caller sizes its canvas
-// or clears its region from it.
+// or clears its region from it. Every edge of the box stays transparent through the whole burn.
 (() => {
-const BURN = {ms: 800, box: {l: 3, r: 3, t: 5.6, b: 1.8}};
+const BURN = {ms: 800, box: {l: 3, r: 3, t: 5.6, b: 2.6}};   // b: the glow reaches 2.4 sizes, so it fades out inside with room to spare
 // i-heart in app/head.html, and the colours of .life .full / .life .shell
 const HEART = 'M12 20.5s-7.6-4.7-9.4-9.4C1.4 7.9 3.5 4.3 7.1 4.3c2.1 0 3.6 1.2 4.9 3 1.3-1.8 2.8-3 4.9-3 3.6 0 5.7 3.6 4.5 6.8-1.8 4.7-9.4 9.4-9.4 9.4z';
 const ROSE = '#f3a1b5', SHELL = '#76839b', ASH = '#1b1a22', RIM = '#e9b98a';

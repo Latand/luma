@@ -88,6 +88,22 @@ await p.waitForTimeout(1000);
 const cooled = await p.evaluate(() => { window.Luma.test.draw(); return window.Luma.test.state().lives; });
 assert(cooled.burning === 0 && cooled.burns === off.losses.length && cooled.lost === off.losses.length, 'after 0.8 s no burn is left, only the lost outlines, and redrawing burns nothing again ' + JSON.stringify(cooled));
 
+// ── the burn fades out inside its box: no edge of a canvas cut to LumaBurn.box is ever painted, so nothing ends flat ─
+const edges = await p.evaluate(() => {
+  const B = window.LumaBurn, hits = [];
+  for (const size of [13, 14]) for (const dpr of [1, 2, 3]) {
+    const W = Math.round((B.box.l + B.box.r) * size * dpr), H = Math.round((B.box.t + B.box.b) * size * dpr), c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d', {willReadFrequently: true});
+    for (let ms = 0; ms <= B.ms; ms += 5) for (const seed of [0, 4, 9]) {
+      g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H); B.drawHeart(g, B.box.l * size, B.box.t * size, size, 'burn', ms, seed);
+      const side = {top: g.getImageData(0, 0, W, 1), bottom: g.getImageData(0, H - 1, W, 1), left: g.getImageData(0, 0, 1, H), right: g.getImageData(W - 1, 0, 1, H)};
+      for (const [k, d] of Object.entries(side)) { let a = 0; for (let i = 3; i < d.data.length; i += 4) a = Math.max(a, d.data[i]); if (a) hits.push({size, dpr, ms, seed, side: k, alpha: a}); }
+    }
+  }
+  return hits;
+});
+assert(edges.length === 0, 'the burn fades out before every edge of its box, at every frame ' + JSON.stringify(edges.slice(0, 8)));
+
 // ── the burn (docs/design/LIFE_BURN.md): over the lost heart, above the piano roll, no layout jump, gone after 0.8 s ─
 for (const vp of [{width: 390, height: 844}, {width: 1440, height: 900}]) {
   await p.setViewportSize(vp); await p.waitForTimeout(250);
