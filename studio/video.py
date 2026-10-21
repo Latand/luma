@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
-SR = 48000; FPS = 30; W, H = 1920, 1080
+SR = 48000; FPS = 30; W, H = 1920, 1080; ENC_THREADS = 4
 CAM = {'x': 72, 'y': 570, 'size': 300}
 ID = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
 MAX_TAKE = 32 << 20; MAX_CHUNK = 16 << 20; MAX_VOICE = 700 << 20; MAX_GAME = 64 << 20; MAX_SEGMENTS = 64
@@ -103,15 +103,24 @@ def align(pcm: np.ndarray, audio_start: float, wavs: list[np.ndarray], segments:
     out.update(W0=w0, approximateSync=False, residuals=res, spread=round(max(res) - min(res), 5) if res else None)
     return out
 
+def aligned(d: Path, take: dict) -> dict:
+    """align() over a sitting's folder. The decoded audio (float64, about 200 MB for a 4-minute sitting) lives only in
+    here, so none of it is held while the render and the compose run."""
+    a0, _ = starts(d / 'camera.webm'); pcm = decode(d / 'camera.webm')
+    wavs = [decode(d / f'voice-{k}.wav') for k in range(len(take['segments']))]
+    return align(pcm, a0, wavs, take['segments'], float(take['ctxAtStart']))
+
 # ── compose ────────────────────────────────────────────────────────────────────────────────────────────────────────
 def compose_cmd(game: Path, camera: Path | None, voices: list[Path], stem: Path | None, take: dict, cam_offset: float, out: Path) -> list[str]:
     """One ffmpeg run. The game layer is the base; the camera, cut to its centre square, sits in a soft-edged circle at
     (72, 570) and holds its last frame; each voice and each instrumental piece is delayed to its segment's place."""
     segs = take['segments']; t1 = segs[0]['when']; dur = duration(take); back = float(take.get('back', .75)); n = len(segs)
-    cmd = ['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-f', 'h264', '-framerate', str(FPS), '-i', str(game)]
+    # x264 sizes its thread pool by the cores (24 threads on 16 cores, 0.8 GB at 1080p); four keep it near 0.4 GB and leave
+    # the cores to a trainer that sings on while a video composes
+    cmd = ['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-threads', '2', '-f', 'h264', '-framerate', str(FPS), '-i', str(game)]
     graph = [f'[0:v]setpts=N/({FPS}*TB),scale=out_range=tv,format=yuv420p[g]']; i = 1
     if camera:
-        cmd += ['-i', str(camera)]; r = CAM['size']; c = (r - 1) / 2
+        cmd += ['-threads', '2', '-i', str(camera)]; r = CAM['size']; c = (r - 1) / 2
         graph.append(f'[{i}:v]setpts=PTS+({cam_offset:.6f})/TB,fps=fps={FPS}:start_time=0,crop=min(iw\\,ih):min(iw\\,ih),scale={r}:{r}:out_range=tv,format=yuva420p,'
                      f"geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':a='255*clip({r / 2:.1f}-hypot(X-{c},Y-{c}),0,1)',tpad=stop_mode=clone:stop_duration={dur + 1:.3f}[c]")
         graph.append(f"[g][c]overlay={CAM['x']}:{CAM['y']}:eof_action=repeat,format=yuv420p[v]"); i += 1
@@ -120,16 +129,15 @@ def compose_cmd(game: Path, camera: Path | None, voices: list[Path], stem: Path 
     for k, path in enumerate(voices):
         cmd += ['-i', str(path)]; delay = round((segs[k]['when'] - t1) * SR)
         graph.append(f'[{i}:a]aresample={SR},aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.9,adelay=delays={delay}S:all=1[vo{k}]'); mix.append(f'[vo{k}]'); i += 1
-    if stem:
-        cmd += ['-i', str(stem)]
-        graph.append(f'[{i}:a]aresample={SR},aformat=sample_fmts=fltp:channel_layouts=stereo,asplit={n}' + ''.join(f'[in{k}]' for k in range(n)))
-        for k, s in enumerate(segs):
-            delay = round((s['when'] - t1) * SR)
-            graph.append(f"[in{k}]atrim=start={s['a'] / s['speed']:.6f}:duration={s['stop'] - s['when']:.6f},asetpts=PTS-STARTPTS,volume={back:.4f},adelay=delays={delay}S:all=1[bk{k}]"); mix.append(f'[bk{k}]')
-        i += 1
+    # one input of the stem per segment: an asplit of a single input would hold every later segment's copy in memory
+    # until its delay ran out (about 1 GB for a 4-minute sitting of eight rewinds); separate inputs are read on demand
+    for k, s in enumerate(segs if stem else []):
+        cmd += ['-i', str(stem)]; delay = round((s['when'] - t1) * SR)
+        graph.append(f"[{i}:a]aresample={SR},aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=start={s['a'] / s['speed']:.6f}:duration={s['stop'] - s['when']:.6f},"
+                     f"asetpts=PTS-STARTPTS,volume={back:.4f},adelay=delays={delay}S:all=1[bk{k}]"); mix.append(f'[bk{k}]'); i += 1
     if mix: graph.append(''.join(mix) + f'amix=inputs={len(mix)}:normalize=0:duration=longest,alimiter=limit=0.95:level=false:latency=true,apad[a]')
     else: graph.append(f'anullsrc=r={SR}:cl=stereo[a]')
-    cmd += ['-filter_complex', ';'.join(graph), '-map', '[v]', '-map', '[a]', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22', '-maxrate', '5M', '-bufsize', '10M',
+    cmd += ['-filter_complex', ';'.join(graph), '-map', '[v]', '-map', '[a]', '-c:v', 'libx264', '-threads', str(ENC_THREADS), '-preset', 'veryfast', '-crf', '22', '-maxrate', '5M', '-bufsize', '10M',
             '-profile:v', 'high', '-pix_fmt', 'yuv420p', '-color_range', 'tv', '-r', str(FPS), '-c:a', 'aac', '-b:a', '192k', '-ar', str(SR), '-ac', '2', '-movflags', '+faststart',
             '-t', f'{dur:.3f}', '-f', 'mp4', str(out)]
     return cmd
@@ -374,9 +382,7 @@ class Videos:
         if not t: raise Failed('Немає запису спроби')
         dur = duration(t); segs = t['segments']
         self.step(vid, 'aligning')
-        a0, v0 = starts(d / 'camera.webm')
-        pcm = decode(d / 'camera.webm'); wavs = [decode(d / f'voice-{k}.wav') for k in range(len(segs))]
-        al = align(pcm, a0, wavs, segs, float(t['ctxAtStart'])); (d / 'align.json').write_text(json.dumps(al), encoding='utf-8')
+        al = aligned(d, t); (d / 'align.json').write_text(json.dumps(al), encoding='utf-8')
         self.step(vid, 'rendering'); self.render(vid, dur)
         game = d / 'game.h264'
         if not game.is_file() or game.stat().st_size == 0: raise Failed('Шар гри не намальовано')
@@ -420,7 +426,8 @@ class Videos:
         if not browser: raise Failed('Для монтажу потрібен Edge або Chrome')
         d = self.dir / vid; profile = d / '.profile'; (d / 'game.h264').unlink(missing_ok=True)
         with self.lock: self.render_done.clear(); self.render_error = None; self.game_seq[vid] = 0
-        cmd = nice([browser, '--headless=new', f'--user-data-dir={profile}', '--disable-gpu', '--mute-audio', '--no-first-run', '--no-default-browser-check',
+        cmd = nice([browser, '--headless=new', f'--user-data-dir={profile}', '--disable-gpu', '--mute-audio', '--no-first-run', '--no-default-browser-check', '--disable-extensions',
+                    '--disable-background-networking', '--disable-component-update', '--disable-sync',
                     '--force-device-scale-factor=1', f'--window-size={W},{H}', '--no-sandbox', f'{self.base}/video/{vid}/render'])
         try: self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         except OSError as e: raise Failed('Браузер не запустився: ' + str(e))
