@@ -172,11 +172,13 @@ const singFor=async ms=>{await p.locator('#singBtn').click();await p.waitForFunc
   const banner=await p.locator('#errorBanner').isVisible();await p.waitForTimeout(ms);await p.locator('#stopBtn').click();
   await p.waitForFunction(()=>window.Luma.test.state().mode==='idle'&&!document.getElementById('singBtn').disabled,null,{timeout:9000});await p.waitForTimeout(400);return banner;};
 await setAudio(true);
-const long=await p.evaluate(()=>{
-  // a 600 s song whose last sung line is at its very end, so a full pass really is 600 s long
-  window.Luma.test.closeTrace();window.LUMA_SONG.duration=600;window.LUMA_SONG.lyrics.push({a:598,b:599.6,words:[{a:598,b:599.6,w:'ла',c:1}]});
-  const r=window.Luma.test.injectTake({a:0,b:600,points:[],audio:true});
-  window.Luma.test.setRange(1,3);window.Luma.test.seek(1);return r.id;
+const {id:long,end}=await p.evaluate(()=>{
+  // a song whose last sung line is at its very end, so a full pass really is that long: 600 s at 48 kHz, as long as one
+  // 57.6 MB WAV at the rate this tab records at (the host's output rate: 96 kHz makes it 300 s, 44.1 kHz 653 s)
+  const end=Math.round(28.8e6/window.Luma.diagnostics().sampleRate);
+  window.Luma.test.closeTrace();window.LUMA_SONG.duration=end;window.LUMA_SONG.lyrics.push({a:end-2,b:end-.4,words:[{a:end-2,b:end-.4,w:'ла',c:1}]});
+  const r=window.Luma.test.injectTake({a:0,b:end,points:[],audio:true});
+  window.Luma.test.setRange(1,3);window.Luma.test.seek(1);return {id:r.id,end};
 });
 // a punch into a take this long cannot keep its old WAV for undo beside the full replacement, so it keeps no undo
 assert(!(await singFor(3200)),'a punch past the WAV budget records instead of refusing');
@@ -184,7 +186,7 @@ const punched=await p.evaluate(id=>({take:window.Luma.test.takes().find(t=>t.id=
 assert(punched.take.punches===1&&punched.take.hasAudio&&!punched.undo&&punched.take.bytes<100*1024*1024,
   'the punch merged into the take and kept no undo copy it had no room for '+JSON.stringify({punches:punched.take.punches,bytes:punched.take.bytes,undo:punched.undo}));
 // a fresh full pass needs room the old voice holds: that voice leaves memory, the attempt and its line stay
-await p.evaluate(()=>{window.Luma.test.closeTrace();window.Luma.test.clearRange();window.Luma.test.seek(600);});
+await p.evaluate(end=>{window.Luma.test.closeTrace();window.Luma.test.clearRange();window.Luma.test.seek(end);},end);
 assert(!(await singFor(2600)),'starting at song end with a full WAV budget records instead of refusing');
 const freed=await p.evaluate(id=>{const T=window.Luma.test;return {old:T.takes().find(t=>t.id===id),newest:T.takes()[0],
   unload:(()=>{const e=new Event('beforeunload',{cancelable:true});window.dispatchEvent(e);return e.defaultPrevented;})(),
@@ -194,7 +196,7 @@ assert(freed.old&&!freed.old.hasAudio&&freed.old.bytes===0&&freed.old.points===p
 assert(!freed.unload&&!/[Зз]береж/.test(freed.hint+freed.titles),'a WAV nobody downloaded neither holds the tab open nor asks for a save '+JSON.stringify({unload:freed.unload,hint:freed.hint}));
 // with the switch off there is no WAV to budget, so the very same attempt is allowed
 await setAudio(false);
-await p.evaluate(()=>{window.Luma.test.closeTrace();window.Luma.test.seek(600);document.getElementById('errorBanner').hidden=true;});
+await p.evaluate(end=>{window.Luma.test.closeTrace();window.Luma.test.seek(end);document.getElementById('errorBanner').hidden=true;},end);
 await p.locator('#singBtn').click();await p.waitForFunction(()=>window.Luma.test.state().mode==='singing',null,{timeout:9000});
 assert(await p.locator('#errorBanner').isHidden(),'with the recording switch off the WAV budget no longer stops a new attempt');
 await p.locator('#stopBtn').click();await p.waitForFunction(()=>window.Luma.test.state().mode==='idle',null,{timeout:9000});await p.waitForTimeout(600);
