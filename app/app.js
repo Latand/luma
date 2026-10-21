@@ -1437,13 +1437,25 @@ function draw(t){
  g.fillStyle=lit;g.fillRect(0,0,W,H);
  g.fillStyle='#090d15';g.fillRect(0,0,b.left-7,H);// pitch rail: note names keep their own strip, off the roll
  g.strokeStyle='#ffffff0a';g.lineWidth=1;g.beginPath();g.moveTo(b.left-6.5,0);g.lineTo(b.left-6.5,H);g.stroke();
+ // the rail is a piano keyboard on its side, one semitone per row: a black key on every sharp row, white keys around
+ // them. That is why the named notes sit unevenly: E–F and B–C are one row apart (no black key between), the rest two.
+ const kw=b.left-7,bk=Math.round(kw*.58),k0=Math.floor(s.rangeLo)-1,k1=Math.ceil(s.rangeHi)+1;
+ g.save();g.beginPath();g.rect(0,b.top,kw,b.bottom-b.top);g.clip();
+ const ivory=g.createLinearGradient(0,0,kw,0);ivory.addColorStop(0,'#8995a8');ivory.addColorStop(1,'#c9d2df');g.fillStyle=ivory;g.fillRect(0,b.top,kw,b.bottom-b.top);
+ g.strokeStyle='#3b4456';g.lineWidth=1;g.beginPath();
+ for(let n=k0;n<=k1;n++){const pc=(n%12+12)%12;
+  if(pc===4||pc===11){const yy=Math.round(y(n+.5))+.5;g.moveTo(0,yy);g.lineTo(kw,yy);}   // E|F, B|C: the keys meet along their whole length
+  else if(BLACK.has(pc)){const yy=Math.round(y(n))+.5;g.moveTo(bk,yy);g.lineTo(kw,yy);}}   // elsewhere the split runs out of the black key's middle
+ g.stroke();
+ for(let n=k0;n<=k1;n++){if(!BLACK.has((n%12+12)%12))continue;g.fillStyle='#0b0f17';g.beginPath();g.roundRect(0,y(n+.5)+.5,bk,Math.max(1,rowH-1),[0,2.5,2.5,0]);g.fill();}
+ g.restore();
  // piano-roll rows: black keys in a darker band, C lines drawn and named clearly, every other semitone a whisper
- const named=n=>{const pc=(n%12+12)%12;return pc===0||(rowH>=16||(rowH>=11?!BLACK.has(pc):rowH>=7&&(pc===4||pc===7)));};
+ const named=n=>{const pc=(n%12+12)%12;return pc===0||(rowH>=16?bk>=26||!BLACK.has(pc):rowH>=11?!BLACK.has(pc):rowH>=7&&(pc===4||pc===7));};
  g.textAlign='right';g.textBaseline='middle';
- for(let n=Math.ceil(s.rangeLo);n<=s.rangeHi;n++){const yy=y(n),pc=(n%12+12)%12,isC=pc===0;
-  if(BLACK.has(pc)){g.fillStyle='#ffffff05';g.fillRect(b.left,y(n+.5),b.right-b.left,rowH);}
+ for(let n=Math.ceil(s.rangeLo);n<=s.rangeHi;n++){const yy=y(n),pc=(n%12+12)%12,isC=pc===0,black=BLACK.has(pc);
+  if(black){g.fillStyle='#ffffff05';g.fillRect(b.left,y(n+.5),b.right-b.left,rowH);}
   g.strokeStyle=isC?'#9fb4d133':'#93a8c40f';g.lineWidth=1;g.beginPath();g.moveTo(b.left,y(n+.5));g.lineTo(b.right,y(n+.5));g.stroke();
-  if(!named(n))continue;g.font=(isC?'600 ':'')+'11px '+mono;g.fillStyle=isC?'#d3deee':BLACK.has(pc)?'#93a2b8':'#b3c1d6';g.fillText(name(n),b.left-11,yy);}
+  if(!named(n))continue;g.font=(isC?'700 ':'600 ')+(black?'9px ':'11px ')+mono;g.fillStyle=black?'#aab6c8':isC?'#0a101a':'#2a3343';g.fillText(name(n),black?bk-3:kw-4,yy);}
  g.textAlign='center';g.font='11px '+mono;const tstep=v.span>10?2:1;
  for(let a=Math.ceil(v.a);a<v.b;a++){const xx=x(a),major=a%tstep===0;
   g.strokeStyle=major?'#93a8c414':'#93a8c407';g.beginPath();g.moveTo(xx,b.top);g.lineTo(xx,b.bottom+(major?6:3));g.stroke();
