@@ -332,9 +332,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def activity(self):
         """Append a batch of activity events. Pages of another origin may not write here; a request without an Origin
-        header (a local script, a test) may."""
-        origin = self.headers.get('Origin')
-        if origin and origin != 'http://' + (self.headers.get('Host') or ''): return self.send(403, 'origin', 'text/plain')
+        header (a local script, a test) may. The page's own origin is https when it comes through the LAN TLS proxy."""
+        origin = self.headers.get('Origin'); host = self.headers.get('Host') or ''
+        if origin and origin not in ('http://' + host, 'https://' + host): return self.send(403, 'origin', 'text/plain')
         try: n = int(self.headers.get('Content-Length') or 0)
         except ValueError: n = -1
         if n > MAX_ACTIVITY: return self.send(413, 'too large', 'text/plain')

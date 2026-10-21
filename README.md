@@ -49,6 +49,8 @@ of your voice, no server after the file is built.
   without gaps. Seek during playback and the music picks up from there.
 - **Vocal on/off.** One button (V) mutes the original vocal stem so you hear only the backing and yourself.
 - Two speeds (1× and 0.8× with pitch preserved), vocal octave shift, mix balance, note editor, fragment verification.
+- **VR with the room in view.** In a headset's browser (Quest Browser) the header shows **VR**: the trainer becomes one
+  panel in Luma's own look, 1.5 m in front of the eyes over the passthrough. See «In a VR headset» below.
 - Ukrainian interface. Works offline once built; needs `http://localhost` for the microphone (browsers refuse the audio
   worklet on `file://`).
 
@@ -95,6 +97,27 @@ Details in [docs/design/AUTOPICK.md](docs/design/AUTOPICK.md).
 **Hardware.** A 5-minute song takes about 4 minutes on an RTX 3060 (Demucs ≈ 50 s, pYIN ≈ 1 min, CREPE ≈ 30 s). CPU works
 and takes considerably longer. Python 3.11, FFmpeg and a few GB of RAM are required; `requirements.txt` pins PyTorch 2.10.
 
+### In a VR headset (Quest)
+
+Studio listens on `127.0.0.1` only. To reach it from the headset, put TLS in front of it on the LAN, for example a user
+service running `ncat --ssl --ssl-cert cert.pem --ssl-key key.pem -l 8790 --keep-open --allow 192.168.5.0/24 --sh-exec
+"ncat 127.0.0.1 8792"`. HTTPS is required: the microphone and WebXR work only in a secure context. With a self-signed
+certificate the headset's browser warns once per address. In the headset open `https://<this PC>:8790/`, open a song and
+press **VR** in its header (`app/xr.js`):
+
+- an immersive-ar session: the room stays visible, and one panel 1.5 m away holds the song and its status, the
+  readout, the words, the chart and the controls (Співати, Слухати, Спочатку, −5 / +5 с, Вокал, Повтор, 1× / 0.8×,
+  the auto-marked fragments ‹ ›, the level, Сюди, Вийти). A press on the progress bar seeks.
+- the panel mirrors the page: its labels are read from the page's elements and its buttons click the page's own, so
+  scoring, history and settings are the same as on the desktop. History and settings belong to the address, so
+  `https://<this PC>:8790` keeps its own.
+- point with a controller or a hand; press with the trigger or a pinch. The grip, B / Y, a pressed thumbstick or
+  **Сюди** bring the panel in front of the eyes again.
+- the microphone permission is asked before the session starts: a browser cannot show it inside VR. If that took
+  long, press **VR** once more.
+- the headset's speakers reach its microphone. Use headphones, or switch **Вокал** off, so the original singer is not
+  scored as your voice.
+
 ## Honesty about the map
 
 Every automatic map is a draft. Confident (`ok`) frames typically cover 20–35 % of a real song; the rest is instrumental,
@@ -134,7 +157,9 @@ repeats, the history read without creating the base, the home button and the rea
 few attempts, other songs through `/targets`, wordless notes, 200 four-minute attempts under 1.5 s, the daily hint,
 390 px and 1440 px, and `file://`. `cloud.mjs` checks the dust of past takes: built and painted in a worker, the take on
 screen and a punch-in left out, drawn under the target and the live line, faint, wordless notes unchanged, the record
-line gone with its saved pref, and frame time with 20 takes at 390 px and 1440 px under 1× and 4× CPU throttle. Every suite requires a clean console. Set `LUMA_BROWSER=/path/to/chrome` to use a specific
+line gone with its saved pref, and frame time with 20 takes at 390 px and 1440 px under 1× and 4× CPU throttle. `xr.mjs` enters VR on
+Meta's WebXR emulator (the `iwer` dev dependency) as a Quest 3: the panel 1.5 m ahead with the chart at its size, «Слухати», «Вокал»
+and a seek on the progress bar by a controller's trigger, «Сюди» by a pinch, «Вийти». Every suite requires a clean console. Set `LUMA_BROWSER=/path/to/chrome` to use a specific
 Chromium build.
 
 ## Layout
@@ -142,7 +167,7 @@ Chromium build.
 ```
 app/       head.html (styles + markup, {{TITLE}} / {{ARTIST}} placeholders), workers.html (AudioWorklet capture + YIN worker + the worker that builds and paints the dust of past takes), app.js,
            activity.js (activity log, shared with Studio), latency.js (microphone offset estimate from attempts),
-           burn.js (the burn of a lost life, one canvas draw function)
+           burn.js (the burn of a lost life, one canvas draw function), xr.js (the VR panel in a headset's browser)
 studio/    prepare_song.py (pipeline), build_html.py (package → HTML, --rebuild), studio_server.py + studio.html, covers.py, difficulty.py, luma-studio.sh,
            activity_report.py (digest of the activity log)
 examples/  make_demo.py (synthetic demo song)

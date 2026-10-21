@@ -1326,10 +1326,12 @@ async function playTake(t){
   if(t.hasAudio)addSource(t.buffer,s.gains.voice,when,off/t.speed,dur,()=>{naturalEnd(token);});else lead.onended=()=>naturalEnd(token);if(changed)setRangeScale();
  }catch(e){error(e.message);}finally{if(token===s.cancel){s.busy=false;sync();renderTakes();}}
 }
-function resize(){const r=$('chartWrap').getBoundingClientRect(),q=$('timelineWrap').getBoundingClientRect();W=r.width;H=r.height;TW=q.width;TH=q.height;DPR=Math.min(window.devicePixelRatio||1,2);canvas.width=Math.round(W*DPR);canvas.height=Math.round(H*DPR);g.setTransform(DPR,0,0,DPR,0,0);tl.width=Math.round(TW*DPR);tl.height=Math.round(TH*DPR);tg.setTransform(DPR,0,0,DPR,0,0);measureStage();if(W>0&&H>0){s.dirty=false;draw(now());}else s.dirty=true;requestDraw();}
+// In the headset (app/xr.js) the chart takes the size of its place on the panel, not of the hidden page.
+function resize(){const r=s.xr?s.xr.chart:$('chartWrap').getBoundingClientRect(),q=$('timelineWrap').getBoundingClientRect();W=r.width;H=r.height;TW=q.width;TH=q.height;DPR=s.xr?s.xr.dpr:Math.min(window.devicePixelRatio||1,2);canvas.width=Math.round(W*DPR);canvas.height=Math.round(H*DPR);g.setTransform(DPR,0,0,DPR,0,0);tl.width=Math.round(TW*DPR);tl.height=Math.round(TH*DPR);tg.setTransform(DPR,0,0,DPR,0,0);measureStage();if(W>0&&H>0){s.dirty=false;draw(now());}else s.dirty=true;requestDraw();}
 // The readout, the lyric band and the rail are flow items inside the stage; the plot takes what is left between them.
 // Measured on layout changes only (resize and sync), never per frame, so the piano roll can never be drawn under them.
-function measureStage(){const box=$('chartWrap').getBoundingClientRect();const below=el=>el&&!el.hidden?el.getBoundingClientRect().bottom-box.top:0;
+function measureStage(){if(s.xr){s.dense=false;s.headH=s.railH=0;return;}   // the panel draws the readout and the words above the chart
+ const box=$('chartWrap').getBoundingClientRect();const below=el=>el&&!el.hidden?el.getBoundingClientRect().bottom-box.top:0;
  const dense=box.height<520||innerWidth<=720;if(dense!==s.dense){s.dense=dense;$('chartWrap').dataset.dense=dense?'1':'0';}
  s.headH=Math.max(below($('stageHead')),below($('lyricBand')));const rail=$('stageRail');s.railH=rail?box.bottom-rail.getBoundingClientRect().top:0;}
 // Phones, and phones held sideways: the page scrolls, so the stage takes exactly the height that leaves «Співати» on the first
@@ -1572,7 +1574,7 @@ function updateReadout(t){
  renderLyric(t);placeCountdown();
  if($('settingsDialog').open)$('diagnostics').textContent='YIN · '+(s.ctx?(s.ctx.sampleRate/1000).toFixed(1)+' kHz':'мікрофон вимкнено')+'\nВікно аналізу: '+s.windowMs.toFixed(1)+' мс\nОбчислення останнього кадру: '+s.computeMs.toFixed(2)+' мс\nЦе не вимір повної затримки.\nКалібрування: ручний зсув '+prefs.latency+' мс';
 }
-function requestDraw(){if(!s.raf&&!document.hidden)s.raf=requestAnimationFrame(tick);}
+function requestDraw(){if(!s.raf&&!document.hidden&&!s.xr)s.raf=requestAnimationFrame(tick);}   // the headset's frames call tick() in VR
 function tick(wall){s.raf=0;const moving=s.mode!=='idle'||!!s.stream||s.busy;if(wall-s.lastDraw>=(reduced.matches?32:15)){const t=now(),wasDirty=s.dirty;
  if(s.mode==='singing'&&s.live&&s.transport){scoreAdvance(s.live,s.history,Math.min(t-.18*s.transport.speed,s.transport.end));livesStep();}
  if(wasDirty||moving){s.dirty=false;draw(t);s.lastDraw=wall;}if(wall-s.lastUI>55||wasDirty){updateReadout(t);s.lastUI=wall;}}if(moving||s.dirty)requestDraw();}
@@ -1649,7 +1651,8 @@ window.addEventListener('keydown',e=>{if(e.ctrlKey||e.metaKey||e.altKey||e.repea
  else if(e.code==='ArrowLeft'||e.code==='ArrowRight'){if(s.mode==='singing')return;e.preventDefault();applySeek(now()+(e.code==='ArrowRight'?1:-1)*(e.shiftKey?5:1));}else if(e.key===',')jumpMiss(-1);else if(e.key==='.')jumpMiss(1);
  else if(e.code==='KeyA')markRange('a');else if(e.code==='KeyB')markRange('b');else if(e.code==='KeyL'){$('loopBtn').click();}else if(e.code==='KeyV'){$('vocalBtn').click();}});
 window.addEventListener('beforeunload',e=>{if(s.unsaved||s.mode==='singing'){e.preventDefault();e.returnValue='';}});
-document.addEventListener('visibilitychange',()=>{if(document.hidden){if(s.raf)cancelAnimationFrame(s.raf);s.raf=0;if(s.mode!=='idle'){prefs.loop=false;stopTransport('hidden');toast('Вкладку приховано — відтворення зупинено.');}}else{s.dirty=true;requestDraw();}});
+document.addEventListener('visibilitychange',()=>{if(s.xr)return;if(document.hidden){   // in VR the session's own visibility counts (app/xr.js)
+ if(s.raf)cancelAnimationFrame(s.raf);s.raf=0;if(s.mode!=='idle'){prefs.loop=false;stopTransport('hidden');toast('Вкладку приховано — відтворення зупинено.');}}else{s.dirty=true;requestDraw();}});
 addEventListener('resize',fitStage);
 new ResizeObserver(resize).observe($('chartWrap'));new ResizeObserver(resize).observe($('timelineWrap'));
 // ── «Розрахувати затримку» (docs/design/LATENCY_AUTOCAL.md): the microphone offset the recorded attempts imply ──────
@@ -1817,6 +1820,12 @@ const historyHooks={
  synthPoints:(spec,a,b,speed=1)=>{const tr=synthTrace(spec,{a,b,speed,latency:prefs.latency});return Array.from(tr.segments[0].cents,(c,i)=>({t:i*tr.hop,f:c===HIST.noPitch?null:440*2**((c/100-69)/12),confidence:tr.segments[0].conf[i]/255,db:tr.segments[0].db[i]}));},
  latency:()=>({prefs:prefs.latency,result:s.lat?.result?{...s.lat.result}:null,hint:s.latHint,check:localStorage.getItem(LAT.key)})
 };
+// The headset (app/xr.js): a panel in VR over the room mirrors this page; the chart is drawn at its place on the panel,
+// on the headset's frames.
+window.LumaXR?.attach({chart:canvas,begin(place){s.xr=place;resize();sync();act('xr',{state:'enter'});},end(){s.xr=null;resize();sync();act('xr',{state:'exit'});},
+ frame(wall){const was=s.lastDraw;s.lastDraw=-Infinity;tick(wall);if(s.lastDraw===wall)return true;s.lastDraw=was;return false;},audio:ensureContext,
+ hidden(){if(s.mode!=='idle'){prefs.loop=false;stopTransport('hidden');toast('Шолом знято або відкрите меню: відтворення зупинено.');}},
+ time:()=>({t:now(),duration:song.duration,range:customRange()?{a:s.range.a,b:s.range.b}:null}),seek:applySeek,say:toast});
 window.Luma={diagnostics:()=>({mode:s.mode,busy:s.busy,pending:s.awaitFinish,time:now(),range:{...s.range},takeCount:s.takes.length,takes:s.takes.map(t=>({id:t.id,endSong:t.endSong,duration:t.duration,samples:t.duration*t.sampleRate,sampleRate:t.sampleRate,points:t.points.length,stats:t.stats,match:scorePct(t.score),frames:t.score.frames.length})),mic:!!s.stream,frequency:s.current?.f??null,computeMs:s.computeMs,windowMs:s.windowMs,contextState:s.ctx?.state,bufferDurations:[...s.bufs].map(([k,b])=>({speed:k,back:b.back.duration,fore:b.fore.duration}))}),targetAt:t=>targetAt(t),song:()=>({title:song.title,duration:song.duration,singEnd:singEnd(),metrics:song.metrics,notes:song.notes.length,phrases:song.phrases.length,lyrics:song.lyrics.length}),
  // Test hooks: pure scoring and synthetic takes (silent WAV) so the review path can be exercised without a microphone.
  test:{GRID,autostartBlock:null,score:(points,meta,upTo)=>{const sc=newScore(meta);scoreAdvance(sc,points,upTo??Infinity);return {target:sc.target,hit:sc.hit,sung:sc.sung,pct:scorePct(sc),frames:sc.frames,notes:[...sc.notes]};},
