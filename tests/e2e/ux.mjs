@@ -173,9 +173,10 @@ const singFor=async ms=>{await p.locator('#singBtn').click();await p.waitForFunc
   await p.waitForFunction(()=>window.Luma.test.state().mode==='idle'&&!document.getElementById('singBtn').disabled,null,{timeout:9000});await p.waitForTimeout(400);return banner;};
 await setAudio(true);
 const {id:long,end}=await p.evaluate(()=>{
-  // a song whose last sung line is at its very end, so a full pass really is that long: 600 s at 48 kHz, as long as one
-  // 57.6 MB WAV at the rate this tab records at (the host's output rate: 96 kHz makes it 300 s, 44.1 kHz 653 s)
-  const end=Math.round(28.8e6/window.Luma.diagnostics().sampleRate);
+  // a song whose last sung line is at its very end, so a full pass really is that long: as long as one 57.6 MB WAV at
+  // the rate this tab records at (the host's output rate), capped at 600 s because the recorder refuses more than 601 s.
+  // 48 kHz gives 600 s, 96 kHz 300 s, 44.1 kHz the 600 s cap (52.9 MB): one WAV fits 100 MiB and two do not at each
+  const end=Math.min(600,Math.round(28.8e6/window.Luma.diagnostics().sampleRate));
   window.Luma.test.closeTrace();window.LUMA_SONG.duration=end;window.LUMA_SONG.lyrics.push({a:end-2,b:end-.4,words:[{a:end-2,b:end-.4,w:'ла',c:1}]});
   const r=window.Luma.test.injectTake({a:0,b:end,points:[],audio:true});
   window.Luma.test.setRange(1,3);window.Luma.test.seek(1);return {id:r.id,end};
