@@ -12,12 +12,14 @@
   GET  /cover/<name>.html        the album cover cached beside that trainer's package (studio/covers.py)
   GET  /demo                     the synthetic demo trainer, if it has been built
   GET  /activity.js              the activity logger Studio shares with the trainers (docs/ACTIVITY_LOG.md)
+  /video/<id>/…, GET /videos     camera videos of a sitting (studio/video.py, docs/design/CAMERA_VIDEO_BUILD_BRIEF.md §5.4)
 
-Run: python studio/studio_server.py [--port 8792] [--songs DIR] [--copy-to DIR]
+Run: python studio/studio_server.py [--port 8792] [--songs DIR] [--copy-to DIR] [--video-budget BYTES] [--video-min-seconds S]
+     [--render-deadline-factor F]
 """
 from __future__ import annotations
 import argparse, base64, datetime, json, os, re, shutil, subprocess, sys, threading, time, urllib.parse, uuid
-import covers, difficulty
+import covers, difficulty, video
 from array import array
 from concurrent.futures import ThreadPoolExecutor
 from build_html import wrap
@@ -26,6 +28,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 ap = argparse.ArgumentParser(); ap.add_argument('--port', type=int, default=int(os.environ.get('LUMA_STUDIO_PORT', '8792'))); ap.add_argument('--songs', default=str(ROOT / 'songs')); ap.add_argument('--copy-to', default=os.environ.get('LUMA_COPY_TO', ''))
+ap.add_argument('--video-budget', type=int, default=5 << 30, help='bytes all camera videos may take together (default 5 GiB)')
+ap.add_argument('--video-min-seconds', type=float, default=30, help='a sitting shorter than this is not composed')
+ap.add_argument('--render-deadline-factor', type=float, default=3, help='render deadline = factor × video length + 60 s')
 args = ap.parse_args()
 SONGS = Path(args.songs).expanduser().resolve(); INBOX = SONGS / 'inbox'; LOGS = SONGS / 'logs'
 for d in (SONGS, INBOX, LOGS): d.mkdir(parents=True, exist_ok=True)
@@ -219,6 +224,8 @@ def worker():
                 except OSError as e: job['copy_error'] = str(e)
 threading.Thread(target=worker, daemon=True).start()
 threading.Thread(target=covers.backfill, args=(SONGS,), daemon=True).start()  # covers of songs prepared before covers existed
+VIDEOS = video.Videos(SONGS, ROOT, base=f'http://127.0.0.1:{args.port}', budget=args.video_budget, min_seconds=args.video_min_seconds, deadline_factor=args.render_deadline_factor)
+VIDEO_PATH = re.compile(r'^/video/([0-9a-f-]{36})(?:/([a-z0-9.-]+))?$')
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -231,6 +238,8 @@ class Handler(BaseHTTPRequestHandler):
             demo = ROOT / 'examples' / 'demo' / 'Luma_Demo.html'
             if demo.is_file(): return self.send(200, demo.read_bytes())
             return self.send(404, 'Демо ще не зібрано. Додай готовий тренажер до бібліотеки.', 'text/plain; charset=utf-8')
+        if u.path == '/videos': return self.send(200, json.dumps(VIDEOS.listing()), 'application/json')
+        if u.path.startswith('/video/'): return self.video_get(u)
         if u.path == '/activity.js': return self.send(200, (ROOT / 'app' / 'activity.js').read_bytes(), 'text/javascript; charset=utf-8')
         if u.path == '/status':
             now = time.time()
@@ -266,6 +275,7 @@ class Handler(BaseHTTPRequestHandler):
         return self.send(404, 'not found', 'text/plain')
     def do_PUT(self):
         u = urllib.parse.urlparse(self.path)
+        if u.path.startswith('/video/'): return self.video_write(u, 'PUT')
         if u.path not in ('/upload', '/import'): return self.send(404, 'not found', 'text/plain')
         q = urllib.parse.parse_qs(u.query); name = os.path.basename(q.get('name', ['song'])[0]); n = int(self.headers.get('Content-Length', '0'))
         limit = MAX_IMPORT if u.path == '/import' else MAX_UPLOAD
@@ -321,6 +331,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)
         if u.path == '/activity': return self.activity()
+        if u.path.startswith('/video/'): return self.video_write(u, 'POST')
         if u.path != '/retry': return self.send(404, 'not found', 'text/plain')
         job_id = urllib.parse.parse_qs(u.query).get('id', [''])[0]
         with lock:
@@ -329,6 +340,84 @@ class Handler(BaseHTTPRequestHandler):
             job['state'] = 'queued'
             for key in ('started', 'finished', 'error', 'log'): job.pop(key, None)
         return self.send(200, '{}', 'application/json')
+
+    def do_DELETE(self):
+        u = urllib.parse.urlparse(self.path)
+        if u.path.startswith('/video/'): return self.video_write(u, 'DELETE')
+        return self.send(404, 'not found', 'text/plain')
+
+    # ── camera videos (studio/video.py) ──
+    def same_origin(self) -> bool:
+        origin = self.headers.get('Origin'); return not origin or origin == 'http://' + (self.headers.get('Host') or '')
+    def body(self, limit: int) -> bytes | None:
+        try: n = int(self.headers.get('Content-Length') or 0)
+        except ValueError: return None
+        if n <= 0 or n > limit: return None
+        data = self.rfile.read(n); return data if len(data) == n else None
+    def video_get(self, u):
+        m = VIDEO_PATH.match(u.path)
+        if not m or not video.ID.match(m.group(1)): return self.send(404, 'not found', 'text/plain')
+        vid, what = m.group(1), m.group(2); d = VIDEOS.path(vid); take = VIDEOS.take(vid)
+        if what == 'take' and take: return self.send(200, (d / 'take.json').read_bytes(), 'application/json')
+        if what == 'render' and take:
+            p = VIDEOS.trainer(take)
+            if p: return self.send(200, p.read_bytes())
+        if what == 'video.mp4': return self.send_file(d / 'video.mp4', 'video/mp4')
+        if what == 'thumb.jpg': return self.send_file(d / 'thumb.jpg', 'image/jpeg')
+        return self.send(404, 'not found', 'text/plain')
+    def send_file(self, p: Path, ctype: str):
+        """A file with HTTP Range (206), so a player can seek without loading the whole video."""
+        try: f = open(p, 'rb'); size = os.fstat(f.fileno()).st_size
+        except OSError: return self.send(404, 'not found', 'text/plain')
+        with f:
+            a, b, code = 0, size - 1, 200; rng = re.match(r'^bytes=(\d*)-(\d*)$', self.headers.get('Range') or '')
+            if rng and (rng.group(1) or rng.group(2)):
+                if rng.group(1): a = int(rng.group(1)); b = min(size - 1, int(rng.group(2))) if rng.group(2) else size - 1
+                else: a = max(0, size - int(rng.group(2)))
+                if a > b or a >= size:
+                    self.send_response(416); self.send_header('Content-Range', f'bytes */{size}'); self.send_header('Content-Length', '0'); self.end_headers(); return
+                code = 206
+            self.send_response(code); self.send_header('Content-Type', ctype); self.send_header('Accept-Ranges', 'bytes'); self.send_header('Content-Length', str(b - a + 1))
+            if code == 206: self.send_header('Content-Range', f'bytes {a}-{b}/{size}')
+            self.end_headers(); f.seek(a); left = b - a + 1
+            try:
+                while left:
+                    chunk = f.read(min(left, 1 << 20))
+                    if not chunk: break
+                    self.wfile.write(chunk); left -= len(chunk)
+            except (BrokenPipeError, ConnectionResetError): pass
+    def video_write(self, u, method: str):
+        m = VIDEO_PATH.match(u.path)
+        if not m: return self.send(404, 'not found', 'text/plain')
+        if not self.same_origin(): return self.send(403, 'origin', 'text/plain')
+        vid, what = m.group(1), m.group(2); q = urllib.parse.parse_qs(u.query)
+        if not video.ID.match(vid): return self.send(404, 'not found', 'text/plain')
+        def num(key):
+            try: return int(q.get(key, [''])[0])
+            except ValueError: return None
+        if method == 'DELETE' and what is None:
+            return self.send(200 if VIDEOS.remove(vid) else 404, '{}', 'application/json')
+        if method == 'PUT' and what in ('camera', 'game'):
+            seq = num('seq'); data = self.body(video.MAX_CHUNK if what == 'camera' else video.MAX_GAME)
+            if seq is None or data is None: return self.send(400, 'bad chunk', 'text/plain')
+            code = VIDEOS.append_camera(vid, seq, data) if what == 'camera' else VIDEOS.append_game(vid, seq, data, num('frames'))
+            return self.send(code, '{}', 'application/json')
+        if method == 'PUT' and what == 'voice':
+            k = num('seg')
+            try: n = int(self.headers.get('Content-Length') or 0)
+            except ValueError: n = 0
+            if k is None or not 0 < n <= video.MAX_VOICE: return self.send(400, 'bad voice', 'text/plain')
+            return self.send(VIDEOS.put_voice(vid, k, self.rfile, n), '{}', 'application/json')
+        if method == 'PUT' and what == 'take':
+            data = self.body(video.MAX_TAKE)
+            if data is None: return self.send(400, json.dumps({'composed': False, 'reason': 'invalid'}), 'application/json')
+            code, out = VIDEOS.put_take(vid, data); return self.send(code, json.dumps(out), 'application/json')
+        if method == 'POST' and what in ('rendered', 'render-failed'):
+            error = None
+            if what == 'render-failed':
+                data = self.body(64 << 10) or b''; error = data.decode('utf-8', errors='replace') or 'render failed'
+            return self.send(VIDEOS.rendered(vid, error), '{}', 'application/json')
+        return self.send(404, 'not found', 'text/plain')
 
     def activity(self):
         """Append a batch of activity events. Pages of another origin may not write here; a request without an Origin
@@ -350,6 +439,13 @@ class Handler(BaseHTTPRequestHandler):
         except OSError: return self.send(500, 'not written', 'text/plain')
         self.send_response(204); self.end_headers()
 
+def shutdown(*_):
+    """A Studio that stops ends the render browser it started, so no headless browser outlives it."""
+    VIDEOS.stop_render(wait=True); os._exit(0)
+
 if __name__ == '__main__':
+    import signal
+    for sig in (signal.SIGTERM, signal.SIGINT): signal.signal(sig, shutdown)
+    VIDEOS.start()
     print(f'Luma Studio on http://127.0.0.1:{args.port}/  (songs: {SONGS})', flush=True)
     ThreadingHTTPServer(('127.0.0.1', args.port), Handler).serve_forever()
