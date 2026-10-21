@@ -154,7 +154,8 @@ few attempts, other songs through `/targets`, wordless notes, 200 four-minute at
 390 px and 1440 px, and `file://`. `cloud.mjs` checks the dust of past takes: built and painted in a worker, the take on
 screen and a punch-in left out, drawn under the target and the live line, faint, wordless notes unchanged, the record
 line gone with its saved pref, and frame time with 20 takes at 390 px and 1440 px under 1× and 4× CPU throttle. `video.mjs` runs its own Studios with Chromium's fake camera and a microphone fed with
-non-repeating bursts: the switch off by default and off outside Studio, one prompt and one recorder per sitting, what Studio
+non-repeating bursts, each group of checks in a process and a browser of its own, so its memory stays under 2 GB beside
+the render browser and ffmpeg: the switch off by default and off outside Studio, one prompt and one recorder per sitting, what Studio
 stores (and 409 / 403 for a wrong chunk or origin), the alignment, the latency applied once, the MP4's codecs and length,
 the frames (no chrome, the camera in its circle, the note states, lives and dust the take implies, the burn at each loss,
 the count-in of a rewind), a lost camera, a camera denied, missing or busy, the 30 s rule inside «Заняття», eviction across

@@ -204,6 +204,7 @@ class Videos:
         self.lock = threading.Lock(); self.seq: dict[str, int] = {}; self.game_seq: dict[str, int] = {}; self.state: dict[str, dict] = {}
         self.queue: list[str] = []; self.wake = threading.Event(); self.current: str | None = None; self.cancel: set[str] = set()
         self.proc: subprocess.Popen | None = None; self.render_done = threading.Event(); self.render_error: str | None = None; self.cache: dict[str, tuple[float, dict]] = {}
+        self.rows: dict[str, tuple[tuple[int, int], dict]] = {}   # listing rows of finished folders, one per folder that exists
         self.dir.mkdir(parents=True, exist_ok=True)
 
     # paths and record
@@ -292,28 +293,42 @@ class Videos:
 
     # the listing
     def listing(self) -> dict:
-        out = []
+        """Every video folder, newest first, and the bytes they take. Studio's page polls this every few seconds, so a
+        finished folder (ready or failed, which never changes again) is read once and kept until its folder or its take
+        record changes; only the videos still recording or composing are measured again on each poll."""
+        out = []; used = 0; seen = set()
         for d in sorted(self.dir.iterdir()) if self.dir.is_dir() else []:
-            if not d.is_dir() or not ID.match(d.name): continue
-            vid = d.name; t = self.take(vid); st = dict(self.state.get(vid) or {})
-            if (d / 'video.mp4').is_file(): state = 'ready'
-            elif (d / 'failed.json').is_file():
-                state = 'failed'
-                try: st['error'] = json.loads((d / 'failed.json').read_text(encoding='utf-8')).get('error')
-                except (OSError, ValueError): st['error'] = None
-            elif t: state = st.get('state') or 'queued'
-            else: state = 'recording'
-            item = {'id': vid, 'state': state, 'bytes': folder_bytes(d), 'title': None, 'startedAt': None, 'duration': None, 'segments': 0, 'progress': None}
-            if t: item.update(title=t.get('title'), startedAt=t.get('startedAt'), duration=round(duration(t), 2), segments=len(t['segments']))
-            if state == 'rendering':
-                exp = max(1, math.ceil((item['duration'] or 0) * FPS)); item['progress'] = min(.99, (st.get('frames') or 0) / exp)
-            if state == 'failed': item['error'] = st.get('error')
-            if (d / 'align.json').is_file():
-                try: item['approximateSync'] = json.loads((d / 'align.json').read_text(encoding='utf-8')).get('approximateSync')
-                except (OSError, ValueError): pass
-            out.append(item)
+            if not d.is_dir() or not ID.match(d.name):
+                used += folder_bytes(d) if d.is_dir() else (d.stat().st_size if d.is_file() else 0); continue
+            vid = d.name; seen.add(vid)
+            try: key = (d.stat().st_mtime_ns, (d / 'take.json').stat().st_mtime_ns if (d / 'take.json').exists() else 0)
+            except OSError: continue
+            hit = self.rows.get(vid)
+            item = dict(hit[1]) if hit and hit[0] == key else self.row(d)
+            if item['state'] in ('ready', 'failed'): self.rows[vid] = (key, dict(item))
+            else: self.rows.pop(vid, None)
+            used += item['bytes']; out.append(item)
+        for vid in [v for v in list(self.rows) if v not in seen]: self.rows.pop(vid, None)
         out.sort(key=lambda v: v['startedAt'] or '', reverse=True)
-        return {'videos': out, 'used': folder_bytes(self.dir), 'budget': self.budget}
+        return {'videos': out, 'used': used, 'budget': self.budget}
+    def row(self, d: Path) -> dict:
+        vid = d.name; t = self.take(vid); st = dict(self.state.get(vid) or {})
+        if (d / 'video.mp4').is_file(): state = 'ready'
+        elif (d / 'failed.json').is_file():
+            state = 'failed'
+            try: st['error'] = json.loads((d / 'failed.json').read_text(encoding='utf-8')).get('error')
+            except (OSError, ValueError): st['error'] = None
+        elif t: state = st.get('state') or 'queued'
+        else: state = 'recording'
+        item = {'id': vid, 'state': state, 'bytes': folder_bytes(d), 'title': None, 'startedAt': None, 'duration': None, 'segments': 0, 'progress': None}
+        if t: item.update(title=t.get('title'), startedAt=t.get('startedAt'), duration=round(duration(t), 2), segments=len(t['segments']))
+        if state == 'rendering':
+            exp = max(1, math.ceil((item['duration'] or 0) * FPS)); item['progress'] = min(.99, (st.get('frames') or 0) / exp)
+        if state == 'failed': item['error'] = st.get('error')
+        if (d / 'align.json').is_file():
+            try: item['approximateSync'] = json.loads((d / 'align.json').read_text(encoding='utf-8')).get('approximateSync')
+            except (OSError, ValueError): pass
+        return item
 
     # the budget
     def evict(self) -> list[str]:

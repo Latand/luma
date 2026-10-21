@@ -131,6 +131,21 @@ class Budget(unittest.TestCase):
         self.assertEqual(gone, [stale, old, mid])                                     # until it fits: 3 + 3 + 3 MiB over 10
         self.assertLessEqual(s.listing()['used'], s.budget)
 
+    def test_listing_measures_a_finished_folder_once(self):
+        # Studio's page polls /videos: a ready video is walked once; one still recording is measured on every poll
+        s = self.store; ready = fake_video(s, 1, '2026-10-01T10:00:00Z', 1 << 20); rec = fake_video(s, 2, '', 1000, ready=False, take=False)
+        walked = []; real = video.folder_bytes
+        video.folder_bytes = lambda d: walked.append(Path(d).name) or real(d)
+        try:
+            first = s.listing(); second = s.listing()
+            with open(s.dir / rec / 'camera.webm', 'ab') as f: f.write(b'\0' * 500)   # the camera chunks keep coming
+            third = s.listing()
+        finally: video.folder_bytes = real
+        self.assertEqual(walked.count(ready), 1, walked); self.assertEqual(walked.count(rec), 3, walked)
+        self.assertEqual(first, second); self.assertEqual(third['used'], first['used'] + 500)
+        shutil.rmtree(s.dir / ready); after = s.listing()                             # a deleted folder leaves no row behind
+        self.assertEqual([v['id'] for v in after['videos']], [rec]); self.assertNotIn(ready, s.rows)
+
     def test_newest_ready_survives_even_over_budget(self):
         only = fake_video(self.store, 7, '2026-10-05T10:00:00Z', 12 << 20)
         self.assertEqual(self.store.evict(), []); self.assertTrue((self.store.dir / only).is_dir())
