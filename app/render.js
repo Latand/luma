@@ -47,7 +47,7 @@ function match(g, info) {
   const text = pct === null ? '—' : pct + '%', w = Math.max(g.measureText(text).width, 40), ink = g.fillStyle;
   g.fillStyle = '#0c111aec'; g.beginPath(); g.roundRect(PCT.x - 12, PCT.y - 40, w + 24, 98, 8); g.fill();
   g.fillStyle = ink; g.fillText(text, PCT.x, PCT.y);
-  g.letterSpacing = '1.3px'; g.font = font(400, 12); g.fillStyle = '#a3b1c6'; g.fillText('ЗБІГ', PCT.x + 2, PCT.y + 44); g.restore();
+  g.letterSpacing = '2px'; g.font = font(400, 22); g.fillStyle = '#a3b1c6'; g.fillText('ЗБІГ', PCT.x + 2, PCT.y + 42); g.restore();
 }
 // The current line with the sung word lit and underlined, the next line dimmed; a line too long for 1700 px shrinks to
 // 30 px, then wraps onto two lines and the next line steps aside. Never an ellipsis.
@@ -83,19 +83,32 @@ function seat(g) {
   g.beginPath(); g.arc(SEAT.x, SEAT.y, SEAT.r + 5, 0, Math.PI * 2); g.fill(); g.shadowBlur = 0;
   g.strokeStyle = '#a1eed8aa'; g.lineWidth = 5; g.beginPath(); g.arc(SEAT.x, SEAT.y, SEAT.r + 2.5, 0, Math.PI * 2); g.stroke(); g.restore();
 }
-// The count-in of a lives rewind, the trainer's #countdown scaled for 1080p.
+// The count-in of a lives rewind, the trainer's #countdown scaled for 1080p, on a panel of its own so no note or word of
+// the dimmed roll runs through its text.
 function countIn(g, info) {
   if (info.count === null) return;
   g.save(); const wash = g.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, W * .64 / 2 * 1.15);
   wash.addColorStop(0, '#0f1723e0'); wash.addColorStop(1, '#0b0f1700'); g.fillStyle = wash; g.fillRect(0, 0, W, H);
-  g.textAlign = 'center'; g.textBaseline = 'middle'; g.shadowColor = '#0b0e15'; g.shadowBlur = 14;
-  let y = 430;
-  if (info.notice) { g.font = font(600, 30); g.fillStyle = '#f3a1b5'; g.fillText(info.notice, W / 2, y); g.font = font(400, 17); g.fillStyle = '#c8d8dc'; g.fillText('Забагато промахів поспіль · життя відновлено', W / 2, y + 36); y += 70; }
-  g.font = mono(300, 96); g.fillStyle = '#a1eed8'; g.fillText(String(info.count), W / 2, y + 64);
-  g.font = font(400, 17); g.fillStyle = '#c8d8dc'; g.fillText('Приготуйся. Вдихни спокійно.', W / 2, y + 140); g.restore();
+  const lines = [], prompt = 'Приготуйся. Вдихни спокійно.';
+  let y = 420;
+  if (info.notice) { lines.push([font(600, 40), '#f3a1b5', info.notice, y], [font(400, 24), '#c8d8dc', 'Забагато промахів поспіль · життя відновлено', y + 48]); y += 92; }
+  lines.push([mono(300, 110), '#a1eed8', String(info.count), y + 70], [font(400, 24), '#c8d8dc', prompt, y + 158]);
+  let w = 0; for (const [f, , text] of lines) { g.font = f; w = Math.max(w, g.measureText(text).width); }
+  const top = lines[0][3] - 50, bottom = lines.at(-1)[3] + 36;
+  g.fillStyle = '#0c111a'; g.beginPath(); g.roundRect(W / 2 - w / 2 - 48, top, w + 96, bottom - top, 8); g.fill();
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  for (const [f, ink, text, ly] of lines) { g.font = f; g.fillStyle = ink; g.fillText(text, W / 2, ly); }
+  window.LumaRender.panel = [W / 2 - w / 2 - 48, top, W / 2 + w / 2 + 48, bottom];
+  g.restore();
 }
-function overlay(g, info) { seat(g); hearts(g, info); match(g, info); band(g, info); countIn(g, info); }
-window.LumaRender = {overlay, ready: null, done: false};
+// app.js draws the stage at 960×540 and DPR 2; the overlays are laid out in the frame's own 1920×1080 pixels
+function overlay(g, info) { g.save(); g.setTransform(1, 0, 0, 1, 0, 0); window.LumaRender.panel = null; seat(g); hearts(g, info); match(g, info); band(g, info); countIn(g, info); g.restore(); }
+// What the roll must stay clear of, in frame pixels: the heart row with the whole box its burn paints, the % box, the circle.
+function hud(total) {
+  const B = window.LumaBurn, s = HEART.size, first = HEART.last - (total - 1) * HEART.pitch;
+  return {hearts: [first - B.box.l * s, HEART.y - B.box.t * s, HEART.last + B.box.r * s, HEART.y + B.box.b * s], pct: [PCT.x - 12, PCT.y - 40, W, PCT.y + 58], seat: {...SEAT, r: SEAT.r + 5}};
+}
+window.LumaRender = {overlay, hud, panel: null, ready: null, done: false};
 
 if (!/^\/video\/[0-9a-f-]{36}\/render$/.test(location.pathname) || !window.Luma?.render) return;
 const base = location.pathname.replace(/render$/, ''), hold = new URLSearchParams(location.search).has('hold');

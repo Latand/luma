@@ -219,6 +219,14 @@ class Compose(unittest.TestCase):
         for got, want in zip(peaks, (.1, 2.0 + .3)):   # adelay of segment 2 is when₂ − when₁ = 2 s
             self.assertLess(abs(got / SR - want), .001, f'click at {got / SR:.4f} s, wanted {want} s')
 
+    def test_thumbnail_falls_inside_a_sung_segment(self):
+        # a lives sitting: a short first segment, a rewind gap, a long re-sing; 40 % of the whole would land in the gap
+        segs = [{'when': 10.0, 'stop': 14.0}, {'when': 19.0, 'stop': 34.0}, {'when': 37.0, 'stop': 40.0}]
+        u = video.thumb_at({'segments': segs})
+        self.assertTrue(any(g['when'] - 10 <= u <= g['stop'] - 10 for g in segs), u)
+        self.assertAlmostEqual(u, 9 + 15 * .4)
+        self.assertAlmostEqual(video.thumb_at({'segments': [{'when': 2.0, 'stop': 32.0}]}), 12.0)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=1)

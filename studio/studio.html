@@ -80,11 +80,13 @@ body.locked{overflow:hidden}
 /* «Мої відео» (docs/design/CAMERA_VIDEO_BUILD_BRIEF.md §6.3): the composed camera videos, newest first, and a player. */
 .lib.videos{grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}.vid{display:flex;flex-direction:column;gap:8px}.vid .title{font-size:15px;font-weight:600;overflow-wrap:anywhere}
 .vthumb{display:block;position:relative;aspect-ratio:16/9;border-radius:10px;overflow:hidden;background:var(--stage);border:1px solid var(--border);width:100%}.vthumb img{display:block;width:100%;height:100%;object-fit:cover}
-.vid .facts{display:flex;flex-wrap:wrap;gap:4px 6px;font-size:13px;color:#c7d2e2;align-items:center}.vid .facts span+span::before{content:'· ';color:var(--dim)}.vid .facts .chip{margin-left:auto}.vid .facts .chip::before{content:none}
+.vid .facts{display:flex;flex-wrap:wrap;gap:4px 6px;font-size:13px;color:#c7d2e2;align-items:center}.vid .facts span+span::before{content:'·';margin-right:6px;color:var(--dim)}.vid .facts .chip{margin-left:auto}.vid .facts .chip::before{content:none}
 .vid .actions{display:flex;gap:8px}.vid .actions .primary{flex:1}
 dialog.player{background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:14px;padding:18px;width:min(960px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto}dialog.player::backdrop{background:#05080ecc}
 .phead{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:12px}.phead b{font-size:16px;font-weight:600;overflow-wrap:anywhere;min-width:0}.phead .secondary{width:40px;padding:0;justify-content:center;flex:none}
-.player video{display:block;width:100%;aspect-ratio:16/9;background:#000;border-radius:10px}.player .st{margin:10px 0 0}.player .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+/* the browser's control bar (about 73 px) gets a strip of its own under the 16:9 picture, so pausing never covers the
+   lyric band or the camera circle */
+.pvid{container-type:inline-size}.player video{display:block;width:100%;height:calc(100cqw * 9 / 16 + 80px);object-fit:contain;object-position:top;background:#000;border-radius:10px}.player .st{margin:10px 0 0}.player .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
 @keyframes rise{from{opacity:0;transform:translateY(10px)}}@keyframes fade{from{opacity:0}}
 @keyframes blink{50%{opacity:.35}}@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 @media(max-width:560px){.bar{padding:10px 14px}.wrap{padding:18px 14px 40px}.row{flex-direction:column;align-items:stretch}.row label,.row .primary{width:100%}.card{padding:14px}.lib{grid-template-columns:1fr}.bar .status{display:none}
@@ -131,7 +133,7 @@ dialog.player{background:var(--panel);color:var(--text);border:1px solid var(--b
 <p class="sr" id="sessionLive" aria-live="polite"></p>
 </section>
 <dialog class="player" id="player" aria-labelledby="playerTitle"><div class="phead"><b id="playerTitle">Відео</b><button class="secondary" id="playerClose" type="button" aria-label="Закрити">×</button></div>
-<video id="playerVideo" controls playsinline preload="metadata"></video><p class="st" id="playerMeta"></p>
+<div class="pvid"><video id="playerVideo" controls playsinline preload="metadata"></video></div><p class="st" id="playerMeta"></p>
 <div class="actions" id="playerActions"><a class="primary" id="playerDownload" download>Завантажити</a><button class="secondary" id="playerDelete" type="button">Видалити</button></div></dialog>
 <script src="/activity.js"></script>
 <script>
@@ -221,7 +223,10 @@ function setStatus(kind,text){const el=$('serverStatus');el.className='status'+(
 // ── «Мої відео»: camera videos Studio composed from sittings in the trainers (studio/video.py) ──────────────────────
 let videos=[],videosKey='',videosLoaded=false;
 const VSTATE={recording:'Записується',queued:'Чекає на монтаж',aligning:'Монтую',rendering:'Монтую',composing:'Монтую',failed:'Не вдалося',ready:'Готово'};
-const gb=n=>(n/1073741824).toFixed(1).replace('.',',');
+// under 0,1 ГБ in МБ, so a few short videos never read as nothing
+const gb=n=>(n/1073741824).toFixed(1).replace('.',',')+' ГБ',size=n=>n>0&&n<107374182?Math.max(1,Math.round(n/1048576))+' МБ':gb(n);
+// whole seconds, cut the way the player's own clock cuts them
+const vlen=t=>clock(Math.floor(t||0));
 const two=n=>String(n).padStart(2,'0');
 function when(iso){const d=new Date(iso);return isNaN(d)?'':two(d.getDate())+'.'+two(d.getMonth()+1)+'.'+d.getFullYear()+' '+two(d.getHours())+':'+two(d.getMinutes());}
 function videoFile(v){const d=new Date(v.startedAt),t=isNaN(d)?'':'_'+d.getFullYear()+'-'+two(d.getMonth()+1)+'-'+two(d.getDate())+'_'+two(d.getHours())+'-'+two(d.getMinutes());return 'Luma_'+String(v.title||'video').replace(/[^\p{L}\p{N}_-]+/gu,'_')+t+'.mp4';}
@@ -229,11 +234,11 @@ function stateText(v){if(v.state==='rendering'&&v.progress!==null)return 'Мон
 function renderVideos(d){
  const key=JSON.stringify(d);videos=d.videos;videosLoaded=true;if(key===videosKey)return;videosKey=key;
  $('videosSection').hidden=!videos.length;$('videosCount').textContent=videos.length?String(videos.length):'';
- $('videosUsed').textContent='Займають '+gb(d.used)+' з '+gb(d.budget)+' ГБ · найстаріші видаляються самі';
+ $('videosUsed').textContent='Займають '+size(d.used)+' з '+gb(d.budget)+' · найстаріші видаляються самі';
  const root=$('videos');root.replaceChildren();
  for(const v of videos){const card=el('article',null,'card vid'),title=v.title||'Пісня';
   const thumb=el(v.state==='ready'?'button':'div',null,'vthumb');if(v.state==='ready'){thumb.type='button';thumb.setAttribute('aria-label','Дивитися: '+title);thumb.onclick=()=>openPlayer(v.id);const img=el('img');img.alt='';img.loading='lazy';img.src='/video/'+v.id+'/thumb.jpg';img.onerror=()=>img.remove();thumb.append(img);}
-  const facts=el('div',null,'facts');if(v.startedAt)facts.append(el('span',when(v.startedAt)));if(v.duration)facts.append(el('span',clock(v.duration),'len'));
+  const facts=el('div',null,'facts');if(v.startedAt)facts.append(el('span',when(v.startedAt)));if(v.duration)facts.append(el('span',vlen(v.duration),'len'));
   const chip=el('span',null,'chip '+(v.state==='ready'?'done':v.state==='failed'?'failed':'running'));chip.append(el('i'),el('span',stateText(v)));facts.append(chip);
   card.append(thumb,el('div',title,'title'),facts);
   if(v.state==='ready'){const acts=el('div',null,'actions'),b=el('button','Дивитися','primary');b.type='button';b.onclick=()=>openPlayer(v.id);acts.append(b);card.append(acts);}
@@ -248,7 +253,7 @@ function openPlayer(id){
  $('playerTitle').textContent=v?(v.title||'Відео'):'Відео';
  const ready=v&&v.state==='ready';video.hidden=!ready;$('playerActions').hidden=!ready;
  if(ready){if(!video.src.endsWith('/video/'+id+'/video.mp4'))video.src='/video/'+id+'/video.mp4';$('playerDownload').href='/video/'+id+'/video.mp4';$('playerDownload').download=videoFile(v);dlg.dataset.id=id;
-  $('playerMeta').textContent=[when(v.startedAt),v.duration?clock(v.duration):null,v.segments>1?v.segments+' '+plural(v.segments,'відрізок','відрізки','відрізків')+' з відмотками':null,v.approximateSync?'синхрон оцінено приблизно':null].filter(Boolean).join(' · ');}
+  $('playerMeta').textContent=[when(v.startedAt),v.segments>1?v.segments+' '+plural(v.segments,'відрізок','відрізки','відрізків')+' з відмотками':null,v.approximateSync?'синхрон оцінено приблизно':null].filter(Boolean).join(' · ');}
  else{video.removeAttribute('src');video.load();dlg.dataset.id='';$('playerMeta').textContent=v?stateText(v):'Цього відео вже немає: найстаріші видаляються самі, щоб відео займали не більше 5 ГБ.';}
  if(!dlg.open)dlg.showModal();activity.log('video_open',{id,found:!!v});
 }

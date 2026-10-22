@@ -42,7 +42,12 @@ function act(type,data){if(window.LumaActivity)window.LumaActivity.log(type,data
 // A scrub or a run of arrow keys is one seek: from where it started to where it settled.
 let seekAct=null;
 function actSeek(from,to){if(!seekAct)seekAct={from:+from.toFixed(1),mode:s.mode};seekAct.to=+to.toFixed(1);clearTimeout(seekAct.timer);seekAct.timer=setTimeout(()=>{const {from,to,mode}=seekAct;seekAct=null;act('seek',{from,to,mode});},600);}
-function toast(text){act('toast',{text:String(text).slice(0,200)});$('toast').textContent=text;$('toast').classList.add('show');clearTimeout(s.toastTimer);s.toastTimer=setTimeout(()=>$('toast').classList.remove('show'),5000);}
+// On a phone the transport and the stage rail end the first screen: a toast that would cover «Співати», «Стоп» or a rail
+// tool rises above those rows, onto the stage.
+function toast(text){act('toast',{text:String(text).slice(0,200)});const el=$('toast');el.textContent=text;el.style.bottom='';
+ let low=innerHeight-24;const h=el.offsetHeight;for(const r of ['.transport','#stageRail'].map(q=>document.querySelector(q)?.getBoundingClientRect()).filter(r=>r&&r.height).sort((p,q)=>q.top-p.top))if(r.top<low&&r.bottom>low-h)low=r.top-8;
+ if(low<innerHeight-24)el.style.bottom=Math.round(innerHeight-low)+'px';
+ el.classList.add('show');clearTimeout(s.toastTimer);s.toastTimer=setTimeout(()=>$('toast').classList.remove('show'),5000);}
 // kind 'mic': microphone trouble, so the banner offers the microphone settings (or the Studio link on file://). Other errors get no action.
 function error(text,kind=''){act('error',{text:String(text).slice(0,200),kind});s.errorKind=kind;$('errorText').textContent=text;$('errorBanner').hidden=false;const file=location.protocol==='file:';$('studioLink').hidden=!(kind==='mic'&&file);$('errorSettings').hidden=!(kind==='mic'&&!file);if($('settingsDialog').open)$('settingsDialog').close();updateStatus();say(text);}
 function savePrefs(){try{localStorage.setItem('luma.trainer.settings',JSON.stringify(prefs));}catch(_){}}
@@ -1447,7 +1452,7 @@ function fitStage(){if(RENDER)return;const app=document.querySelector('.app');
  const box=$('chartWrap').getBoundingClientRect(),btn=$('singBtn').getBoundingClientRect();
  const h=Math.round(clamp(innerHeight-(box.top+scrollY)-(btn.bottom-box.bottom)-6,200,760));
  if(Math.abs(h-(s.stageH||0))>1){s.stageH=h;app.style.setProperty('--stage-h',h+'px');}}
-function bounds(){const narrow=W<720||s.dense,axis=narrow?22:26,left=narrow?42:56;
+function bounds(){const narrow=W<720||s.dense,axis=narrow?22:26,left=s.leftW||(narrow?42:56);
  // a folded head gets a thin lane instead of the 26 px the ЗАРАЗ caption needs
  const top=Math.min((s.headH||0)+(s.dense?12:26),H*.55),bottom=Math.max(top+40,H-(s.railH||0)-axis);
  return{left,right:W-16,top,bottom,laneTop:top-6};}
@@ -1878,7 +1883,11 @@ function synthTrace({lag=0,octave=0,kind='voice',late=0,seed=1},run){
 // while its heart burns, then the count-in of the re-sing plays at the rewind point. app/render.js draws the overlays
 // (hearts, %, lyric band, camera seat, count-in) and encodes.
 const R={segs:[],dust:{},packs:new Map(),key:'',n:0,last:-1};
-function renderSize(){W=1920;H=1080;DPR=1;TW=TH=1;canvas.width=W;canvas.height=H;g.setTransform(1,0,0,1,0,0);s.headH=14;s.railH=180;s.dense=false;s.dirty=true;}// 14 px over the plot's own 26 keep the ЗАРАЗ caption inside the frame
+// The frame is drawn at 960×540 and DPR 2, so the roll's type, lines and labels come out at twice the trainer's size in
+// the 1080p frame. The plot starts at y 101 (202 in the frame), below the hearts, their burn glow and the % box of
+// app/render.js, and at x 228 (456), right of the camera circle and the note names beside it: no note, word or line
+// is ever drawn under the HUD or the camera.
+function renderSize(){W=960;H=540;DPR=2;TW=TH=1;canvas.width=1920;canvas.height=1080;g.setTransform(2,0,0,2,0,0);s.headH=75;s.railH=90;s.leftW=228;s.dense=false;s.dirty=true;}
 function renderLoad(take){
  if(validNotes(take.notes,song.duration)){song.notes=take.notes.map(n=>({...n})).sort((a,b)=>a.a-b.a);invalidateMap();}
  if(Array.isArray(take.verified))s.verified=take.verified.filter(r=>Number.isFinite(r.a)&&Number.isFinite(r.b)&&r.b>r.a);

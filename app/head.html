@@ -302,8 +302,9 @@ dialog details{font-size:13px;color:var(--ink-3)}
 @keyframes noticeIn{0%{opacity:0;transform:translateY(10px) scale(.94)}100%{opacity:1;transform:none}}
 /* ── camera video (docs/design/CAMERA_VIDEO_BUILD_BRIEF.md §6.2): the switch with a mirrored framing preview, the badge while
    a sitting records, «Відео» on an attempt's card ── */
-.cam-field .check{min-height:var(--tap);align-items:center}.cam-field .check input{margin-top:0}
-.cam-body{display:flex;gap:16px;align-items:center}.cam-body p{flex:1;min-width:0}
+/* the row and its description sit as in «Записувати голос у WAV»: a flex box keeps the p's top margin from collapsing into
+   the label's 8 px, so the p gets the 1 px that makes the same 9 px */
+.cam-body{display:flex;gap:16px;align-items:flex-start}.cam-body p{flex:1;min-width:0;margin-top:1px}
 .cam-preview{width:120px;height:120px;flex:none;border-radius:50%;overflow:hidden;border:2px solid #a1eed855;background:var(--sunk)}
 .cam-preview video{display:block;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
 #camState{margin-top:4px}#camState.warn{color:var(--amber)}
@@ -328,6 +329,7 @@ html[data-render] #chartWrap{position:fixed;inset:0;width:1920px;height:1080px;m
  .song{order:3;flex:1 1 50%;min-width:0}.song b{max-width:52vw;overflow:hidden;text-overflow:ellipsis}
  .quality{order:4;margin-left:auto}.status{display:none}.status.cam-badge{display:inline-flex;padding:0 9px}
  .cam-body{flex-direction:column;align-items:stretch;gap:0}.cam-preview{align-self:center;margin:4px 0}
+ .cam-field .check{padding:11px 0;margin:-11px 0 -3px}/* a 44 px target whose padding the margins take back: the text sits where the WAV row's does */
  .stage{flex:none;height:var(--stage-h,560px);min-height:min(62dvh,330px)}
  .stage-head,.stage[data-dense="1"] .stage-head{padding:9px 12px 0;gap:6px 12px;flex-wrap:wrap;align-items:center}
  .readout{width:100%;flex-wrap:wrap;gap:2px 12px}

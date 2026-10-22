@@ -47,7 +47,7 @@ of your voice, no server after the file is built.
   covers a sitting: from «Співати» until an attempt ends with no lives rewind after it, rewinds included. Studio turns
   every sitting of 30 s or longer into a 1920×1080 video. The game fills the frame (target notes, your live line, the dust of
   past takes, the words, the hearts with the same burn as on screen, the match %), with no buttons, and you sit in a circle
-  over the part of the roll already sung. The sound is your voice, shifted by the microphone offset, over the song's own
+  bottom-left, beside the roll: no note, word or line runs under the circle, the hearts or the %. The sound is your voice, shifted by the microphone offset, over the song's own
   instrumental. The attempt's card gets «Відео», which opens it in Studio. A camera that is refused, missing, busy or
   unplugged mid-take never stops the singing: the attempt goes on without video and the settings say why. While the
   camera is on, «Перезаписати з …» is off. Each A–B repeat pass is its own attempt and so its own video: a loop shorter
@@ -157,10 +157,11 @@ line gone with its saved pref, and frame time with 20 takes at 390 px and 1440 p
 non-repeating bursts, each group of checks in a process and a browser of its own, so its memory stays under 2 GB beside
 the render browser and ffmpeg: the switch off by default and off outside Studio, one prompt and one recorder per sitting, what Studio
 stores (and 409 / 403 for a wrong chunk or origin), the alignment, the latency applied once, the MP4's codecs and length,
-the frames (no chrome, the camera in its circle, the note states, lives and dust the take implies, the burn at each loss,
-the count-in of a rewind), a lost camera, a camera denied, missing or busy, the 30 s rule inside «Заняття», eviction across
+the frames (no chrome, the camera in its circle, the roll clear of the circle, the hearts and the %, the note states, lives
+and dust the take implies, the burn at each loss, the count-in of a rewind on its panel), a lost camera, a camera denied, missing or busy, the 30 s rule inside «Заняття», eviction across
 a restart, Range and the player, the layout at 390, 900 and 1440 px, and no process left behind. `tests/video_test.py`
-checks the alignment through Opus, the eviction order, the render deadline and the ffmpeg graph without a browser.
+checks the alignment through Opus, the eviction order, the render deadline, the ffmpeg graph and that the thumbnail
+falls inside a sung segment, without a browser.
 Every suite requires a clean console. Set `LUMA_BROWSER=/path/to/chrome` to use a specific
 Chromium build.
 

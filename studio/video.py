@@ -145,6 +145,11 @@ def compose_cmd(game: Path, camera: Path | None, voices: list[Path], stem: Path 
 def duration(take: dict) -> float:
     s = take['segments']; return s[-1]['stop'] - s[0]['when']
 
+def thumb_at(take: dict) -> float:
+    """The output second of the thumbnail: 40 % into the longest sung segment, never inside the gap of a lives rewind."""
+    s = take['segments']; t1 = s[0]['when']; k = max(s, key=lambda g: g['stop'] - g['when'])
+    return k['when'] - t1 + (k['stop'] - k['when']) * .4
+
 def checked(path: Path, dur: float) -> dict:
     """ffprobe of a composed file: H.264 1920×1080 and AAC, the expected length. Failed when it is not."""
     p = probe(path); v = next((s for s in p['streams'] if s.get('codec_type') == 'video'), None); a = next((s for s in p['streams'] if s.get('codec_type') == 'audio'), None)
@@ -409,7 +414,7 @@ class Videos:
         try: run(nice(compose_cmd(game, d / 'camera.webm', [d / f'voice-{k}.wav' for k in range(len(segs))], stem, t, offset, part)))
         except subprocess.CalledProcessError as e: raise Failed('ffmpeg: ' + e.stderr.decode(errors='replace')[-300:])
         checked(part, dur)
-        try: run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-ss', f'{dur * .4:.2f}', '-f', 'mp4', '-i', str(part), '-frames:v', '1', '-vf', 'scale=480:-2', '-q:v', '4', str(d / 'thumb.jpg')])
+        try: run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-ss', f'{thumb_at(t):.2f}', '-f', 'mp4', '-i', str(part), '-frames:v', '1', '-vf', 'scale=480:-2', '-q:v', '4', str(d / 'thumb.jpg')])
         except subprocess.CalledProcessError: pass
         for f in ['camera.webm', 'game.h264', *[f'voice-{k}.wav' for k in range(len(segs))]]: (d / f).unlink(missing_ok=True)
         # the MP4 arrives last: a folder with video.mp4 in it is a finished video, raw sources gone
