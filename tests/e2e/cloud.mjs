@@ -17,13 +17,15 @@ const SEED = `(n, off, seed, wordless) => { const L = window.Luma, T = L.test, d
     for (let t = 0; t < dur; t += .021333) { const ref = L.targetAt(t) || raw?.(t); pts.push({t, f: ref ? midiF(ref.m + off + Math.sin(t * 9 + k) * .2 + (rnd() - .5) * .3) : null, confidence: .9, db: -20}); }
     T.closeTrace(); ids.push(T.injectTake({a: 0, b: dur, points: pts, startedAt: new Date(Date.now() - (n - k) * 6e4).toISOString()}).id); }
   T.closeTrace(); return ids; }`;
-// The plot rectangle as device pixels, read off a copy of the stage after one drawn frame.
+// The plot rectangle as device pixels, read off a copy of the stage after one drawn frame. The bytes cross as base64
+// into a Buffer: as a JSON array of numbers, two 1440 px frames at DPR 2 held 2.8 GB in the test process.
 const PIXELS = `() => { const T = window.Luma.test, pl = T.plot(), chart = document.getElementById('chart'), DPR = T.dpr(); T.draw();
   const c = document.createElement('canvas'); c.width = chart.width; c.height = chart.height; const g = c.getContext('2d', {willReadFrequently: true}); g.drawImage(chart, 0, 0);
   const x = Math.round(pl.left * DPR), y = Math.round(pl.top * DPR), w = Math.round((pl.right - pl.left) * DPR), h = Math.round((pl.bottom - pl.top) * DPR);
-  return {w, h, d: Array.from(g.getImageData(x, y, w, h).data)}; }`;
+  const d = g.getImageData(x, y, w, h).data; let s = ''; for (let i = 0; i < d.length; i += 0x8000) s += String.fromCharCode.apply(null, d.subarray(i, i + 0x8000));
+  return {w, h, d: btoa(s)}; }`;
 const frame = async (shown, page = p) => { await page.evaluate(v => window.Luma.test.cloudShown(v), shown); if (shown) await fitted(page);
-  const px = await page.evaluate(`(${PIXELS})()`); await page.evaluate(() => window.Luma.test.cloudShown(true)); return px; };
+  const px = await page.evaluate(`(${PIXELS})()`); await page.evaluate(() => window.Luma.test.cloudShown(true)); return {...px, d: Buffer.from(px.d, 'base64')}; };
 
 // The notes view keeps the dust out of every target bar: the pixels inside each bar's rounded shape, read off frames with
 // the dust shown and hidden. The pitch scale eases towards the notes on screen, so the bars are read once it has stopped
