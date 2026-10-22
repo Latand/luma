@@ -42,6 +42,17 @@ of your voice, no server after the file is built.
   fire ([docs/design/LIFE_BURN.md](docs/design/LIFE_BURN.md)), and when the last one goes
   the attempt is saved, the song rewinds to the start of the phrase and you sing it again after the count-in. Rules and
   constants in [docs/SCORING.md](docs/SCORING.md#lives-mode-режим-життів).
+- **Відео з камерою.** «Знімати мене на камеру» in the settings, off by default, works in a trainer opened from Studio.
+  With it on, the camera opens together with the microphone and «● ВІДЕО» shows in the top bar while it films. One video
+  covers a sitting: from «Співати» until an attempt ends with no lives rewind after it, rewinds included. Studio turns
+  every sitting of 30 s or longer into a 1920×1080 video. The game fills the frame (target notes, your live line, the dust of
+  past takes, the words, the hearts with the same burn as on screen, the match %), with no buttons. The hearts, the % and
+  you in a circle stand in one column on the part of the roll already sung; the roll fades out around them, so no note,
+  word or line runs under the circle, the hearts or the %. The sound is your voice, shifted by the microphone offset,
+  over the song's own instrumental. The attempt's card gets «Відео», which opens it in Studio. A camera that is refused, missing, busy or
+  unplugged mid-take never stops the singing: the attempt goes on without video and the settings say why. While the
+  camera is on, «Перезаписати з …» is off. Each A–B repeat pass is its own attempt and so its own video: a loop shorter
+  than 30 s gives no video. Design in [docs/design/CAMERA_VIDEO_BUILD_BRIEF.md](docs/design/CAMERA_VIDEO_BUILD_BRIEF.md).
 - **Built-in lessons.** Three warm-ups with exact synthetic targets; progress on them is kept per exercise, with one lamp
   per difficulty level, because one exercise is one skill sung through nine keys.
 - **Loop and seek.** Whole song by default, and a sung pass of it stops half a second after the last scored note or lyric line
@@ -92,6 +103,15 @@ from easy to hard: a result at or above your usual climbs a step, a lives rewind
 repeat never moves it, and a new session starts one step below the last. The chain runs until × or «До пісень».
 Details in [docs/design/AUTOPICK.md](docs/design/AUTOPICK.md).
 
+**«Мої відео».** The camera videos, newest first, under the library: each card shows its state («Записується», «Чекає на
+монтаж», «Монтую · 40 %», «Не вдалося: …») and a ready one opens a player with «Завантажити» and «Видалити».
+`studio/video.py` composes them in one background worker: it finds where the camera's webm starts on the song timeline by
+cross-correlating its own audio with each attempt's WAV, opens the trainer at `/video/<id>/render` in a headless Edge or
+Chrome (`LUMA_BROWSER`, else the first on `PATH`), where the trainer draws the game layer frame by frame with its own code
+and encodes it with WebCodecs, and has ffmpeg put the camera in its circle and mix the voice over the instrumental. Together
+the videos take at most 5 GB (`--video-budget`): the oldest are deleted first, and the raw recordings are deleted once
+the MP4 checks out. `--video-min-seconds` (30) and `--render-deadline-factor` (3) set the other limits.
+
 **Hardware.** A 5-minute song takes about 4 minutes on an RTX 3060 (Demucs ≈ 50 s, pYIN ≈ 1 min, CREPE ≈ 30 s). CPU works
 and takes considerably longer. Python 3.11, FFmpeg and a few GB of RAM are required; `requirements.txt` pins PyTorch 2.10.
 
@@ -134,7 +154,16 @@ repeats, the history read without creating the base, the home button and the rea
 few attempts, other songs through `/targets`, wordless notes, 200 four-minute attempts under 1.5 s, the daily hint,
 390 px and 1440 px, and `file://`. `cloud.mjs` checks the dust of past takes: built and painted in a worker, the take on
 screen and a punch-in left out, drawn under the target and the live line, faint, wordless notes unchanged, the record
-line gone with its saved pref, and frame time with 20 takes at 390 px and 1440 px under 1× and 4× CPU throttle. Every suite requires a clean console. Set `LUMA_BROWSER=/path/to/chrome` to use a specific
+line gone with its saved pref, and frame time with 20 takes at 390 px and 1440 px under 1× and 4× CPU throttle. `video.mjs` runs its own Studios with Chromium's fake camera and a microphone fed with
+non-repeating bursts, each group of checks in a process and a browser of its own, so its memory stays under 2 GB beside
+the render browser and ffmpeg: the switch off by default and off outside Studio, one prompt and one recorder per sitting, what Studio
+stores (and 409 / 403 for a wrong chunk or origin), the alignment, the latency applied once, the MP4's codecs and length,
+the frames (no chrome, the camera in its circle, the roll clear of the circle, the hearts and the %, the note states, lives
+and dust the take implies, the burn at each loss, the count-in of a rewind on its panel), a lost camera, a camera denied, missing or busy, the 30 s rule inside «Заняття», eviction across
+a restart, Range and the player, the layout at 390, 900 and 1440 px, and no process left behind. `tests/video_test.py`
+checks the alignment through Opus, the eviction order, the render deadline, the ffmpeg graph and that the thumbnail
+falls inside a sung segment, without a browser.
+Every suite requires a clean console. Set `LUMA_BROWSER=/path/to/chrome` to use a specific
 Chromium build.
 
 ## Layout
@@ -142,8 +171,10 @@ Chromium build.
 ```
 app/       head.html (styles + markup, {{TITLE}} / {{ARTIST}} placeholders), workers.html (AudioWorklet capture + YIN worker + the worker that builds and paints the dust of past takes), app.js,
            activity.js (activity log, shared with Studio), latency.js (microphone offset estimate from attempts),
-           burn.js (the burn of a lost life, one canvas draw function)
+           burn.js (the burn of a lost life, one canvas draw function), camera.js (the camera recorder of a sitting and its
+           upload), render.js (the game layer of a camera video: overlays, WebCodecs encoding)
 studio/    prepare_song.py (pipeline), build_html.py (package → HTML, --rebuild), studio_server.py + studio.html, covers.py, difficulty.py, luma-studio.sh,
+           video.py (camera videos: store, alignment, render, compose, budget),
            activity_report.py (digest of the activity log)
 examples/  make_demo.py (synthetic demo song)
 tests/e2e/ Playwright suites
@@ -164,6 +195,11 @@ pitch, confidence and level numbers plus scores, never audio, and a voice cannot
 computer; export is a file you choose to write, and "Очистити пісню" in the Прогрес tab deletes a song's history. Because
 the history belongs to an origin and a browser profile, a different port or profile starts empty — that is what export is
 for. The Studio sends audio to Soniox only when a key is configured, only for word timings.
+
+The camera films only with «Знімати мене на камеру» on, which is off by default, and only in a trainer opened from Studio. It
+films you while you sing, with your voice. The recording goes to that Studio on this computer and nowhere else, into
+`songs/videos/` (ignored by git): one folder per video with the MP4, a thumbnail and the take record. All videos together
+stay within 5 GB, the oldest deleted first, and «Видалити» in the player deletes one at once.
 
 ## License
 
