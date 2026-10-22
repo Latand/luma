@@ -99,10 +99,26 @@ and takes considerably longer. Python 3.11, FFmpeg and a few GB of RAM are requi
 
 ### In a VR headset (Quest)
 
-Studio listens on `127.0.0.1` only. To reach it from the headset, put TLS in front of it on the LAN, for example a user
-service running `ncat --ssl --ssl-cert cert.pem --ssl-key key.pem -l 8790 --keep-open --allow 192.168.5.0/24 --sh-exec
-"ncat 127.0.0.1 8792"`. HTTPS is required: the microphone and WebXR work only in a secure context. With a self-signed
-certificate the headset's browser warns once per address. In the headset open `https://<this PC>:8790/`, open a song and
+Studio listens on `127.0.0.1` only. To reach it from the headset, put TLS in front of it on the LAN with
+`studio/lan_proxy.py` (standard library only): `python3 -I studio/lan_proxy.py --cert cert.pem --key key.pem` listens on
+`0.0.0.0:8790`, lets in only `192.168.5.0/24` and loopback (`--allow` changes that) and relays the bytes to
+`127.0.0.1:8792`. One asyncio loop holds all of the browser's parallel and keep-alive connections; a reset or aborted
+connection closes only itself. (`ncat --ssl … --sh-exec` dies with `fselect error 9` under a browser's parallel
+connections.) To keep it running, copy the script out of the checkout and run it as a user service, for example
+`~/.config/systemd/user/luma-lan.service`:
+
+```ini
+[Service]
+ExecStart=/usr/bin/python3 -I %h/.local/share/luma-lan/lan_proxy.py --cert %h/path/cert.pem --key %h/path/key.pem
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+HTTPS is required: the microphone and WebXR work only in a secure context. With a self-signed certificate the headset's
+browser warns once per address. In the headset open `https://<this PC>:8790/`, open a song and
 press **VR** in its header (`app/xr.js`):
 
 - an immersive-ar session: the room stays visible, and one panel 1.5 m away holds the song and its status, the
@@ -136,6 +152,7 @@ mistakes happen; the easy level exists partly for that reason.
 ```sh
 bun add -d playwright && bunx playwright install chromium   # or npm
 tests/e2e/run.sh
+python3 -I tests/lan_proxy_test.py   # the LAN TLS proxy as a real process; needs openssl
 ```
 
 `scoring.mjs` checks the engine (correct / wrong / uncertain / silence / no-target / no double counting), trace persistence,
@@ -169,7 +186,7 @@ app/       head.html (styles + markup, {{TITLE}} / {{ARTIST}} placeholders), wor
            activity.js (activity log, shared with Studio), latency.js (microphone offset estimate from attempts),
            burn.js (the burn of a lost life, one canvas draw function), xr.js (the VR panel in a headset's browser)
 studio/    prepare_song.py (pipeline), build_html.py (package → HTML, --rebuild), studio_server.py + studio.html, covers.py, difficulty.py, luma-studio.sh,
-           activity_report.py (digest of the activity log)
+           activity_report.py (digest of the activity log), lan_proxy.py (TLS on the LAN for a headset)
 examples/  make_demo.py (synthetic demo song)
 tests/e2e/ Playwright suites
 docs/      TARGET_MAP_SCHEMA.md, PIPELINE.md, SCORING.md, HISTORY_SCHEMA.md, ACTIVITY_LOG.md, PROGRESS_DESIGN.md, LESSONS.md, design/, screenshots
