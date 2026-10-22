@@ -111,6 +111,23 @@ for(const [width,height] of [[1440,900],[1024,700],[844,390],[390,844]]){
   assert(geo.top>=geo.head&&geo.bottom<=geo.rail&&geo.bottom>geo.top,
     'the plot keeps clear of the head and the rail at '+width+'x'+height+' '+JSON.stringify(geo));
 }
+// ── the pitch rail's note names stay on the keyboard: the ivory and the black keys end at the plot's edges, so a name
+// whose text box crosses an edge would be dark ink half over the dark strip. Read from the fillText calls of real frames.
+for(const [width,height] of [[390,844],[900,800],[1440,900]])for(const zoom of ['1','2','0.5']){
+  await p.setViewportSize({width,height});
+  await p.evaluate(z=>{const sel=document.getElementById('scaleSelect');sel.value=z;sel.dispatchEvent(new Event('change'));},zoom);
+  const rail=await p.evaluate(async()=>{const T=window.Luma.test,C=CanvasRenderingContext2D.prototype,fill=C.fillText,out=[];let frames=0,pl=null;// only the frames this test draws: the app's own frames between them are drawn on other bounds
+    const dur=window.Luma.song().duration;
+    C.fillText=function(text,x,y){if(pl&&/^[A-G]#?-?\d$/.test(text)&&x<pl.left-7){const m=this.measureText(text);
+      out.push({text,plot:[pl.top,pl.bottom],top:+(y-m.actualBoundingBoxAscent).toFixed(2),bottom:+(y+m.actualBoundingBoxDescent).toFixed(2),cut:y-m.actualBoundingBoxAscent<pl.top||y+m.actualBoundingBoxDescent>pl.bottom});}
+      return fill.apply(this,arguments);};
+    // every position across the song, three frames each so the range eases between the drawn frames
+    try{for(let t=0;t<dur;t+=dur/24){T.seek(t);for(let i=0;i<3;i++){await new Promise(r=>requestAnimationFrame(r));pl=T.plot();T.draw();pl=null;frames++;}}}finally{C.fillText=fill;}
+    return {frames,names:out.length,cut:out.filter(n=>n.cut).slice(0,4)};});
+  assert(rail.names>0&&rail.cut.length===0,'no pitch rail name crosses the plot edge at '+width+'x'+height+' scale '+zoom+' '+JSON.stringify(rail));
+}
+await p.evaluate(()=>{const sel=document.getElementById('scaleSelect');sel.value='1';sel.dispatchEvent(new Event('change'));});
+await p.setViewportSize({width:1440,height:900});
 // ── item 2: the glyph and the note name on a bar are read off the canvas and compared with the bar under them ──
 // Sing .7 semitone sharp on a 90 cent corridor: still a hit, and the voice trace runs clear of the type it would otherwise cross.
 await p.evaluate(()=>{const T=window.Luma.test,S=window.LUMA_SONG,ns=S.notes.filter(n=>!n.ignored);

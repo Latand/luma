@@ -9,7 +9,8 @@ shutdown before both close. asyncio's TLS layer keeps no half-open state, and br
 their own EOF.
 
 Run: python3 -I studio/lan_proxy.py --cert cert.pem --key key.pem [--listen 0.0.0.0] [--port 8790]
-       [--upstream 127.0.0.1:8792] [--allow 192.168.5.0/24 --allow 127.0.0.0/8 --allow ::1]
+       [--upstream 127.0.0.1:8792] [--allow 192.168.5.0/24 --allow 127.0.0.0/8 --allow ::1] [--max-conns 400]
+       [--handshake-timeout 10] [--reclaim-every 5]
 """
 from __future__ import annotations
 import argparse, asyncio, gc, ipaddress, logging, socket, ssl, sys
@@ -63,8 +64,10 @@ async def close(writer: asyncio.StreamWriter | None, clean: bool) -> None:
 
 
 class Proxy:
-    def __init__(self, ctx: ssl.SSLContext, upstream: tuple[str, int], nets: list, max_conns: int):
+    def __init__(self, ctx: ssl.SSLContext, upstream: tuple[str, int], nets: list, max_conns: int,
+                 handshake_timeout: float = HANDSHAKE_TIMEOUT, reclaim_every: float = RECLAIM_EVERY):
         self.ctx, self.upstream, self.nets, self.max_conns = ctx, upstream, nets, max_conns
+        self.handshake_timeout, self.reclaim_every = handshake_timeout, reclaim_every
         self.open = 0
         self.unclean = 0  # connections closed by an error since the last reclaim()
 
@@ -85,7 +88,7 @@ class Proxy:
             sock = client_w.get_extra_info('socket')
             if sock is not None:
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-            await client_w.start_tls(self.ctx, ssl_handshake_timeout=HANDSHAKE_TIMEOUT)
+            await client_w.start_tls(self.ctx, ssl_handshake_timeout=self.handshake_timeout)
             up_r, up_w = await asyncio.wait_for(asyncio.open_connection(*self.upstream), CONNECT_TIMEOUT)
             to_up = asyncio.create_task(pipe(client_r, up_w))
             to_client = asyncio.create_task(pipe(up_r, client_w))
@@ -111,7 +114,7 @@ class Proxy:
         """A connection that died keeps its error, whose traceback points back at the TLS buffers (about 1 MB each),
         and only a full collection finds such cycles; without it 30 aborted downloads held 30 MB until much later."""
         while True:
-            await asyncio.sleep(RECLAIM_EVERY)
+            await asyncio.sleep(self.reclaim_every)
             if self.unclean:
                 self.unclean = 0
                 gc.collect()
@@ -129,7 +132,7 @@ async def serve(args: argparse.Namespace) -> None:
     ctx.load_cert_chain(args.cert, args.key)
     host, _, port = args.upstream.rpartition(':')
     nets = [ipaddress.ip_network(a, strict=False) for a in args.allow]
-    proxy = Proxy(ctx, (host, int(port)), nets, args.max_conns)
+    proxy = Proxy(ctx, (host, int(port)), nets, args.max_conns, args.handshake_timeout, args.reclaim_every)
     asyncio.get_running_loop().set_exception_handler(quiet_loop_errors)
     # A client that sends close_notify right after its handshake reaches the stream before start_tls() has marked it as
     # TLS, and asyncio warns that a half-open EOF has no effect over TLS; the connection still closes correctly.
@@ -153,6 +156,10 @@ def main() -> None:
     ap.add_argument('--allow', action='append', help='network that may connect (repeatable); '
                     'default 192.168.5.0/24, 127.0.0.0/8 and ::1')
     ap.add_argument('--max-conns', type=int, default=400, help='open connections at once; more are dropped')
+    ap.add_argument('--handshake-timeout', type=float, default=HANDSHAKE_TIMEOUT,
+                    help='seconds a client may take to finish its TLS handshake before it is dropped')
+    ap.add_argument('--reclaim-every', type=float, default=RECLAIM_EVERY,
+                    help='seconds between collections of the memory that failed connections left behind')
     args = ap.parse_args()
     args.allow = args.allow or ['192.168.5.0/24', '127.0.0.0/8', '::1']
     try:

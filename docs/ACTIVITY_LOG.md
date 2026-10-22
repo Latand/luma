@@ -111,6 +111,7 @@ Opening a song or a lesson from Studio is a `click` whose `href` is `song:<file>
 | `attempt` | one finished attempt, below |
 | `latency_estimate` | the microphone offset estimated from the attempts ([design/LATENCY_AUTOCAL.md](design/LATENCY_AUTOCAL.md)): `latency` ms suggested (`null` with too few usable attempts), `ci90` [low, high] ms, `n` usable attempts in the window, `current` setting ms, `onset` ms of extra lateness at phrase starts (`null` when not measured), `ms` the computation took, `auto` (`true` for the daily check after an attempt, `false` for the button), `hint` (the daily check showed the hint) |
 | `latency_apply` | «Застосувати» set the suggested offset: `from`, `to` ms |
+| `xr` | the VR session in a headset ([README](../README.md#in-a-vr-headset-quest), `app/xr.js`): `state` (`enter` = the session started, `exit` = it ended, by «Вийти» or by the headset) |
 
 Play, record and stop are `state` changes of `mode` (and the `click` on `listenBtn`, `singBtn`, `stopBtn`, or the
 `key` Space / Escape that caused them). Loop and A–B ranges are `state` changes of `loop`, `rangeId` and `range`.

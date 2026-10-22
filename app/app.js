@@ -1457,7 +1457,10 @@ function draw(t){
  for(let n=Math.ceil(s.rangeLo);n<=s.rangeHi;n++){const yy=y(n),pc=(n%12+12)%12,isC=pc===0,black=BLACK.has(pc);
   if(black){g.fillStyle='#ffffff05';g.fillRect(b.left,y(n+.5),b.right-b.left,rowH);}
   g.strokeStyle=isC?'#9fb4d133':'#93a8c40f';g.lineWidth=1;g.beginPath();g.moveTo(b.left,y(n+.5));g.lineTo(b.right,y(n+.5));g.stroke();
-  if(!named(n))continue;g.font=(isC?'700 ':'600 ')+(black?'9px ':'11px ')+mono;g.fillStyle=black?'#aab6c8':isC?'#0a101a':'#2a3343';g.fillText(name(n),black?bk-3:kw-4,yy);}
+  if(!named(n))continue;g.font=(isC?'700 ':'600 ')+(black?'9px ':'11px ')+mono;
+  // the keys end at the plot's edges: a name that would cross one is left out, since its ink would run onto the dark strip
+  const lab=name(n),m=g.measureText(lab);if(yy-m.actualBoundingBoxAscent<b.top||yy+m.actualBoundingBoxDescent>b.bottom)continue;
+  g.fillStyle=black?'#aab6c8':isC?'#0a101a':'#2a3343';g.fillText(lab,black?bk-3:kw-4,yy);}
  g.textAlign='center';g.font='11px '+mono;const tstep=v.span>10?2:1;
  for(let a=Math.ceil(v.a);a<v.b;a++){const xx=x(a),major=a%tstep===0;
   g.strokeStyle=major?'#93a8c414':'#93a8c407';g.beginPath();g.moveTo(xx,b.top);g.lineTo(xx,b.bottom+(major?6:3));g.stroke();

@@ -272,12 +272,15 @@ class Gl {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     return t;
   }
-  // a canvas into a texture, premultiplied, with mipmaps: the panel is seen smaller than its texture
-  upload(t, canvas) {
+  // a canvas into a texture, premultiplied, with mipmaps: the panel is seen smaller than its texture. The chart, sent
+  // again on every frame that redraws it (every frame while the song plays), goes without: on the emulator its mipmaps
+  // cost a fifth of the frame rate (tests/e2e/xr_perf.mjs), and a Quest 3 shows it at about 1.5–2 texels a pixel.
+  upload(t, canvas, mip = true) {
     const gl = this.gl; gl.bindTexture(gl.TEXTURE_2D, t);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
-    gl.generateMipmap(gl.TEXTURE_2D); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    if (mip) gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, mip ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR);
     if (this.aniso) gl.texParameterf(gl.TEXTURE_2D, this.aniso.TEXTURE_MAX_ANISOTROPY_EXT, 4);
   }
   begin(proj, view) {
@@ -407,7 +410,7 @@ class Run {
     if (!pose) return;
     if (this.placeWanted || !this.panel) this.place(pose.transform);
     this.input(f, time);
-    if (host.frame(time) || !this.chartReady) { r.upload(this.chartTex, host.chart); this.chartReady = true; }
+    if (host.frame(time) || !this.chartReady) { r.upload(this.chartTex, host.chart, false); this.chartReady = true; }
     if (this.flash && time > this.flash.until) this.flash = null;
     const st = readPage(), key = JSON.stringify(st) + [...this.hovered].join() + (this.flash?.id || '');
     if (key !== this.baseKey) { this.baseKey = key; drawBase(this.base.g, st, this.hovered, this.flash?.id); r.upload(this.baseTex, this.base.c); }
@@ -468,14 +471,17 @@ async function enter() {
   entering = true;
   host.audio()?.catch?.(() => {});
   try {
+    let mic = 'allowed';   // before this press; 'asked' when it was just granted, 'denied' when it was refused
     if (!(await micAllowed())) {
-      try { const stream = await navigator.mediaDevices.getUserMedia({audio: true}); stream.getTracks().forEach(t => t.stop()); }
-      catch (_) { host.say('Без мікрофона в шоломі можна тільки слухати. Дозволь мікрофон для цієї сторінки, щоб співати.'); }
+      try { const stream = await navigator.mediaDevices.getUserMedia({audio: true}); stream.getTracks().forEach(t => t.stop()); mic = 'asked'; }
+      catch (_) { mic = 'denied'; host.say('Без мікрофона в шоломі можна тільки слухати. Дозволь мікрофон для цієї сторінки, щоб співати.'); }
     }
     let session;
     try { session = await navigator.xr.requestSession('immersive-ar', SESSION); }
     catch (e) {
-      host.say(e?.name === 'NotSupportedError' ? 'Цей браузер не відкриває VR з видом кімнати.' : 'Мікрофон дозволено. Натисни «VR» ще раз, щоб увійти.');
+      // one toast at a time: the refusal's replaces the microphone's, so it repeats what the microphone allows
+      host.say(e?.name === 'NotSupportedError' ? 'Цей браузер не відкриває VR з видом кімнати.'
+        : (mic === 'asked' ? 'Мікрофон дозволено. ' : mic === 'denied' ? 'Без мікрофона в шоломі можна тільки слухати. ' : 'VR не відкрився. ') + 'Натисни «VR» ще раз, щоб увійти.');
       return;
     }
     const view = $('xrView'), gl = view.getContext('webgl2', {xrCompatible: true, alpha: true, antialias: true});

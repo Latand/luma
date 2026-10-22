@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """The LAN TLS proxy (studio/lan_proxy.py) as a real process: parallel keep-alive requests, downloads aborted and reset
-mid-transfer, a client's EOF (close_notify or a bare FIN), a refused address and a dead upstream, after each of which
-the same process still answers and has written nothing to stderr beyond the expected line. Uses a throwaway self-signed certificate (openssl) and a local upstream on a free port; no network.
+mid-transfer, a client's EOF (close_notify or a bare FIN), a refused address, a dead upstream, a connection over
+--max-conns and a client that never finishes its handshake, after each of which the same process still answers and has
+written nothing to stderr beyond the expected line. Uses a throwaway self-signed certificate (openssl) and a local
+upstream on a free port; no network.
 """
 import http.client
 import http.server
@@ -95,9 +97,9 @@ class LanProxyTest(unittest.TestCase):
         cls.http.server_close()
         cls.tmp.cleanup()
 
-    def start(self, upstream_port, *allow):
+    def start(self, upstream_port, *allow, extra=()):
         cmd = [sys.executable, '-I', str(ROOT / 'studio' / 'lan_proxy.py'), '--cert', str(self.cert), '--key',
-               str(self.key), '--listen', '127.0.0.1', '--port', '0', '--upstream', f'127.0.0.1:{upstream_port}']
+               str(self.key), '--listen', '127.0.0.1', '--port', '0', '--upstream', f'127.0.0.1:{upstream_port}', *extra]
         for a in allow:
             cmd += ['--allow', a]
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -129,6 +131,19 @@ class LanProxyTest(unittest.TestCase):
         status, body, c = self.get(port)
         c.close()
         self.assertEqual((status, body), (200, SMALL))
+
+    def answers_within(self, port, seconds):
+        """Retries a request until one is answered or `seconds` pass; the error of the last try is returned on failure."""
+        deadline, last = time.monotonic() + seconds, None
+        while time.monotonic() < deadline:
+            try:
+                status, body, c = self.get(port)
+                c.close()
+                return (status, body)
+            except (http.client.HTTPException, OSError) as exc:
+                last = exc
+                time.sleep(0.05)
+        return last
 
     def test_allowed_networks(self):
         nets = [ipaddress.ip_network(n) for n in ('192.168.5.0/24', '127.0.0.0/8', '::1')]
@@ -177,7 +192,7 @@ class LanProxyTest(unittest.TestCase):
 
     @unittest.skipUnless(Path('/proc/self/status').exists(), 'reads VmRSS from /proc')
     def test_aborted_downloads_give_their_memory_back(self):
-        proc, port = self.start(self.http.server_address[1])
+        proc, port = self.start(self.http.server_address[1], extra=('--reclaim-every', '0.5'))
 
         def rss_kb():
             for line in Path(f'/proc/{proc.pid}/status').read_text().splitlines():
@@ -193,10 +208,18 @@ class LanProxyTest(unittest.TestCase):
             tls.close()
 
         def burst():
+            """RSS once it has settled after the burst: unchanged within 1 MB over 3 s, which is six reclaim ticks of
+            the 0.5 s this proxy runs with, so a collection after the burst's last close is always inside the window."""
             with ThreadPoolExecutor(30) as pool:
                 list(pool.map(abort, range(30)))
-            time.sleep(lan_proxy.RECLAIM_EVERY + 1.5)
-            return rss_kb()
+            reads, deadline = [rss_kb()], time.monotonic() + 30
+            while time.monotonic() < deadline:
+                time.sleep(0.25)
+                reads.append(rss_kb())
+                window = reads[-13:]
+                if len(window) == 13 and max(window) - min(window) < 1024:
+                    return reads[-1]
+            self.fail(f'RSS never settled after a burst: {reads[-13:]}')
 
         # The first burst sets the allocator's high-water mark; what it keeps after that is the peak of 30 connections
         # at once. Three more bursts must not add to it (before the reclaim each one added about 30 MB).
@@ -253,6 +276,35 @@ class LanProxyTest(unittest.TestCase):
         self.assertIsNone(proc.poll())
         self.stop(proc)
         self.assertEqual(self.stderr, 'lan_proxy: refused 127.0.0.1\n')
+
+    def test_connections_over_max_conns_are_dropped(self):
+        proc, port = self.start(self.http.server_address[1], extra=('--max-conns', '1'))
+        status, body, held = self.get(port)  # a keep-alive connection holds the only place
+        self.assertEqual((status, body), (200, SMALL))
+        with self.assertRaises((http.client.HTTPException, OSError)):
+            self.get(port)
+        status, body, held = self.get(port, conn=held)  # the held one still works
+        self.assertEqual((status, body), (200, SMALL))
+        held.close()
+        self.assertEqual(self.answers_within(port, 5), (200, SMALL), 'the place comes back when the held one closes')
+        self.assertEqual(self.stop(proc), 'lan_proxy: busy, dropped 127.0.0.1 (1 open)\n')
+
+    def test_silent_client_is_dropped_after_the_handshake_timeout(self):
+        proc, port = self.start(self.http.server_address[1], extra=('--max-conns', '1', '--handshake-timeout', '0.5'))
+        silent = socket.create_connection(('127.0.0.1', port), timeout=8)  # connects, never says hello
+        self.addCleanup(silent.close)
+        t0 = time.monotonic()
+        try:
+            dropped = silent.recv(1) == b''
+        except ConnectionResetError:
+            dropped = True
+        except TimeoutError:
+            dropped = False
+        waited = time.monotonic() - t0
+        self.assertTrue(dropped and waited < 5, f'the silent client was dropped after {waited:.1f} s')
+        # it held the only place until then; now a real client gets it
+        self.assertEqual(self.answers_within(port, 5), (200, SMALL))
+        self.assertEqual(self.stop(proc), '')
 
     def test_dead_upstream(self):
         proc, port = self.start(free_port_closed())

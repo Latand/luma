@@ -176,7 +176,10 @@ few attempts, other songs through `/targets`, wordless notes, 200 four-minute at
 screen and a punch-in left out, drawn under the target and the live line, faint, wordless notes unchanged, the record
 line gone with its saved pref, and frame time with 20 takes at 390 px and 1440 px under 1× and 4× CPU throttle. `xr.mjs` enters VR on
 Meta's WebXR emulator (the `iwer` dev dependency) as a Quest 3: the panel 1.5 m ahead with the chart at its size, «Слухати», «Вокал»
-and a seek on the progress bar by a controller's trigger, «Сюди» by a pinch, «Вийти». Every suite requires a clean console. Set `LUMA_BROWSER=/path/to/chrome` to use a specific
+and a seek on the progress bar by a controller's trigger, «Сюди» by a pinch, «Вийти», a refused session (the page stays out
+of VR, and its toast is true to the microphone) and a hidden one (listening and singing stop). `xr_perf.mjs`, outside
+`run.sh`, measures the headset's frames on the emulator, idle, listening and singing, under 1× and 4× CPU throttle.
+Every suite requires a clean console. Set `LUMA_BROWSER=/path/to/chrome` to use a specific
 Chromium build.
 
 ## Layout
