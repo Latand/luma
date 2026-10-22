@@ -12,12 +12,13 @@ Run: python3 -I studio/lan_proxy.py --cert cert.pem --key key.pem [--listen 0.0.
        [--upstream 127.0.0.1:8792] [--allow 192.168.5.0/24 --allow 127.0.0.0/8 --allow ::1]
 """
 from __future__ import annotations
-import argparse, asyncio, ipaddress, logging, socket, ssl, sys
+import argparse, asyncio, gc, ipaddress, logging, socket, ssl, sys
 
 CHUNK = 64 * 1024
 HANDSHAKE_TIMEOUT = 10.0
 CONNECT_TIMEOUT = 5.0
 CLOSE_TIMEOUT = 5.0
+RECLAIM_EVERY = 5.0
 QUIET = (OSError, EOFError, asyncio.IncompleteReadError, asyncio.TimeoutError)  # ssl.SSLError is an OSError
 
 
@@ -65,6 +66,7 @@ class Proxy:
     def __init__(self, ctx: ssl.SSLContext, upstream: tuple[str, int], nets: list, max_conns: int):
         self.ctx, self.upstream, self.nets, self.max_conns = ctx, upstream, nets, max_conns
         self.open = 0
+        self.unclean = 0  # connections closed by an error since the last reclaim()
 
     async def handle(self, client_r: asyncio.StreamReader, client_w: asyncio.StreamWriter) -> None:
         peer = (client_w.get_extra_info('peername') or ('?',))[0]
@@ -100,8 +102,19 @@ class Proxy:
             log('connection error', peer, type(exc).__name__, exc)
         finally:
             self.open -= 1
+            self.unclean += not clean
             await close(up_w, clean)
             await close(client_w, clean)
+
+
+    async def reclaim(self) -> None:
+        """A connection that died keeps its error, whose traceback points back at the TLS buffers (about 1 MB each),
+        and only a full collection finds such cycles; without it 30 aborted downloads held 30 MB until much later."""
+        while True:
+            await asyncio.sleep(RECLAIM_EVERY)
+            if self.unclean:
+                self.unclean = 0
+                gc.collect()
 
 
 def quiet_loop_errors(loop: asyncio.AbstractEventLoop, context: dict) -> None:
@@ -124,8 +137,10 @@ async def serve(args: argparse.Namespace) -> None:
     server = await asyncio.start_server(proxy.handle, args.listen, args.port, backlog=256, reuse_address=True)
     bound = server.sockets[0].getsockname()
     print(f'lan_proxy: listening on {bound[0]}:{bound[1]} -> {args.upstream}, allow {", ".join(args.allow)}', flush=True)
+    reclaim = asyncio.create_task(proxy.reclaim())
     async with server:
         await server.serve_forever()
+    reclaim.cancel()
 
 
 def main() -> None:

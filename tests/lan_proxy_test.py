@@ -27,6 +27,13 @@ BIG = bytes(range(256)) * 16384  # 4 MiB
 SMALL = b'luma ok\n'
 
 
+class QuietServer(http.server.ThreadingHTTPServer):
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        pass  # the proxy resets Studio's side when a client aborts
+
+
 class Upstream(http.server.BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
 
@@ -76,8 +83,7 @@ class LanProxyTest(unittest.TestCase):
         cls.cert, cls.key = d / 'cert.pem', d / 'key.pem'
         subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=test',
                         '-keyout', str(cls.key), '-out', str(cls.cert)], check=True, capture_output=True)
-        cls.http = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
-        cls.http.daemon_threads = True
+        cls.http = QuietServer(('127.0.0.1', 0), Upstream)
         threading.Thread(target=cls.http.serve_forever, daemon=True).start()
         cls.ctx = ssl.create_default_context()
         cls.ctx.check_hostname = False
@@ -166,6 +172,37 @@ class LanProxyTest(unittest.TestCase):
         socket.create_connection(('127.0.0.1', port)).close()
         s = socket.create_connection(('127.0.0.1', port)); s.sendall(b'\x16\x03\x01garbage'); s.close()
         time.sleep(0.3)
+        self.assert_alive(proc, port)
+        self.assertEqual(self.stop(proc), '')
+
+    @unittest.skipUnless(Path('/proc/self/status').exists(), 'reads VmRSS from /proc')
+    def test_aborted_downloads_give_their_memory_back(self):
+        proc, port = self.start(self.http.server_address[1])
+
+        def rss_kb():
+            for line in Path(f'/proc/{proc.pid}/status').read_text().splitlines():
+                if line.startswith('VmRSS:'):
+                    return int(line.split()[1])
+
+        def abort(_):
+            tls = self.ctx.wrap_socket(socket.create_connection(('127.0.0.1', port), timeout=10))
+            tls.sendall(b'GET /big HTTP/1.1\r\nHost: x\r\n\r\n')
+            tls.recv(65536)
+            time.sleep(0.3)  # let Studio's side fill the buffers
+            tls.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 1, 0))
+            tls.close()
+
+        def burst():
+            with ThreadPoolExecutor(30) as pool:
+                list(pool.map(abort, range(30)))
+            time.sleep(lan_proxy.RECLAIM_EVERY + 1.5)
+            return rss_kb()
+
+        # The first burst sets the allocator's high-water mark; what it keeps after that is the peak of 30 connections
+        # at once. Three more bursts must not add to it (before the reclaim each one added about 30 MB).
+        first = burst()
+        grown = max(burst() for _ in range(3)) - first
+        self.assertLess(grown, 25_000, f'RSS grew by {grown} kB over three more bursts of 30 aborted downloads')
         self.assert_alive(proc, port)
         self.assertEqual(self.stop(proc), '')
 
