@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 
 SR = 48000; FPS = 30; W, H = 1920, 1080; ENC_THREADS = 4
-CAM = {'x': 72, 'y': 570, 'size': 300}
+CAM = {'x': 180, 'y': 320, 'size': 440}   # app/render.js SEAT: centre (400, 540), r 220
 ID = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
 MAX_TAKE = 32 << 20; MAX_CHUNK = 16 << 20; MAX_VOICE = 700 << 20; MAX_GAME = 64 << 20; MAX_SEGMENTS = 64
 STALE = 3600            # a folder with no take record and no write for an hour is a closed or crashed tab
@@ -113,7 +113,7 @@ def aligned(d: Path, take: dict) -> dict:
 # ── compose ────────────────────────────────────────────────────────────────────────────────────────────────────────
 def compose_cmd(game: Path, camera: Path | None, voices: list[Path], stem: Path | None, take: dict, cam_offset: float, out: Path) -> list[str]:
     """One ffmpeg run. The game layer is the base; the camera, cut to its centre square, sits in a soft-edged circle at
-    (72, 570) and holds its last frame; each voice and each instrumental piece is delayed to its segment's place."""
+    (180, 320) and holds its last frame; each voice and each instrumental piece is delayed to its segment's place."""
     segs = take['segments']; t1 = segs[0]['when']; dur = duration(take); back = float(take.get('back', .75)); n = len(segs)
     # x264 sizes its thread pool by the cores (24 threads on 16 cores, 0.8 GB at 1080p); four keep it near 0.4 GB and leave
     # the cores to a trainer that sings on while a video composes

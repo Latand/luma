@@ -46,9 +46,10 @@ of your voice, no server after the file is built.
   With it on, the camera opens together with the microphone and «● ВІДЕО» shows in the top bar while it films. One video
   covers a sitting: from «Співати» until an attempt ends with no lives rewind after it, rewinds included. Studio turns
   every sitting of 30 s or longer into a 1920×1080 video. The game fills the frame (target notes, your live line, the dust of
-  past takes, the words, the hearts with the same burn as on screen, the match %), with no buttons, and you sit in a circle
-  bottom-left, beside the roll: no note, word or line runs under the circle, the hearts or the %. The sound is your voice, shifted by the microphone offset, over the song's own
-  instrumental. The attempt's card gets «Відео», which opens it in Studio. A camera that is refused, missing, busy or
+  past takes, the words, the hearts with the same burn as on screen, the match %), with no buttons. The hearts, the % and
+  you in a circle stand in one column on the part of the roll already sung; the roll fades out around them, so no note,
+  word or line runs under the circle, the hearts or the %. The sound is your voice, shifted by the microphone offset,
+  over the song's own instrumental. The attempt's card gets «Відео», which opens it in Studio. A camera that is refused, missing, busy or
   unplugged mid-take never stops the singing: the attempt goes on without video and the settings say why. While the
   camera is on, «Перезаписати з …» is off. Each A–B repeat pass is its own attempt and so its own video: a loop shorter
   than 30 s gives no video. Design in [docs/design/CAMERA_VIDEO_BUILD_BRIEF.md](docs/design/CAMERA_VIDEO_BUILD_BRIEF.md).

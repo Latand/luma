@@ -3,10 +3,11 @@
 > **Status (2026-10-19):** built per [CAMERA_VIDEO_BUILD_BRIEF.md](CAMERA_VIDEO_BUILD_BRIEF.md). The operator's
 > 2026-10-14 decisions replace §7's recommendations (the game fills a landscape frame with the camera in a circle; one
 > video per sitting, lives rewinds inside it; every sitting of 30 s or longer is composed; oldest deleted past 5 GB).
-> §2.1's disk figure and the shadow line are out of date. After the visual review of 2026-10-22 the frame differs from
-> the brief's D1 in three ways: the roll is drawn at 960×540 and DPR 2, so its type is twice the trainer's; the plot
-> starts below the hearts, their burn and the % box (y 202) and right of the camera circle (x 456), so no note, word or
-> line runs under either; the rewind count-in sits on an opaque panel. The body below is the design as written.
+> §2.1's disk figure and the shadow line are out of date. After the visual reviews of 2026-10-22 the frame differs from
+> the brief's D1 in three ways: the roll is drawn at 960×540 and DPR 2, so its type is twice the trainer's; the roll
+> fills the frame above the lyric band, and the hearts, the % and a 440 px camera circle stand in one column on its past
+> part (centred on x 400), where the roll fades out around them, so no note, word or line runs under any of them; the
+> rewind count-in sits on an edged card in a dark halo. The body below is the design as written.
 
 ## Originating requirement
 

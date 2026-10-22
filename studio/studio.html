@@ -253,7 +253,7 @@ function openPlayer(id){
  $('playerTitle').textContent=v?(v.title||'Відео'):'Відео';
  const ready=v&&v.state==='ready';video.hidden=!ready;$('playerActions').hidden=!ready;
  if(ready){if(!video.src.endsWith('/video/'+id+'/video.mp4'))video.src='/video/'+id+'/video.mp4';$('playerDownload').href='/video/'+id+'/video.mp4';$('playerDownload').download=videoFile(v);dlg.dataset.id=id;
-  $('playerMeta').textContent=[when(v.startedAt),v.segments>1?v.segments+' '+plural(v.segments,'відрізок','відрізки','відрізків')+' з відмотками':null,v.approximateSync?'синхрон оцінено приблизно':null].filter(Boolean).join(' · ');}
+  $('playerMeta').textContent=[when(v.startedAt),v.approximateSync?'голос може трохи розходитися з музикою':null].filter(Boolean).join(' · ');}
  else{video.removeAttribute('src');video.load();dlg.dataset.id='';$('playerMeta').textContent=v?stateText(v):'Цього відео вже немає: найстаріші видаляються самі, щоб відео займали не більше 5 ГБ.';}
  if(!dlg.open)dlg.showModal();activity.log('video_open',{id,found:!!v});
 }

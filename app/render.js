@@ -6,9 +6,13 @@
 // WebCodecs H.264 and streams it to Studio. On every other page it only defines LumaRender and does nothing.
 // ?hold=1 loads the take and stops, so a test can call Luma.render.frame(u) itself.
 (() => {
-const FPS = 30, W = 1920, H = 1080, SEAT = {x: 222, y: 720, r: 150};
-// the last heart's burn glow reaches 2.4 sizes (86 px) from its centre and must end before the box of the match %
-const HEART = {size: 36, pitch: 44, y: 92, last: 1636}, PCT = {x: 1740, y: 84};
+// The HUD is one column on the past part of the roll (x 112 to the playhead at 822), centred on x 400: the hearts on
+// top, the % under them, the camera circle below. The burn's box reaches 3 sizes (108 px) beside the outer hearts, so
+// ten span 94–706, clear of the note names and short of the playhead, and 2.6 sizes (94 px) under the row, above the %.
+// Around the column the roll fades out: the clearing is each element grown by MOAT.pad and blurred, solid for 13 px
+// past the element and gone 23 px past the pad, so a note never meets the column at an edge.
+const FPS = 30, W = 1920, H = 1080, COL = 400, SEAT = {x: COL, y: 540, r: 220};
+const HEART = {size: 36, pitch: 44, y: 84}, PCT = {y: 230, w: 168}, MOAT = {pad: 36, blur: 10};
 const BAND = {top: 900, bottom: 1060, max: 1700, now: 44, min: 30, next: 30};
 const font = (w, px) => w + ' ' + px + 'px ' + (getComputedStyle(document.body).getPropertyValue('--sans') || 'sans-serif');
 const mono = (w, px) => w + ' ' + px + 'px ' + (getComputedStyle(document.body).getPropertyValue('--mono') || 'monospace');
@@ -37,17 +41,14 @@ function hearts(g, info) {
     } else if (burning) B.drawHeart(c, x, y0, s, 'burn', burns.get(i), i);
     else B.drawHeart(c, x, y0, s, i < info.left ? 'full' : 'lost');
   }
-  g.drawImage(row, HEART.last - (n - 1) * HEART.pitch - x0, HEART.y - y0);
+  g.drawImage(row, COL - (n - 1) * HEART.pitch / 2 - x0, HEART.y - y0);
 }
 function match(g, info) {
-  const pct = info.pct; g.save(); g.textAlign = 'left'; g.textBaseline = 'middle';
+  const pct = info.pct; g.save(); g.textAlign = 'center'; g.textBaseline = 'middle';
   g.font = font(500, 60); g.fontVariantNumeric = 'tabular-nums'; g.letterSpacing = '-2px';
   g.fillStyle = pct === null ? '#eaf1fa' : pct >= 70 ? '#b7f3e1' : pct < 40 ? '#f0b5bb' : '#eaf1fa';
-  // the halo the stage gives words riding the melody, so the number reads over a note bar as well
-  const text = pct === null ? '—' : pct + '%', w = Math.max(g.measureText(text).width, 40), ink = g.fillStyle;
-  g.fillStyle = '#0c111aec'; g.beginPath(); g.roundRect(PCT.x - 12, PCT.y - 40, w + 24, 98, 8); g.fill();
-  g.fillStyle = ink; g.fillText(text, PCT.x, PCT.y);
-  g.letterSpacing = '2px'; g.font = font(400, 22); g.fillStyle = '#a3b1c6'; g.fillText('ЗБІГ', PCT.x + 2, PCT.y + 42); g.restore();
+  g.fillText(pct === null ? '—' : pct + '%', COL, PCT.y);
+  g.letterSpacing = '2px'; g.font = font(400, 22); g.fillStyle = '#a3b1c6'; g.fillText('ЗБІГ', COL, PCT.y + 42); g.restore();
 }
 // The current line with the sung word lit and underlined, the next line dimmed; a line too long for 1700 px shrinks to
 // 30 px, then wraps onto two lines and the next line steps aside. Never an ellipsis.
@@ -77,6 +78,28 @@ function band(g, info) {
   }
   g.restore();
 }
+// The clearing around the HUD column shows the stage as draw() had it before the first note, dust speck, word or line
+// (its light, rows, grid, axis and past shade, copied by backdrop()), so it has the roll's own colour and lines and only
+// the sung and targeted content fades out. The mask is built once per number of hearts.
+let back = null, mask = null;
+function backdrop(src) {
+  if (!back) { back = document.createElement('canvas'); back.width = W; back.height = H; }
+  const c = back.getContext('2d'); c.globalCompositeOperation = 'copy'; c.drawImage(src, 0, 0);
+}
+function moat(g, info) {
+  if (!back) return;
+  const key = String(info.total || 0);
+  if (mask?.key !== key) {
+    const m = document.createElement('canvas'); m.width = W; m.height = H; const c = m.getContext('2d'), z = hud(info.total || 0), p = MOAT.pad;
+    c.filter = 'blur(' + MOAT.blur + 'px)'; c.fillStyle = '#000'; c.beginPath();
+    c.roundRect(z.top[0] - p, -p, z.top[2] - z.top[0] + 2 * p, z.top[3] + 2 * p, 24);
+    c.rect(COL - PCT.w / 2 - p, z.top[3], PCT.w + 2 * p, SEAT.y - z.top[3]);
+    c.moveTo(SEAT.x + z.seat.r + p, SEAT.y); c.arc(SEAT.x, SEAT.y, z.seat.r + p, 0, Math.PI * 2); c.fill();
+    mask = {key, m};
+  }
+  const c = back.getContext('2d'); c.globalCompositeOperation = 'destination-in'; c.drawImage(mask.m, 0, 0);
+  g.drawImage(back, 0, 0);
+}
 // Where the camera sits: a dark disc and its ring, every frame, so the circle reads even where the camera has ended.
 function seat(g) {
   g.save(); g.shadowColor = '#000000a0'; g.shadowBlur = 28; g.fillStyle = '#0b0e15';
@@ -95,20 +118,28 @@ function countIn(g, info) {
   lines.push([mono(300, 110), '#a1eed8', String(info.count), y + 70], [font(400, 24), '#c8d8dc', prompt, y + 158]);
   let w = 0; for (const [f, , text] of lines) { g.font = f; w = Math.max(w, g.measureText(text).width); }
   const top = lines[0][3] - 50, bottom = lines.at(-1)[3] + 36;
-  g.fillStyle = '#0c111a'; g.beginPath(); g.roundRect(W / 2 - w / 2 - 48, top, w + 96, bottom - top, 8); g.fill();
+  // the toast's card at twice its size, a step lighter than the roll and edged, in a dark halo 40 px wide that the roll
+  // fades into: no note or word stops at the card's edge
+  const x0 = W / 2 - w / 2 - 48, cw = w + 96, ch = bottom - top;
+  g.filter = 'blur(12px)'; g.fillStyle = '#0b0e15'; g.beginPath(); g.roundRect(x0 - 40, top - 40, cw + 80, ch + 80, 40); g.fill(); g.filter = 'none';
+  g.fillStyle = '#1c2534'; g.strokeStyle = '#3d4b63'; g.lineWidth = 2;
+  g.beginPath(); g.roundRect(x0, top, cw, ch, 16); g.fill(); g.stroke();
   g.textAlign = 'center'; g.textBaseline = 'middle';
   for (const [f, ink, text, ly] of lines) { g.font = f; g.fillStyle = ink; g.fillText(text, W / 2, ly); }
   window.LumaRender.panel = [W / 2 - w / 2 - 48, top, W / 2 + w / 2 + 48, bottom];
   g.restore();
 }
 // app.js draws the stage at 960×540 and DPR 2; the overlays are laid out in the frame's own 1920×1080 pixels
-function overlay(g, info) { g.save(); g.setTransform(1, 0, 0, 1, 0, 0); window.LumaRender.panel = null; seat(g); hearts(g, info); match(g, info); band(g, info); countIn(g, info); g.restore(); }
-// What the roll must stay clear of, in frame pixels: the heart row with the whole box its burn paints, the % box, the circle.
+function overlay(g, info) { g.save(); g.setTransform(1, 0, 0, 1, 0, 0); window.LumaRender.panel = null; moat(g, info); seat(g); hearts(g, info); match(g, info); band(g, info); countIn(g, info); g.restore(); }
+// The HUD in frame pixels: the heart row with the whole box its burn paints, the % with its label, the circle with its
+// ring, and `top`, what the upper part of the clearing holds (the hearts themselves and the %).
 function hud(total) {
-  const B = window.LumaBurn, s = HEART.size, first = HEART.last - (total - 1) * HEART.pitch;
-  return {hearts: [first - B.box.l * s, HEART.y - B.box.t * s, HEART.last + B.box.r * s, HEART.y + B.box.b * s], pct: [PCT.x - 12, PCT.y - 40, W, PCT.y + 58], seat: {...SEAT, r: SEAT.r + 5}};
+  const B = window.LumaBurn, s = HEART.size, first = COL - (total - 1) * HEART.pitch / 2, last = COL + (total - 1) * HEART.pitch / 2;
+  const pct = [COL - PCT.w / 2, PCT.y - 36, COL + PCT.w / 2, PCT.y + 56], half = total ? s / 2 + 2 : 0;
+  return {hearts: total ? [first - B.box.l * s, HEART.y - B.box.t * s, last + B.box.r * s, HEART.y + B.box.b * s] : null, pct, seat: {...SEAT, r: SEAT.r + 5},
+    top: [Math.min(pct[0], first - half), 0, Math.max(pct[2], last + half), pct[3]]};
 }
-window.LumaRender = {overlay, hud, panel: null, ready: null, done: false};
+window.LumaRender = {overlay, backdrop, hud, panel: null, ready: null, done: false};
 
 if (!/^\/video\/[0-9a-f-]{36}\/render$/.test(location.pathname) || !window.Luma?.render) return;
 const base = location.pathname.replace(/render$/, ''), hold = new URLSearchParams(location.search).has('hold');

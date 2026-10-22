@@ -42,10 +42,11 @@ function act(type,data){if(window.LumaActivity)window.LumaActivity.log(type,data
 // A scrub or a run of arrow keys is one seek: from where it started to where it settled.
 let seekAct=null;
 function actSeek(from,to){if(!seekAct)seekAct={from:+from.toFixed(1),mode:s.mode};seekAct.to=+to.toFixed(1);clearTimeout(seekAct.timer);seekAct.timer=setTimeout(()=>{const {from,to,mode}=seekAct;seekAct=null;act('seek',{from,to,mode});},600);}
-// On a phone the transport and the stage rail end the first screen: a toast that would cover «Співати», «Стоп» or a rail
-// tool rises above those rows, onto the stage.
+// On a phone the transport, the stage rail and the roll's time axis end the first screen: a toast that would cover
+// «Співати», «Стоп», a rail tool or the axis labels rises above those rows, onto the plot.
+function axisRow(){const w=$('chartWrap').getBoundingClientRect();if(!w.height||!W)return null;const b=bounds();return {top:w.top+b.bottom,bottom:w.top+Math.min(H,b.bottom+(W<720||s.dense?22:26)),height:1};}
 function toast(text){act('toast',{text:String(text).slice(0,200)});const el=$('toast');el.textContent=text;el.style.bottom='';
- let low=innerHeight-24;const h=el.offsetHeight;for(const r of ['.transport','#stageRail'].map(q=>document.querySelector(q)?.getBoundingClientRect()).filter(r=>r&&r.height).sort((p,q)=>q.top-p.top))if(r.top<low&&r.bottom>low-h)low=r.top-8;
+ let low=innerHeight-24;const h=el.offsetHeight;for(const r of [...['.transport','#stageRail'].map(q=>document.querySelector(q)?.getBoundingClientRect()),axisRow()].filter(r=>r&&r.height).sort((p,q)=>q.top-p.top))if(r.top<low&&r.bottom>low-h)low=r.top-8;
  if(low<innerHeight-24)el.style.bottom=Math.round(innerHeight-low)+'px';
  el.classList.add('show');clearTimeout(s.toastTimer);s.toastTimer=setTimeout(()=>$('toast').classList.remove('show'),5000);}
 // kind 'mic': microphone trouble, so the banner offers the microphone settings (or the Studio link on file://). Other errors get no action.
@@ -1473,7 +1474,8 @@ function drawWords(t,v,x,y,b,opt){
    g.fillStyle=on?'#f2f8ff':past?'#a6b3c8':'#c6d0e0';g.fillText(w.w,xx,yy);if(on){g.fillStyle='#a1eed8';g.fillRect(xx,yy+3.5,tw,1.8);}
    g.globalAlpha=1;}}
 }
-function view(t){const span=W<550?7:W<1100?10:12,behind=span*.34;return{a:t-behind,b:t+span-behind,span};}
+// a camera video keeps 40 % of the roll behind the playhead: the HUD column stands on that part (app/render.js)
+function view(t){const span=W<550?7:W<1100?10:12,behind=span*(RENDER?.4:.34);return{a:t-behind,b:t+span-behind,span};}
 function tracePaths(points,x,y,frames,upTo){
  const paths={1:new Path2D(),2:new Path2D(),0:new Path2D()};let last=null;
  for(const p of points){if(p.songT>upTo)break;if(p.m===null||p.m===undefined){last=null;continue;}
@@ -1547,8 +1549,8 @@ function draw(t){
  // stage light: the roll sits on a lit surface that falls off downwards instead of a flat field
  const lit=g.createLinearGradient(0,0,0,H);lit.addColorStop(0,'#121a27');lit.addColorStop(.5,'#0e131d');lit.addColorStop(1,'#0a0e16');
  g.fillStyle=lit;g.fillRect(0,0,W,H);
- g.fillStyle='#090d15';g.fillRect(0,0,b.left-7,H);// pitch rail: note names keep their own strip, off the roll
- g.strokeStyle='#ffffff0a';g.lineWidth=1;g.beginPath();g.moveTo(b.left-6.5,0);g.lineTo(b.left-6.5,H);g.stroke();
+ // pitch rail: note names keep their own strip, off the roll; a camera video is one stage, its names on the stage light
+ if(!RENDER){g.fillStyle='#090d15';g.fillRect(0,0,b.left-7,H);g.strokeStyle='#ffffff0a';g.lineWidth=1;g.beginPath();g.moveTo(b.left-6.5,0);g.lineTo(b.left-6.5,H);g.stroke();}
  // piano-roll rows: black keys in a darker band, C lines drawn and named clearly, every other semitone a whisper
  const named=n=>{const pc=(n%12+12)%12;return pc===0||(rowH>=16||(rowH>=11?!BLACK.has(pc):rowH>=7&&(pc===4||pc===7)));};
  g.textAlign='right';g.textBaseline='middle';
@@ -1564,6 +1566,7 @@ function draw(t){
  // loop region edges on the plot
  if(customRange()){for(const edge of [s.range.a,s.range.b]){const xe=x(edge);if(xe<b.left||xe>b.right)continue;g.strokeStyle='#b4a2eb82';g.lineWidth=1;g.setLineDash([5,4]);g.beginPath();g.moveTo(xe,b.top);g.lineTo(xe,b.bottom);g.stroke();g.setLineDash([]);}
   g.fillStyle='#b4a2eb0c';const xa=clamp(x(s.range.a),b.left,b.right),xb=clamp(x(s.range.b),b.left,b.right);if(xb>xa)g.fillRect(xa,b.top,xb-xa,b.bottom-b.top);}
+ if(RENDER)window.LumaRender?.backdrop(canvas);// the stage before anything sung or targeted: what the HUD column of a video stands on
  g.save();g.beginPath();g.rect(b.left,b.top,b.right-b.left,b.bottom-b.top);g.clip();const opt=effective(),sc=activeScore(),pts=activePoints();
  const tolH=Math.max(4,opt.tolerance/100*rowH*2),barH=clamp(rowH*.74,7,26);
  // past takes as dust, under everything the target and the voice draw; in the notes view it keeps out of the bars
@@ -1884,10 +1887,10 @@ function synthTrace({lag=0,octave=0,kind='voice',late=0,seed=1},run){
 // (hearts, %, lyric band, camera seat, count-in) and encodes.
 const R={segs:[],dust:{},packs:new Map(),key:'',n:0,last:-1};
 // The frame is drawn at 960×540 and DPR 2, so the roll's type, lines and labels come out at twice the trainer's size in
-// the 1080p frame. The plot starts at y 101 (202 in the frame), below the hearts, their burn glow and the % box of
-// app/render.js, and at x 228 (456), right of the camera circle and the note names beside it: no note, word or line
-// is ever drawn under the HUD or the camera.
-function renderSize(){W=960;H=540;DPR=2;TW=TH=1;canvas.width=1920;canvas.height=1080;g.setTransform(2,0,0,2,0,0);s.headH=75;s.railH=90;s.leftW=228;s.dense=false;s.dirty=true;}
+// the 1080p frame. The roll fills the frame above the lyric band (x 112–1888, y 80–848 in the frame, the ЗАРАЗ caption
+// above it); the hearts, the % and the camera circle of app/render.js stand on its past part, left of the playhead at
+// x 822, and the roll fades out before it reaches them, so no note, word or line runs under the HUD or the camera.
+function renderSize(){W=960;H=540;DPR=2;TW=TH=1;canvas.width=1920;canvas.height=1080;g.setTransform(2,0,0,2,0,0);s.headH=14;s.railH=90;s.leftW=56;s.dense=false;s.dirty=true;}
 function renderLoad(take){
  if(validNotes(take.notes,song.duration)){song.notes=take.notes.map(n=>({...n})).sort((a,b)=>a.a-b.a);invalidateMap();}
  if(Array.isArray(take.verified))s.verified=take.verified.filter(r=>Number.isFinite(r.a)&&Number.isFinite(r.b)&&r.b>r.a);
@@ -1933,8 +1936,8 @@ async function renderFrame(u){
  const pct=scorePct(s.live),L=song.lyrics||[];let lyric=null;
  if(L.length){const {cur,next,i}=lyricAt(t);let line=cur;if(!cur&&next&&next.a-t<4)line=next;const after=line?L[i+1]:null;
   if(line)lyric={words:line.words.map(w=>({w:w.w,state:line===next?'soon':t>=w.a&&t<w.b+.08?'on':t>=w.b?'past':''})),next:after?after.words.map(w=>w.w).join(' '):''};}
- const fitDrawn=!!cloud.layer&&cloud.n>0&&!cloud.hidden;
- return {u,t,segment:at.k,gap:at.phase!=='play',phase:at.phase,total:lv?lv.total:null,left,burns,lossMs:burns.length?Math.max(...burns.map(b=>b.ms)):null,
+ const fitDrawn=!!cloud.layer&&cloud.n>0&&!cloud.hidden,b=bounds(),v=view(t),plot=[b.left,b.top,b.right,b.bottom,b.left+(t-v.a)/v.span*(b.right-b.left)].map(q=>q*DPR);
+ return {u,t,segment:at.k,plot,gap:at.phase!=='play',phase:at.phase,total:lv?lv.total:null,left,burns,lossMs:burns.length?Math.max(...burns.map(b=>b.ms)):null,
   refill:at.phase==='count'&&lv?{ms:(u-seg.uc)*1000,wait:prev?prev.losses.map(x=>({i:x.left,ms:Math.max(0,window.LumaBurn.ms-(seg.uc-x.u)*1000)})):[]}:null,
   notice:at.phase==='count'&&lv?'Ще раз з '+fmt(seg.lives.retryFrom??seg.a):null,count:at.phase==='count'?Math.max(1,Math.ceil(seg.u0-u-1e-9)):null,pct,lyric,
   dust:{ids:(seg.dust||[]).length,specks:cloud.n,fit:cloud.fit,drawn:fitDrawn},

@@ -259,8 +259,8 @@ if (want('basic') && basicId) {
     assert(pl.bad.length === 0 && box.l >= 0 && box.r <= box.vw && box.t >= 0 && box.b <= box.vh, `the player at ${vp.width}px fits the window, buttons clear of text and ≥ 44 px on a phone ` + JSON.stringify({bad: pl.bad, box}));
     // the browser's control bar (about 73 px) has a strip of its own under the picture; the caption leaves the length to it
     const strip = await page.evaluate(() => { const v = document.getElementById('playerVideo'), r = v.getBoundingClientRect(); return {strip: +(r.height - r.width * 9 / 16).toFixed(1), pos: getComputedStyle(v).objectPosition, meta: document.getElementById('playerMeta').textContent, d: v.duration}; });
-    assert(strip.strip >= 76 && strip.pos === '50% 0%' && strip.meta.split(' · ').every(x => !/^\d+:\d\d$/.test(x)),
-      `the player at ${vp.width}px: the picture on top, ${strip.strip} px for the controls under it, no second length in the caption ` + JSON.stringify(strip));
+    assert(strip.strip >= 76 && strip.pos === '50% 0%' && strip.meta.split(' · ').every(x => !/^\d+:\d\d$/.test(x)) && /^\d\d\.\d\d\.\d{4} \d\d:\d\d$/.test(strip.meta),
+      `the player at ${vp.width}px: the picture on top, ${strip.strip} px for the controls under it, the caption the date alone ` + JSON.stringify(strip));
     if (shot(`player_${vp.width}`)) await page.screenshot({path: shot(`player_${vp.width}`)});
     await page.locator('#playerClose').click();
   }
@@ -352,6 +352,11 @@ if (want('sync')) {
   const r = await sit(page, {seconds: 4}); await close(quiet);
   const v = await settle(A, r.id), d = join(A.lib, 'videos', r.id), al = readJson(d, 'align.json'), take = readJson(d, 'take.json');
   assert(v.state === 'ready' && al.approximateSync && Math.abs(al.W0 - take.ctxAtStart) <= .04, 'a silent microphone falls back to the stamp, within 40 ms of it ' + JSON.stringify(al));
+  // the player says what an estimated sync means for the viewer, after the date, and nothing about segments
+  const viewer = await open([]), sp = await viewer.newPage({viewport: {width: 1440, height: 900}});
+  await sp.goto(A.base + '/#video/' + r.id); await sp.waitForFunction(() => document.getElementById('player').open && !document.getElementById('playerVideo').hidden, null, {timeout: 8000});
+  const meta = await sp.evaluate(() => document.getElementById('playerMeta').textContent); await close(viewer);
+  assert(/^\d\d\.\d\d\.\d{4} \d\d:\d\d · голос може трохи розходитися з музикою$/.test(meta), 'an estimated sync: the date, then «голос може трохи розходитися з музикою» ' + JSON.stringify(meta));
 }
 
 // ── 9, 10, 8 · a lives sitting with dust: one video across two rewinds; its frames; the render page itself ────────────
@@ -387,10 +392,10 @@ if (want('lives')) {
   const fire = [];
   for (const x of losses) {
     const png = join(tmp, `burn-${x.u.toFixed(2)}.png`); ff('-ss', (x.u + .2).toFixed(3), '-i', join(d, 'video.mp4'), '-frames:v', '1', png);
-    const cx = 1636 - (x.total - 1 - x.left) * 44, out = execFileSync(py, ['-c', `
+    const cx = 400 - (x.total - 1) * 22 + x.left * 44, out = execFileSync(py, ['-c', `
 import sys, numpy as np, subprocess
 raw = subprocess.run(['ffmpeg','-v','error','-i',sys.argv[1],'-f','rawvideo','-pix_fmt','rgb24','-'],capture_output=True,check=True).stdout
-img = np.frombuffer(raw, np.uint8).reshape(1080, 1920, 3).astype(int); x, y = int(sys.argv[2]), 92
+img = np.frombuffer(raw, np.uint8).reshape(1080, 1920, 3).astype(int); x, y = int(sys.argv[2]), 84
 box = img[max(0,y-70):y+70, x-60:x+60]; r, g, b = box[...,0], box[...,1], box[...,2]
 print(int(((r > 200) & (g > 90) & (g < 215) & (b < 140)).sum()))`, png, String(cx)], {encoding: 'utf8'});
     fire.push({u: +x.u.toFixed(2), heart: x.left, orange: +out}); rmSync(png);
@@ -413,16 +418,40 @@ print(json.dumps({'gap': r(float(sys.argv[2]) + .1, float(sys.argv[3]) - .1), 's
     return {render: document.documentElement.dataset.render, w: c.width, h: c.height, css: [c.clientWidth, c.clientHeight], dpr: window.Luma.test.dpr(),
       chrome: ['.bar', '.transport', '.stage-head', '.stage-rail', '.takes', '#countdown', '#lyricBand', 'dialog'].filter(vis)}; });
   assert(dom.render === '1' && dom.w === 1920 && dom.h === 1080 && dom.dpr === 2 && dom.chrome.length === 0, 'render mode: html[data-render], a 1920×1080 canvas drawn at DPR 2 (the roll\'s type twice the trainer\'s), no chrome rendered ' + JSON.stringify(dom));
-  // the roll never runs under the hearts, their burn, the % box or the camera: the plot (every note, word and line is
-  // clipped to it), the ЗАРАЗ caption and the note names beside the plot, against the HUD at its widest (10 lives)
+  // One stage: the roll fills the frame above the lyric band, and the hearts with their burn, the % and the camera circle
+  // stand in one column on its past part, left of the playhead; the note names and the ЗАРАЗ caption stay clear of them
   const clear = await hold.evaluate(async () => { const out = [], c = document.createElement('canvas').getContext('2d'), mono = getComputedStyle(document.body).getPropertyValue('--mono');
-    for (const u of [0, 3, 6]) { await window.Luma.render.frame(u); const b = window.Luma.test.plot(), k = window.Luma.test.dpr(), now = b.left + (b.right - b.left) * .34;
+    for (const u of [0, 3, 6]) { const f = await window.Luma.render.frame(u), b = window.Luma.test.plot(), k = window.Luma.test.dpr(), now = f.plot[4] / k;
       c.font = '600 ' + 11 * k + 'px ' + mono; const name = c.measureText('D♯5').width; c.font = '600 ' + 11 * k + 'px sans-serif'; const cap = c.measureText('ЗАРАЗ').width / 2 + 12;
-      out.push({plot: [b.left * k, b.top * k, b.right * k, b.bottom * k], caption: [now * k - cap, (b.laneTop - 15) * k - 14, now * k + cap, (b.laneTop - 15) * k + 14], names: [(b.left - 11) * k - name, b.top * k, (b.left - 11) * k, b.bottom * k]}); }
+      out.push({plot: f.plot, caption: [now * k - cap, (b.laneTop - 15) * k - 14, now * k + cap, (b.laneTop - 15) * k + 14], names: [(b.left - 11) * k - name, b.top * k, (b.left - 11) * k, b.bottom * k]}); }
     return {frames: out, hud: window.LumaRender.hud(10)}; });
   const meet = (p, q) => p[0] < q[2] && q[0] < p[2] && p[1] < q[3] && q[1] < p[3], disc = (r, c) => { const x = Math.max(r[0], Math.min(c.x, r[2])), y = Math.max(r[1], Math.min(c.y, r[3])); return Math.hypot(x - c.x, y - c.y) < c.r; };
-  assert(clear.frames.every(f => ['plot', 'caption', 'names'].every(k => !meet(f[k], clear.hud.hearts) && !meet(f[k], clear.hud.pct) && !disc(f[k], clear.hud.seat))) && clear.frames.every(f => f.plot[1] === clear.frames[0].plot[1] && f.plot[0] === clear.frames[0].plot[0]),
-    'the plot, the ЗАРАЗ caption and the note names stay clear of the hearts with their burn, the % box and the camera circle ' + JSON.stringify(clear));
+  const H_ = clear.hud, P0 = clear.frames[0].plot;
+  assert(clear.frames.every(f => f.plot.every((q, i) => q === P0[i])) && P0[0] <= 112 && P0[1] <= 80 && P0[2] >= 1880 && P0[3] >= 840
+    && H_.hearts[2] < P0[4] - 24 && H_.top[2] < P0[4] - 24 && H_.seat.x + H_.seat.r < P0[4] - 100 && H_.hearts[0] > 0 && H_.seat.x - H_.seat.r > P0[0] + 24 && H_.seat.y + H_.seat.r < P0[3]
+    && clear.frames.every(f => ['caption', 'names'].every(k => !meet(f[k], H_.hearts) && !meet(f[k], H_.pct) && !disc(f[k], H_.seat))),
+    'the roll fills the frame; the hearts with their burn, the % and the circle stand left of the playhead, inside the roll; names and ЗАРАЗ clear of them ' + JSON.stringify(clear));
+  // Nothing sung or targeted shows in the clearing around the column: there each frame has the stage as draw() had it
+  // before its first note (copied here as the page hands it to LumaRender.backdrop), exactly between the hearts and the
+  // %, and never lighter beside the circle, where only the seat's shadow darkens it; outside the clearing the content
+  // does show. No rail of its own: left of the note names the stage has the colour it has right of them, no seam.
+  // Pixels are read from copies, so the page's own canvas is never read back.
+  const pix = await hold.evaluate(async () => { const mk = () => { const c = document.createElement('canvas').getContext('2d', {willReadFrequently: true}); c.canvas.width = 1920; c.canvas.height = 1080; return c; };
+    const stage = mk(), shot = mk(), z = window.LumaRender.hud(3), out = [], orig = window.LumaRender.backdrop;
+    window.LumaRender.backdrop = src => { stage.globalCompositeOperation = 'copy'; stage.drawImage(src, 0, 0); orig(src); };
+    const ring = []; for (let a = 0; a < 360; a += 10) ring.push([Math.round(z.seat.x + Math.cos(a * Math.PI / 180) * (z.seat.r + 10)), Math.round(z.seat.y + Math.sin(a * Math.PI / 180) * (z.seat.r + 10))]);
+    const gap = []; for (let x = Math.ceil(z.top[0]); x <= z.top[2]; x += 6) for (const y of [130, 150, 170]) gap.push([x, y]);
+    for (let u = 1; u < 12 && out.length < 4; u += .7) { const f = await window.Luma.render.frame(u); if (f.burns.length || f.count !== null) continue;
+      shot.globalCompositeOperation = 'copy'; shot.drawImage(document.getElementById('chart'), 0, 0);
+      const A = shot.getImageData(0, 0, 1920, 1080).data, B = stage.getImageData(0, 0, 1920, 1080).data, at = (d, x, y) => [0, 1, 2].map(c => d[(y * 1920 + x) * 4 + c]);
+      const dev = pts => Math.max(...pts.map(([x, y]) => Math.max(...at(A, x, y).map((v, c) => Math.abs(v - at(B, x, y)[c])))));
+      const lighter = pts => Math.max(...pts.map(([x, y]) => Math.max(...at(A, x, y).map((v, c) => v - at(B, x, y)[c]))));
+      let shown = 0; for (let y = 100; y < 800; y += 2) for (let x = z.seat.x + z.seat.r + 70; x < f.plot[4] - 4; x += 2) shown = Math.max(shown, ...at(A, x, y).map((v, c) => Math.abs(v - at(B, x, y)[c])));
+      out.push({u: +u.toFixed(1), total: f.total, gap: dev(gap), ring: lighter(ring), shown, rail: [150, 300, 450, 600, 750].map(y => [at(A, 20, y), at(A, f.plot[0] - 13, y), at(A, f.plot[0] - 8, y)])}); }
+    window.LumaRender.backdrop = orig; return out; });
+  const same = (a, b) => a.every((v, i) => Math.abs(v - b[i]) <= 2);
+  assert(pix.length >= 3 && pix.every(f => f.total === 3 && f.gap <= 2 && f.ring <= 2) && pix.some(f => f.shown > 40) && pix.every(f => f.rail.every(([a, b, c]) => same(a, b) && same(b, c))),
+    'the clearing around the hearts, the % and the circle shows the bare stage while notes and lines show beside it; no rail fill, no seam ' + JSON.stringify(pix.map(f => ({u: f.u, gap: f.gap, ring: f.ring, shown: f.shown, rail: f.rail[2]}))));
   // what the take record implies, decoded here from its packed trace and scored in one pass by the trainer's pure engine
   const LV = {easy: {slack: .12, ratio: .35, octaveFree: true}, normal: {slack: .06, ratio: .5, octaveFree: false}, strict: {slack: .05, ratio: .65, octaveFree: false}};
   const stored = segs.map(s => { const run = s.history.runs[0], tr = s.history.traces[0], pts = [];
@@ -446,8 +475,15 @@ print(json.dumps({'gap': r(float(sys.argv[2]) + .1, float(sys.argv[3]) - .1), 's
     'the dust is drawn on every sampled frame; the re-sing\'s dust holds the attempt that ended in the rewind ' + JSON.stringify({dust: frames.map(f => f.dust), sets: segs.map(s => s.dust)}));
   const gapU = (segs[1].cin + segs[1].when) / 2 - t1, gapF = await hold.evaluate(u => window.Luma.render.frame(u), gapU);
   const panel = await hold.evaluate(() => window.LumaRender.panel), plotNow = await hold.evaluate(() => { const b = window.Luma.test.plot(); return [b.left * 2, b.top * 2, b.right * 2, b.bottom * 2]; });
-  assert(gapF.gap && /^Ще раз з \d\d:\d\d$/.test(gapF.notice) && gapF.count >= 1 && gapF.left === gapF.total && panel && panel[0] > 0 && panel[2] < 1920 && panel[1] > plotNow[1] && panel[3] < plotNow[3],
-    'inside the gap: «Ще раз з …», the count and the refilled hearts, on an opaque panel over the roll ' + JSON.stringify({notice: gapF.notice, count: gapF.count, left: gapF.left, panel}));
+  // the card has a visible edge, and within 20 px around it the roll is gone into its halo: no word cut at the edge
+  const edge = await hold.evaluate(p => { const cp = document.createElement('canvas').getContext('2d', {willReadFrequently: true}); cp.canvas.width = 1920; cp.canvas.height = 1080; cp.drawImage(document.getElementById('chart'), 0, 0);
+    const img = cp.getImageData(0, 0, 1920, 1080).data, my = Math.round((p[1] + p[3]) / 2), lum = (x, y) => { const i = (y * 1920 + x) * 4; return img[i] + img[i + 1] + img[i + 2]; };
+    let halo = 0; for (let d = 2; d <= 20; d += 2) { for (let x = Math.round(p[0]) - 30; x <= p[2] + 30; x += 3) halo = Math.max(halo, lum(x, Math.round(p[1]) - d), lum(x, Math.round(p[3]) + d));
+      for (let y = Math.round(p[1]); y <= p[3]; y += 3) halo = Math.max(halo, lum(Math.round(p[0]) - d, y), lum(Math.round(p[2]) + d, y)); }
+    return {border: lum(Math.round(p[0]), my), fill: lum(Math.round(p[0]) + 12, my), outside: lum(Math.round(p[0]) - 24, my), halo}; }, panel);
+  assert(gapF.gap && /^Ще раз з \d\d:\d\d$/.test(gapF.notice) && gapF.count >= 1 && gapF.left === gapF.total && panel && panel[0] > 0 && panel[2] < 1920 && panel[1] > plotNow[1] && panel[3] < plotNow[3]
+    && edge.border > edge.fill + 60 && edge.fill > edge.outside + 15 && edge.halo < 90,
+    'inside the gap: «Ще раз з …», the count and the refilled hearts, on an edged card a step lighter than the roll, nothing of the roll within 20 px of it ' + JSON.stringify({notice: gapF.notice, count: gapF.count, left: gapF.left, panel, edge}));
   if (shot('render_gap')) await hold.screenshot({path: shot('render_gap')});
   // the composed frame against the render's own frame: where the trainer's transport and rail would be the video shows
   // the stage as the render drew it, and inside the circle the camera
@@ -461,7 +497,7 @@ import sys, json, subprocess, numpy as np
 def img(p): return np.frombuffer(subprocess.run(['ffmpeg','-v','error','-i',p,'-f','rawvideo','-pix_fmt','rgb24','-'],capture_output=True,check=True).stdout, np.uint8).reshape(1080,1920,3).astype(int)
 g = img(sys.argv[1]); v = img(sys.argv[2]); pts = json.loads(sys.argv[3])
 def d(x, y, r=10): return float(np.abs(g[y-r:y+r, x-r:x+r] - v[y-r:y+r, x-r:x+r]).mean())
-print(json.dumps({'chrome': {k: d(*p) for k, p in pts.items()}, 'circle': d(222, 720, 60), 'outside': d(1100, 300, 60)}))`, gamePng, mp4Png, JSON.stringify(geo)], {encoding: 'utf8'}));
+print(json.dumps({'chrome': {k: d(*p) for k, p in pts.items()}, 'circle': d(400, 540, 100), 'outside': d(1100, 300, 60)}))`, gamePng, mp4Png, JSON.stringify(geo)], {encoding: 'utf8'}));
   assert(Object.values(cmp.chrome).every(x => x < 12) && cmp.outside < 12 && cmp.circle > 30, 'the MP4 is the render where the trainer has chrome, and the camera inside the circle ' + JSON.stringify(cmp));
   const clean = hlogs.filter(l => !/^(log|debug|info):/.test(l));
   assert(clean.length === 0 && [...hosts].every(h => h === '127.0.0.1:' + A.port), 'the render page logs nothing and asks only 127.0.0.1 ' + JSON.stringify({clean, hosts: [...hosts]}));
@@ -509,15 +545,21 @@ if (want('refused')) {
   const quiet = await open(media(silentWav));
   const plainScore = await (async () => { const {page} = await trainer(quiet, demoA); await sit(page, {seconds: 2}); const t = await page.evaluate(() => window.Luma.test.takes()[0]); await page.close(); return t; })();
   for (const why of ['absent', 'busy']) await refused({why, ...await trainer(quiet, demoA, {failVideo: why === 'absent' ? 'NotFoundError' : 'NotReadableError'})}, plainScore);
-  // on a phone the toast of a refused camera rises above the transport and the stage rail during the count-in
+  // on a phone the toast of a refused camera rises above the transport, the stage rail and the time axis during the count-in
   { const c = await trainer(quiet, demoA, {viewport: {width: 390, height: 844}, failVideo: 'NotReadableError'}); await setCamera(c.page, true);
     await c.page.locator('#singBtn').click(); await c.page.waitForFunction(() => document.getElementById('toast').classList.contains('show'), null, {timeout: 10000}); await c.page.waitForTimeout(400);
     const t = await c.page.evaluate(() => { const r = e => { const q = e.getBoundingClientRect(); return [q.left, q.top, q.right, q.bottom]; }, el = document.getElementById('toast'), tr = r(el);
       const under = [...document.querySelectorAll('button, select, input')].filter(b => b.checkVisibility() && b.getBoundingClientRect().width).map(b => ({id: b.id || b.textContent.trim().slice(0, 16), r: r(b)}))
         .filter(b => b.r[0] < tr[2] && tr[0] < b.r[2] && b.r[1] < tr[3] && tr[1] < b.r[3]);
-      return {text: el.textContent, toast: tr.map(Math.round), under, mode: window.Luma.test.state().mode}; });
+      // the stage's text: the time axis the canvas draws under the plot, and every visible text range of the stage's DOM
+      const w = document.getElementById('chartWrap').getBoundingClientRect(), b = window.Luma.test.plot(), axis = [w.left, w.top + b.bottom, w.right, w.top + b.bottom + 22], texts = [];
+      const walk = document.createTreeWalker(document.querySelector('.stage'), NodeFilter.SHOW_TEXT);
+      for (let n; (n = walk.nextNode());) { if (!n.textContent.trim() || !n.parentElement.checkVisibility({opacityProperty: true, visibilityProperty: true})) continue;
+        const rg = document.createRange(); rg.selectNodeContents(n); for (const q of rg.getClientRects()) if (q.width && q.left < tr[2] && tr[0] < q.right && q.top < tr[3] && tr[1] < q.bottom) texts.push(n.textContent.trim().slice(0, 20)); }
+      return {text: el.textContent, toast: tr.map(Math.round), under, axis: axis.map(Math.round), onAxis: axis[1] < tr[3] && tr[1] < axis[3], texts, mode: window.Luma.test.state().mode}; });
     if (shot('toast_390')) await c.page.screenshot({path: shot('toast_390')});
-    assert(t.text === 'Камера недоступна: спроба без відео.' && t.under.length === 0 && t.toast[1] >= 0, 'at 390 px the camera toast covers no control during the count-in ' + JSON.stringify(t));
+    assert(t.text === 'Камера недоступна: спроба без відео.' && t.under.length === 0 && t.toast[1] >= 0 && !t.onAxis && t.texts.length === 0,
+      'at 390 px the camera toast covers no control, no time-axis label and no text of the stage during the count-in ' + JSON.stringify(t));
     await c.page.locator('#stopBtn').click(); await c.page.waitForFunction(() => window.Luma.test.state().mode === 'idle' && !window.Luma.diagnostics().pending, null, {timeout: 30000});
     assert(c.logs.length === 0, 'console clean through the phone toast ' + JSON.stringify(c.logs)); await c.page.close(); }
   await close(quiet);
