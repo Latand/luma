@@ -348,7 +348,10 @@ class Handler(BaseHTTPRequestHandler):
 
     # ── camera videos (studio/video.py) ──
     def same_origin(self) -> bool:
-        origin = self.headers.get('Origin'); return not origin or origin == 'http://' + (self.headers.get('Host') or '')
+        """Pages of another origin may not write; a request without an Origin header (a local script, a test) may. The
+        page's own origin is https when it comes through the LAN TLS proxy (studio/lan_proxy.py)."""
+        origin = self.headers.get('Origin'); host = self.headers.get('Host') or ''
+        return not origin or origin in ('http://' + host, 'https://' + host)
     def body(self, limit: int) -> bytes | None:
         try: n = int(self.headers.get('Content-Length') or 0)
         except ValueError: return None
@@ -420,10 +423,8 @@ class Handler(BaseHTTPRequestHandler):
         return self.send(404, 'not found', 'text/plain')
 
     def activity(self):
-        """Append a batch of activity events. Pages of another origin may not write here; a request without an Origin
-        header (a local script, a test) may."""
-        origin = self.headers.get('Origin')
-        if origin and origin != 'http://' + (self.headers.get('Host') or ''): return self.send(403, 'origin', 'text/plain')
+        """Append a batch of activity events, from the page's own origin only (same_origin)."""
+        if not self.same_origin(): return self.send(403, 'origin', 'text/plain')
         try: n = int(self.headers.get('Content-Length') or 0)
         except ValueError: n = -1
         if n > MAX_ACTIVITY: return self.send(413, 'too large', 'text/plain')

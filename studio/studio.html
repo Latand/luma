@@ -311,7 +311,7 @@ function dropFrame(){const f=S.frame;S.frame=null;S.loaded=false;S.wantOpen=fals
  // Removing the document stops its audio and frees the microphone without a beforeunload prompt; an attempt still in
  // progress is dropped, a finished one is already in the history.
  setTimeout(()=>f.remove(),ms(200));}
-function makeFrame(src){dropFrame();const f=el('iframe',null,'sframe');f.src=src;f.title='Тренажер';f.allow='microphone; camera; autoplay; fullscreen';f.inert=true;f.tabIndex=-1;
+function makeFrame(src){dropFrame();const f=el('iframe',null,'sframe');f.src=src;f.title='Тренажер';f.allow='microphone; camera; autoplay; fullscreen; xr-spatial-tracking';f.inert=true;f.tabIndex=-1;
  f.addEventListener('load',()=>{if(S.frame!==f)return;S.loaded=true;if(S.wantOpen)showFrame();});S.frame=f;$('sessionBody').append(f);return f;}
 function showFrame(){const f=S.frame;if(!f)return;S.wantOpen=false;
  const card=$('sessionBody').querySelector('.sintro');if(card){card.classList.add('out');setTimeout(()=>card.remove(),ms(180));}

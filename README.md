@@ -60,6 +60,8 @@ of your voice, no server after the file is built.
   without gaps. Seek during playback and the music picks up from there.
 - **Vocal on/off.** One button (V) mutes the original vocal stem so you hear only the backing and yourself.
 - Two speeds (1× and 0.8× with pitch preserved), vocal octave shift, mix balance, note editor, fragment verification.
+- **VR with the room in view.** In a headset's browser (Quest Browser) the header shows **VR**: the trainer becomes one
+  panel in Luma's own look, 1.5 m in front of the eyes over the passthrough. See «In a VR headset» below.
 - Ukrainian interface. Works offline once built; needs `http://localhost` for the microphone (browsers refuse the audio
   worklet on `file://`).
 
@@ -115,6 +117,43 @@ the MP4 checks out. `--video-min-seconds` (30) and `--render-deadline-factor` (3
 **Hardware.** A 5-minute song takes about 4 minutes on an RTX 3060 (Demucs ≈ 50 s, pYIN ≈ 1 min, CREPE ≈ 30 s). CPU works
 and takes considerably longer. Python 3.11, FFmpeg and a few GB of RAM are required; `requirements.txt` pins PyTorch 2.10.
 
+### In a VR headset (Quest)
+
+Studio listens on `127.0.0.1` only. To reach it from the headset, put TLS in front of it on the LAN with
+`studio/lan_proxy.py` (standard library only): `python3 -I studio/lan_proxy.py --cert cert.pem --key key.pem` listens on
+`0.0.0.0:8790`, lets in only `192.168.5.0/24` and loopback (`--allow` changes that) and relays the bytes to
+`127.0.0.1:8792`. One asyncio loop holds all of the browser's parallel and keep-alive connections; a reset or aborted
+connection closes only itself. (`ncat --ssl … --sh-exec` dies with `fselect error 9` under a browser's parallel
+connections.) To keep it running, copy the script out of the checkout and run it as a user service, for example
+`~/.config/systemd/user/luma-lan.service`:
+
+```ini
+[Service]
+ExecStart=/usr/bin/python3 -I %h/.local/share/luma-lan/lan_proxy.py --cert %h/path/cert.pem --key %h/path/key.pem
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+HTTPS is required: the microphone and WebXR work only in a secure context. With a self-signed certificate the headset's
+browser warns once per address. In the headset open `https://<this PC>:8790/`, open a song and
+press **VR** in its header (`app/xr.js`):
+
+- an immersive-ar session: the room stays visible, and one panel 1.5 m away holds the song and its status, the
+  readout, the words, the chart and the controls (Співати, Слухати, Спочатку, −5 / +5 с, Вокал, Повтор, 1× / 0.8×,
+  the auto-marked fragments ‹ ›, the level, Сюди, Вийти). A press on the progress bar seeks.
+- the panel mirrors the page: its labels are read from the page's elements and its buttons click the page's own, so
+  scoring, history and settings are the same as on the desktop. History and settings belong to the address, so
+  `https://<this PC>:8790` keeps its own.
+- point with a controller or a hand; press with the trigger or a pinch. The grip, B / Y, a pressed thumbstick or
+  **Сюди** bring the panel in front of the eyes again.
+- the microphone permission is asked before the session starts: a browser cannot show it inside VR. If that took
+  long, press **VR** once more.
+- the headset's speakers reach its microphone. Use headphones, or switch **Вокал** off, so the original singer is not
+  scored as your voice.
+
 ## Honesty about the map
 
 Every automatic map is a draft. Confident (`ok`) frames typically cover 20–35 % of a real song; the rest is instrumental,
@@ -133,6 +172,7 @@ mistakes happen; the easy level exists partly for that reason.
 ```sh
 bun add -d playwright && bunx playwright install chromium   # or npm
 tests/e2e/run.sh
+python3 -I tests/lan_proxy_test.py   # the LAN TLS proxy as a real process; needs openssl
 ```
 
 `scoring.mjs` checks the engine (correct / wrong / uncertain / silence / no-target / no double counting), trace persistence,
@@ -163,6 +203,11 @@ and dust the take implies, the burn at each loss, the count-in of a rewind on it
 a restart, Range and the player, the layout at 390, 900 and 1440 px, and no process left behind. `tests/video_test.py`
 checks the alignment through Opus, the eviction order, the render deadline, the ffmpeg graph and that the thumbnail
 falls inside a sung segment, without a browser.
+`xr.mjs` enters VR on Meta's WebXR emulator (the `iwer` dev dependency) as a Quest 3: the panel 1.5 m ahead with the
+chart at its size, «Слухати», «Вокал» and a seek on the progress bar by a controller's trigger, «Сюди» by a pinch,
+«Вийти», a refused session (the page stays out of VR, and its toast is true to the microphone) and a hidden one
+(listening and singing stop). `xr_perf.mjs`, outside `run.sh`, measures the headset's frames on the emulator, idle,
+listening and singing, under 1× and 4× CPU throttle.
 Every suite requires a clean console. Set `LUMA_BROWSER=/path/to/chrome` to use a specific
 Chromium build.
 
@@ -171,11 +216,11 @@ Chromium build.
 ```
 app/       head.html (styles + markup, {{TITLE}} / {{ARTIST}} placeholders), workers.html (AudioWorklet capture + YIN worker + the worker that builds and paints the dust of past takes), app.js,
            activity.js (activity log, shared with Studio), latency.js (microphone offset estimate from attempts),
-           burn.js (the burn of a lost life, one canvas draw function), camera.js (the camera recorder of a sitting and its
+           burn.js (the burn of a lost life, one canvas draw function), xr.js (the VR panel in a headset's browser), camera.js (the camera recorder of a sitting and its
            upload), render.js (the game layer of a camera video: overlays, WebCodecs encoding)
 studio/    prepare_song.py (pipeline), build_html.py (package → HTML, --rebuild), studio_server.py + studio.html, covers.py, difficulty.py, luma-studio.sh,
            video.py (camera videos: store, alignment, render, compose, budget),
-           activity_report.py (digest of the activity log)
+           activity_report.py (digest of the activity log), lan_proxy.py (TLS on the LAN for a headset)
 examples/  make_demo.py (synthetic demo song)
 tests/e2e/ Playwright suites
 docs/      TARGET_MAP_SCHEMA.md, PIPELINE.md, SCORING.md, HISTORY_SCHEMA.md, ACTIVITY_LOG.md, PROGRESS_DESIGN.md, LESSONS.md, design/, screenshots
