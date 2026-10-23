@@ -1,6 +1,9 @@
 'use strict';
 (() => {
 const $=id=>document.getElementById(id),clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+// Render mode (docs/design/CAMERA_VIDEO_BUILD_BRIEF.md §5.3): Studio opens the trainer at /video/<id>/render in a headless
+// browser to draw the game layer of a camera video frame by frame. No microphone, no history, no chrome, a virtual clock.
+const RENDER=/^\/video\/[0-9a-f-]{36}\/render$/.test(location.pathname);if(RENDER)document.documentElement.dataset.render='1';
 const names=['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
 const words=['До','До-дієз','Ре','Ре-дієз','Мі','Фа','Фа-дієз','Соль','Соль-дієз','Ля','Ля-дієз','Сі'];
 const BLACK=new Set([1,3,6,8,10]);
@@ -19,7 +22,8 @@ try{const saved=localStorage.getItem('luma.trainer.settings');hadSettings=!!save
 // before, or `back` seconds when there is none within `maxBack`, never before the A–B start.
 const LIVES={count:10,sizes:[3,5,10],window:4,minMiss:1.5,share:.6,cooldown:2.5,minBack:3,maxBack:20,back:9};
 prefs.lives=false;prefs.livesCount=LIVES.count;// off by default: with it off nothing in the trainer changes
-try{const p=JSON.parse(localStorage.getItem('luma.trainer.settings')||'{}');if(typeof p.lives==='boolean')prefs.lives=p.lives;if(LIVES.sizes.includes(p.livesCount))prefs.livesCount=p.livesCount;}catch(_){}
+prefs.camera=false;// «Знімати мене на камеру»: off by default; with it off getUserMedia asks for no video and nothing goes to /video
+try{const p=JSON.parse(localStorage.getItem('luma.trainer.settings')||'{}');if(typeof p.lives==='boolean')prefs.lives=p.lives;if(LIVES.sizes.includes(p.livesCount))prefs.livesCount=p.livesCount;if(typeof p.camera==='boolean')prefs.camera=p.camera;}catch(_){}
 function levelOpt(){const L=LEVELS[prefs.level]||LEVELS.normal;return{tolerance:prefs.level==='custom'?prefs.tolerance:L.tolerance,slack:L.slack,ratio:L.ratio,octaveFree:L.octaveFree,level:prefs.level};}
 function levelLabel(opt){return opt.level==='custom'?'свій коридор':(LEVELS[opt.level]||LEVELS.normal).label;}
 // Signed distance in cents; on the easy level the octave is forgiven (distance folds into ±6 semitones).
@@ -38,7 +42,13 @@ function act(type,data){if(window.LumaActivity)window.LumaActivity.log(type,data
 // A scrub or a run of arrow keys is one seek: from where it started to where it settled.
 let seekAct=null;
 function actSeek(from,to){if(!seekAct)seekAct={from:+from.toFixed(1),mode:s.mode};seekAct.to=+to.toFixed(1);clearTimeout(seekAct.timer);seekAct.timer=setTimeout(()=>{const {from,to,mode}=seekAct;seekAct=null;act('seek',{from,to,mode});},600);}
-function toast(text){act('toast',{text:String(text).slice(0,200)});$('toast').textContent=text;$('toast').classList.add('show');clearTimeout(s.toastTimer);s.toastTimer=setTimeout(()=>$('toast').classList.remove('show'),5000);}
+// On a phone the transport, the stage rail and the roll's time axis end the first screen: a toast that would cover
+// «Співати», «Стоп», a rail tool or the axis labels rises above those rows, onto the plot.
+function axisRow(){const w=$('chartWrap').getBoundingClientRect();if(!w.height||!W)return null;const b=bounds();return {top:w.top+b.bottom,bottom:w.top+Math.min(H,b.bottom+(W<720||s.dense?22:26)),height:1};}
+function toast(text){act('toast',{text:String(text).slice(0,200)});const el=$('toast');el.textContent=text;el.style.bottom='';
+ let low=innerHeight-24;const h=el.offsetHeight;for(const r of [...['.transport','#stageRail'].map(q=>document.querySelector(q)?.getBoundingClientRect()),axisRow()].filter(r=>r&&r.height).sort((p,q)=>q.top-p.top))if(r.top<low&&r.bottom>low-h)low=r.top-8;
+ if(low<innerHeight-24)el.style.bottom=Math.round(innerHeight-low)+'px';
+ el.classList.add('show');clearTimeout(s.toastTimer);s.toastTimer=setTimeout(()=>$('toast').classList.remove('show'),5000);}
 // kind 'mic': microphone trouble, so the banner offers the microphone settings (or the Studio link on file://). Other errors get no action.
 function error(text,kind=''){act('error',{text:String(text).slice(0,200),kind});s.errorKind=kind;$('errorText').textContent=text;$('errorBanner').hidden=false;const file=location.protocol==='file:';$('studioLink').hidden=!(kind==='mic'&&file);$('errorSettings').hidden=!(kind==='mic'&&!file);if($('settingsDialog').open)$('settingsDialog').close();updateStatus();say(text);}
 function savePrefs(){try{localStorage.setItem('luma.trainer.settings',JSON.stringify(prefs));}catch(_){}}
@@ -114,7 +124,7 @@ function missRuns(sc){const runs=[];if(!sc)return runs;let start=-1;for(let i=0;
 // attempt (a new s.live) starts with a full set.
 s.lives=null;s.livesRetry=null;
 function livesBegin(retryFrom){
- const prev=s.lives;s.lives=prefs.lives&&s.live?{sc:s.live,total:prefs.livesCount,left:prefs.livesCount,i:0,from:0,t:0,m:0,lost:-1e9,out:false}:null;
+ const prev=s.lives;s.lives=prefs.lives&&s.live?{sc:s.live,total:prefs.livesCount,left:prefs.livesCount,i:0,from:0,t:0,m:0,lost:-1e9,out:false,losses:[]}:null;
  renderLives(s.lives&&(retryFrom!==null||prev&&prev.left<prev.total)?'refill':'');
  const note=$('livesNotice');note.hidden=retryFrom===null||!s.lives;
  if(!note.hidden){$('livesFrom').textContent='Ще раз з '+fmt(retryFrom);note.classList.remove('show');void note.offsetWidth;note.classList.add('show');say('Забагато промахів: ще раз з '+fmt(retryFrom)+'. Життя відновлено.');}
@@ -128,7 +138,7 @@ function livesStep(){
   const st=f[lv.i];if(st){lv.t++;if(st>=2)lv.m++;}
   const o=lv.i-W;if(o>=lv.from&&f[o]){lv.t--;if(f[o]>=2)lv.m--;}
   if(lv.m<need||lv.m<lv.t*LIVES.share||lv.i-lv.lost<cool)continue;
-  lv.left--;lv.lost=lv.i;lv.from=lv.i+1;lv.t=lv.m=0;renderLives('lose');
+  lv.left--;lv.lost=lv.i;lv.from=lv.i+1;lv.t=lv.m=0;lv.losses.push({i:lv.i,at:+now().toFixed(4),left:lv.left});renderLives('lose');
   if(!lv.left){lv.out=true;livesRewind(lv.sc.a+lv.i*GRID);return;}
  }
 }
@@ -145,7 +155,8 @@ function livesRewind(t){if(s.awaitFinish||s.resumeAt!==null)return;s.livesRetry=
 function livesResume(m){
  const r=s.livesRetry;if(!r||r.id!==m.id)return false;s.livesRetry=null;s.pos=r.to;sync();
  // fresh: a new attempt from the rewind point, never a punch into the one just saved; the normal count-in plays first
- startTransport(true,false,true).then(()=>{if(s.mode==='singing'&&s.live)livesBegin(r.to);});return true;
+ if(s.sit)s.sit.retry=r.to;
+ startTransport(true,false,true).then(()=>{if(s.mode==='singing'&&s.live)livesBegin(r.to);else if(s.sit?.expect)closeSitting('nostart');});return true;
 }
 // The count-in sits centred over the roll. On a short stage the centre falls on the lyric lines, so with the retry notice
 // in it the block moves down just far enough to clear the last lyric line; with no room for that, the lyrics step back
@@ -192,6 +203,79 @@ function renderLives(ev){
  box.setAttribute('aria-label','Життя: '+left+' з '+total);
  box.title='Режим життів: '+left+' з '+total+' · довгі промахи під нотами забирають життя, коли скінчаться — пісня відмотується назад';
 }
+// ── Camera video (docs/design/CAMERA_VIDEO_BUILD_BRIEF.md): with «Знімати мене на камеру» on, a trainer served by Studio
+// films a whole sitting, from «Співати» until an attempt ends with no lives rewind after it, and streams it to Studio,
+// which composes the video with the game layer and the instrumental. The camera never stops the singing: refused,
+// missing, busy or unplugged, the attempt goes on as it would without it.
+s.cam={reason:null,told:false};s.sit=null;s.sitClosing=null;s.camTried=null;s.preview=null;
+const CAM_VIDEO={width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}};
+const CAM_ERRORS={NotAllowedError:'denied',SecurityError:'denied',NotFoundError:'absent',OverconstrainedError:'absent',NotReadableError:'busy',AbortError:'busy'};
+const CAM_TEXT={denied:'Доступ до камери заборонено. Дозволь камеру для цієї сторінки біля адреси; поки що спроби йдуть без відео.',absent:'Камеру не знайдено. Підключи її; поки що спроби йдуть без відео.',busy:'Камера зайнята іншою програмою або вкладкою; спроби йдуть без відео.'};
+function camOn(){return prefs.camera&&studioPage&&!RENDER;}
+function liveVideo(stream){return stream?.getVideoTracks().find(t=>t.readyState==='live')||null;}
+// The set of past takes the dust shows right now, packed once each; the video draws the same set.
+function cloudIds(sit){const ids=[];for(const t of cloudTakes()){const p=packTake(t);if(!sit.dust[p.id])sit.dust[p.id]={seed:p.seed,buf:b64(p.buf)};ids.push(p.id);}return ids;}
+function openSitting(){
+ try{const id=crypto.randomUUID(),sit={id,segs:[],dust:{},cur:null,expect:false,retry:null,startedAt:new Date().toISOString(),t0:performance.now()};
+  sit.rec=window.LumaCamera.open(s.stream,{id,now:()=>s.ctx.currentTime,onfail:why=>camRefused(sit,why)});sit.rec.start();s.sit=sit;act('video_capture',{ok:true});}
+ catch(e){act('video_capture',{ok:false,reason:'recorder'});}
+ renderCamBadge();
+}
+// One attempt of the sitting begins: where its music starts on the AudioContext clock, where its count-in began, and the
+// dust and lives it starts with.
+function sitBegin(meta,{when,cin,end}){const sit=s.sit;
+ sit.cur={id:meta.id,when,cin,b:end,a:meta.a,speed:meta.speed,latency:meta.latency,live:s.live,lives:prefs.lives?prefs.livesCount:null,retry:sit.retry,dust:cloudIds(sit)};sit.retry=null;sit.expect=false;
+}
+// The attempt is over: a stored one becomes a segment of the video, its WAV goes to Studio. Its stop is the worker's own end.
+function sitEnd(meta,m,take){const sit=s.sit,cur=sit.cur;if(!cur||cur.id!==meta.id)return;sit.cur=null;if(!take||!m.blob)return;
+ if(sit.segs.length&&cur.latency!==sit.segs[0].latency){closeSitting('latency');return;}// one latency per video; settings are locked while singing
+ const k=sit.segs.length,lv=s.lives&&s.lives.sc===cur.live?s.lives:null;
+ sit.segs.push({k,runId:take.runId,when:cur.when,cin:cur.cin,stop:cur.when+cur.latency/1000+m.duration,a:cur.a,b:cur.b,endSong:take.endSong,speed:cur.speed,latency:cur.latency,
+  history:takePayload(take),lives:cur.lives?{total:cur.lives,losses:lv?lv.losses.map(x=>({...x})):[],retryFrom:cur.retry}:null,dust:cur.dust});
+ sit.rec.voice(k,m.blob);
+}
+// The sitting is over: the recorder stops, the take record goes to Studio, and Studio says whether it composes it.
+function closeSitting(why){
+ const sit=s.sit;if(!sit)return s.sitClosing;s.sit=null;renderCamBadge();
+ const edited=(()=>{try{return !!localStorage.getItem('luma.target.'+song.id);}catch(_){return false;}})();
+ s.sitClosing=(async()=>{
+  if(!sit.segs.length){await sit.rec.abort();return {ok:true,composed:false,reason:'empty'};}
+  const take={v:1,id:sit.id,trainer:hostFile(),songId:song.id,songHash:songHash(),title:song.title,startedAt:sit.startedAt,ctxAtStart:sit.rec.ctxAtStart,ctxAtOnstart:sit.rec.ctxAtOnstart,
+   mime:sit.rec.mime,view:prefs.view,octave:prefs.octave,scaleZoom:scaleZoom(),back:prefs.back,speed:sit.segs[0].speed,dust:sit.dust,segments:sit.segs};
+  if(edited){take.notes=song.notes;take.verified=s.verified;}// a fresh render profile has none of this browser's note edits
+  const r=await sit.rec.finish(take);
+  act('video_upload',{ok:!!r.ok,ms:Math.round(performance.now()-sit.t0),bytes:sit.rec.bytes,segments:sit.segs.length,composed:!!r.composed,reason:r.reason||null});
+  if(r.composed){for(const t of s.takes)if(sit.segs.some(g=>g.runId===t.runId))t.videoId=sit.id;renderTakes();toast('Відео монтується в Studio, «Мої відео».');}
+  else if(r.reason==='short')toast('Спроба коротша за 30 с: відео не змонтовано.');
+  else if(!sit.rec.failed)toast('Studio не прийняло відео цієї спроби.');
+  return r;})();
+ return s.sitClosing;
+}
+function camLost(){const sit=s.sit;act('video_capture',{ok:false,reason:'lost'});
+ if(sit&&!sit.rec.failed&&sit.rec.recording){sit.rec.stop();toast('Камера від’єдналась: відео цієї спроби закінчується тут, спів триває.');}
+ renderCamBadge();renderCamera();}
+function camRefused(sit,why){act('video_capture',{ok:false,reason:why});if(s.sit===sit)toast('Studio не приймає відео: спроба триває без відео.');renderCamBadge();}
+function renderCamBadge(){$('camBadge').hidden=!(s.sit&&s.sit.rec.recording);}
+// The settings field: the switch, its state line and a mirrored preview for framing while the dialog is open.
+function renderCamera(){
+ const box=$('cameraMode');if(!box)return;box.checked=prefs.camera;box.disabled=!studioPage||s.mode!=='idle'||s.busy||s.awaitFinish;
+ const line=$('camState'),track=liveVideo(s.preview)||liveVideo(s.stream);let text='';
+ if(!studioPage)text='Відео працює, коли пісню відкрито з бібліотеки Studio.';
+ else if(prefs.camera)text=s.cam.reason?CAM_TEXT[s.cam.reason]:track?'Камера: '+(track.label||'увімкнена'):'Камера увімкнеться разом із мікрофоном.';
+ line.textContent=text;line.hidden=!text;line.classList.toggle('warn',!!s.cam.reason&&prefs.camera);
+ const show=camOn()&&!!track;$('camPreviewBox').hidden=!show;
+ const v=$('camPreview');if(show&&v.srcObject?.getVideoTracks()[0]!==track){v.srcObject=new MediaStream([track]);v.play().catch(()=>{});}else if(!show&&v.srcObject)v.srcObject=null;
+ renderCamBadge();
+}
+// While the dialog is open the camera shows itself, which is where the browser asks for it the first time.
+async function startCamPreview(){
+ if(!camOn()||!$('settingsDialog').open||liveVideo(s.stream)||liveVideo(s.preview))return renderCamera();
+ try{const stream=await navigator.mediaDevices.getUserMedia({video:CAM_VIDEO,audio:false});
+  if(!$('settingsDialog').open||!camOn()){stream.getTracks().forEach(t=>t.stop());return;}s.preview=stream;s.cam.reason=null;}
+ catch(e){s.cam.reason=CAM_ERRORS[e.name]||'absent';}
+ renderCamera();
+}
+function stopCamPreview(){const p=s.preview;s.preview=null;p?.getTracks().forEach(t=>t.stop());if($('camPreview'))renderCamera();}
 function activeScore(){return s.mode==='singing'?s.live:traceShown()?s.trace.score:null;}
 function activePoints(){return s.mode==='singing'?s.history:traceShown()?s.trace.points:[];}
 function audioClock(){const c=s.ctx;if(!c)return 0;try{const t=c.getOutputTimestamp?.();if(t&&t.contextTime>0&&performance.now()-t.performanceTime<300)return Math.min(c.currentTime,t.contextTime+(performance.now()-t.performanceTime)/1000);}catch(_){}return c.currentTime;}
@@ -253,9 +337,12 @@ function easeScale(dt){if(s.rangeLo===sc.goalLo&&s.rangeHi===sc.goalHi){sc.p=1;r
  sc.p=reduced.matches?1:clamp(sc.p+dt/SCALE.ease,0,1);const e=sc.p*sc.p*(3-2*sc.p);
  if(sc.p>=1){s.rangeLo=sc.goalLo;s.rangeHi=sc.goalHi;}else{s.rangeLo=sc.fromLo+(sc.goalLo-sc.fromLo)*e;s.rangeHi=sc.fromHi+(sc.goalHi-sc.fromHi)*e;}s.dirty=true;}
 // Explicit seek or a new selection: frame the new place at once.
-function setRangeScale(){planScale(view(s.pos),s.pos,performance.now()/1000,true);}
+function setRangeScale(){planScale(view(s.pos),s.pos,wallNow(),true);}
+// Seconds of the scale planner's clock: the wall clock, or in render mode the video's own time, so every frame of a video
+// is planned and eased exactly as it would be at that moment of the take.
+function wallNow(){return RENDER?s.vclock:performance.now()/1000;}
 // Every frame during playback: plan ahead, then glide.
-function followRange(v,t){const wall=performance.now()/1000,dt=clamp(wall-(s.lastFrame||wall),0,.25);s.lastFrame=wall;planScale(v,t,wall,false);easeScale(dt);}
+function followRange(v,t){const wall=wallNow(),dt=clamp(wall-(s.lastFrame||wall),0,.25);s.lastFrame=wall;planScale(v,t,wall,false);easeScale(dt);}
 function populateSong(){
  $('songTitle').textContent=song.title;$('artistName').textContent=song.artist||'';$('songMeta').textContent=fmt(song.duration)+(prefs.speed!==1?' · '+prefs.speed+'×':'');document.title='Luma · '+song.title;$('timeEnd').textContent=fmt(song.duration);$('timelineWrap').setAttribute('aria-valuemax',song.duration.toFixed(1));
  $('qualityCoverage').textContent=(song.metrics?.comparablePercentOfTrack??0)+'% надійної розмітки';
@@ -290,7 +377,7 @@ function sync(){
  const ver=rangeVerified();$('qualityPill').textContent=ver?'Фрагмент підтверджений':'Чернетка мелодії';$('qualityBtn').classList.toggle('ok',ver);$('confirmTarget').checked=ver;
  $('micToggle').textContent=s.stream?'Вимкнути мікрофон':'Увімкнути лише мікрофон';$('micToggle').disabled=active||s.busy||s.awaitFinish;$('takesPanel').dataset.open=prefs.takesOpen?'1':'0';$('takesToggle').setAttribute('aria-expanded',String(prefs.takesOpen));$('takesCount').textContent=s.takes.length;
  $('livesMode').checked=prefs.lives;$('livesCount').value=String(prefs.livesCount);$('livesMode').disabled=$('livesCount').disabled=active||s.busy||s.awaitFinish;renderLives('');
- $('lyricsBtn').setAttribute('aria-pressed',String(prefs.lyrics));$('recordAudio').checked=prefs.audio;
+ $('lyricsBtn').setAttribute('aria-pressed',String(prefs.lyrics));$('recordAudio').checked=prefs.audio;renderCamera();
  refreshCloud();renderProgress();renderLatency();
  for(const b of document.querySelectorAll('[data-view]')){b.classList.toggle('active',b.dataset.view===prefs.view);b.setAttribute('aria-pressed',String(b.dataset.view===prefs.view));b.disabled=active||s.busy||s.awaitFinish;}
  const rv=traceShown();$('reviewBar').hidden=$('reviewDivider').hidden=!rv;if(rv){const t=s.trace.take,runs=missRuns(s.trace.score);$('reviewLabel').textContent='Спроба '+String(t.id).padStart(2,'0');const pct=scorePct(s.trace.score);$('reviewPct').textContent=pct===null?'—':pct+'%';$('missCount').textContent=runs.length?runs.length+' '+plural(runs.length,'промах','промахи','промахів'):'без промахів';$('prevMiss').disabled=$('nextMiss').disabled=!runs.length||s.mode!=='idle';}
@@ -318,20 +405,33 @@ async function buffers(speed){const key=String(speed);if(s.bufs.has(key))return 
 const MIC_ERRORS={NotAllowedError:'Доступ до мікрофона заборонено. Дозволь його для цієї сторінки через значок налаштувань біля адреси, потім натисни «Співати» знову. Прослуховування доступне.',NotFoundError:'Мікрофон не знайдено. Підключи пристрій, вибери його в налаштуваннях і спробуй знову. Поки можна слухати пісню.',NotReadableError:'Мікрофон зайнятий або недоступний. Перевір пристрій у системі та закрий програму, яка використовує його, потім спробуй знову.',OverconstrainedError:'Обраний мікрофон недоступний. У налаштуваннях вибери системний або інший підключений пристрій.'};
 function micError(e){return MIC_ERRORS[e.name]||e.message||'Не вдалося підключити мікрофон.';}
 function errorKind(e){return e&&(e.name in MIC_ERRORS||e.mic)?'mic':'';}
-async function releaseMic(){s.micGeneration++;const w=s.worker,c=s.capture,m=s.micSource,stream=s.stream;s.worker=null;s.capture=null;s.micSource=null;s.stream=null;try{c?.disconnect();c?.port.close();m?.disconnect();}catch(_){}stream?.getTracks().forEach(t=>{t.onended=null;t.stop();});w?.terminate();s.current=null;s.liveSmooth=null;$('micState').textContent='Мікрофон вимкнено';sync();}
+async function releaseMic(){s.micGeneration++;const w=s.worker,c=s.capture,m=s.micSource,stream=s.stream;s.worker=null;s.capture=null;s.micSource=null;s.stream=null;s.camTried=null;try{c?.disconnect();c?.port.close();m?.disconnect();}catch(_){}
+ // a sitting still recording stops first and closes with what is complete; its tracks stop once the recorder has its last chunk
+ const rec=s.sit?.rec;closeSitting('release');const stop=()=>stream?.getTracks().forEach(t=>{t.onended=null;t.stop();});
+ stream?.getTracks().forEach(t=>{t.onended=null;});if(rec)Promise.race([rec.stop(),new Promise(r=>setTimeout(r,2000))]).then(stop);else stop();w?.terminate();s.current=null;s.liveSmooth=null;$('micState').textContent='Мікрофон вимкнено';sync();}
 async function ensureMic(token){
  if(location.protocol==='file:')throw Object.assign(Error('Запис голосу працює через Luma Studio. Відкрий цю пісню з бібліотеки Studio та натисни «Співати».'),{mic:true});
- if(s.stream&&s.worker)return true;
+ // camera mode asks for both in one call; an open stream is reused only when it has the camera this mode wants, or when
+ // the camera was already refused for it (no second prompt on every attempt)
+ const film=camOn();
+ if(s.stream&&s.worker){if(!film||liveVideo(s.stream)||s.camTried===s.stream)return true;await releaseMic();}
  if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia)throw Object.assign(Error('Мікрофон потребує окремої вкладки і localhost / HTTPS. Вбудований перегляд може його блокувати.'),{mic:true});
- const ctx=await ensureContext();const stream=await navigator.mediaDevices.getUserMedia({audio:{deviceId:prefs.mic?{exact:prefs.mic}:undefined,channelCount:1,echoCancellation:false,noiseSuppression:false,autoGainControl:false},video:false});
- if(token!==s.cancel){stream.getTracks().forEach(t=>t.stop());return false;}const gen=++s.micGeneration;s.stream=stream;
+ const ctx=await ensureContext(),audio={deviceId:prefs.mic?{exact:prefs.mic}:undefined,channelCount:1,echoCancellation:false,noiseSuppression:false,autoGainControl:false};
+ stopCamPreview();let stream,camWhy=null;
+ if(film){try{stream=await navigator.mediaDevices.getUserMedia({audio,video:CAM_VIDEO});}
+  catch(e){if(!(e.name in CAM_ERRORS))throw e;camWhy=CAM_ERRORS[e.name];stream=await navigator.mediaDevices.getUserMedia({audio,video:false});}}// the camera never blocks singing
+ else stream=await navigator.mediaDevices.getUserMedia({audio,video:false});
+ if(film){s.cam.reason=camWhy;renderCamera();}
+ if(token!==s.cancel){stream.getTracks().forEach(t=>t.stop());return false;}const gen=++s.micGeneration;s.stream=stream;if(film&&!liveVideo(stream))s.camTried=stream;
  const wu=URL.createObjectURL(new Blob([$('worker-source').textContent],{type:'text/javascript'})),cu=URL.createObjectURL(new Blob([$('capture-source').textContent],{type:'text/javascript'}));
  try{
   s.worker=new Worker(wu);await ctx.audioWorklet.addModule(cu);if(token!==s.cancel){await releaseMic();return false;}
   const worker=s.worker;const ready=new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Аудіоаналізатор не відповідає.')),6000);worker.onmessage=e=>{if(gen!==s.micGeneration)return;if(e.data.type==='ready'){clearTimeout(timer);resolve();}handleWorker(e.data);};worker.onerror=e=>{clearTimeout(timer);reject(Error(e.message||'Помилка аналізатора'));if(s.mode==='singing'){stopTransport('worker');error('Аудіоаналізатор зупинився. Незавершений запис може бути втрачений.');}};});
   const node=new AudioWorkletNode(ctx,'luma-capture',{numberOfInputs:1,numberOfOutputs:1,outputChannelCount:[1]}),src=ctx.createMediaStreamSource(stream),channel=new MessageChannel();s.capture=node;s.micSource=src;
   worker.postMessage({type:'connect',sampleRate:ctx.sampleRate,port:channel.port1},[channel.port1]);node.port.postMessage({type:'connect',port:channel.port2},[channel.port2]);worker.postMessage({type:'settings',gate:prefs.gate});src.connect(node);node.connect(ctx.destination);await ready;
-  stream.getTracks().forEach(t=>t.onended=()=>{stopTransport('device');error('Мікрофон від’єднався. Поточну спробу завершено.','mic');setTimeout(()=>releaseMic(),500);});
+  // only the microphone ends the attempt: a camera that goes away ends the video's footage and lets the singing go on
+  stream.getAudioTracks().forEach(t=>t.onended=()=>{stopTransport('device');error('Мікрофон від’єднався. Поточну спробу завершено.','mic');setTimeout(()=>releaseMic(),500);});
+  stream.getVideoTracks().forEach(t=>t.onended=()=>camLost());
   $('micState').textContent=stream.getAudioTracks()[0]?.label||'Мікрофон увімкнено';populateMics();requestDraw();return true;
  }catch(e){await releaseMic();throw e;}finally{URL.revokeObjectURL(wu);URL.revokeObjectURL(cu);}
 }
@@ -376,8 +476,8 @@ function capacity(fresh=false){
 // What the voice budget frees so the next recording fits: the oldest WAVs of other attempts first, then the copy undo
 // holds. Undo retains the old full WAV, so a punch reserves its full merged replacement even for a short region; a punch
 // that still cannot fit beside its own undo copy keeps no undo.
-function audioRoom(seg){
- const punch=seg.punch,out={drop:[],undo:false,keepUndo:true};if(!prefs.audio&&!punch?.hasAudio)return out;
+function audioRoom(seg,film=false){
+ const punch=seg.punch,out={drop:[],undo:false,keepUndo:true};if(!prefs.audio&&!film&&!punch?.hasAudio)return out;
  const duration=punch?Math.max(punch.duration,(seg.end-punch.a)/punch.speed):Math.max(0,(seg.end-seg.start)/seg.speed);
  let size=44+Math.ceil(duration*(punch?.sampleRate||s.ctx?.sampleRate||48000))*2+s.takes.reduce((a,t)=>a+(t.blob?.size||0),0)+(s.undoPunch?.before.blob?.size||0),
   count=s.takes.filter(t=>t.hasAudio).length+(punch?0:1);const over=()=>count>AUDIO_TAKES||size>=AUDIO_BYTES;
@@ -397,7 +497,7 @@ function makeRoom(){
  if(!s.roomNotice){s.roomNotice=true;toast('У вкладці лишаються '+TRACE_TAKES+' останніх спроб. Старіші — в історії, вкладка «Прогрес».');}
 }
 // Punch-in: with a take on screen and the playhead inside it (same speed), "Співати" re-records that take from here instead of starting a new one.
-function punchTarget(){if(!traceShown()||s.mode!=='idle')return null;const t=s.trace.take;return t.speed===prefs.speed&&!!t.hasAudio===!!prefs.audio&&s.pos>=t.a-.01&&s.pos<t.endSong-.15?t:null;}
+function punchTarget(){if(!traceShown()||s.mode!=='idle'||camOn())return null;const t=s.trace.take;return t.speed===prefs.speed&&!!t.hasAudio===!!prefs.audio&&s.pos>=t.a-.01&&s.pos<t.endSong-.15?t:null;}
 function wavHeaderBuf(count,rate){const b=new ArrayBuffer(44),v=new DataView(b);const text=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i));};text(0,'RIFF');v.setUint32(4,36+count*2,true);text(8,'WAVE');text(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,rate,true);v.setUint32(28,rate*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);text(36,'data');v.setUint32(40,count*2,true);return b;}
 // Splice a freshly recorded segment into an existing take: old audio before the punch point, new audio, then whatever old audio lies beyond the new end.
 function mergeTake(old,meta,m){
@@ -447,11 +547,16 @@ async function startTransport(sing,quick=false,fresh=false){
   await ensureContext();const cap=capacity(fresh);if(sing&&!cap.ok){retryRefused();throw Error(cap.message);}
   if(sing&&!await ensureMic(token))return;
   const b=await buffers(prefs.speed);if(token!==s.cancel)return;await s.ctx.resume();
-  const seg=nextSegment(sing,fresh),punch=seg.punch,room=sing?audioRoom(seg):null;if(room)freeVoices(room);if(sing&&!punch){makeRoom();s.trace=null;}if(seg.start!==s.pos){s.pos=seg.start;setRangeScale();}// only a moved playhead is framed at once; otherwise the eased planner takes over
-  const speed=seg.speed,when=s.ctx.currentTime+(sing?(quick?.6:2.1):.12),offset=seg.start,end=seg.end,loop=seg.loop;
+  const film=sing&&camOn()&&!!liveVideo(s.stream)&&!!window.LumaCamera;
+  if(sing&&camOn()&&!film&&!s.cam.told){s.cam.told=true;toast('Камера недоступна: спроба без відео.');act('video_capture',{ok:false,reason:s.cam.reason||'absent'});}
+  const seg=nextSegment(sing,fresh),punch=seg.punch,room=sing?audioRoom(seg,film):null;if(room)freeVoices(room);if(sing&&!punch){makeRoom();s.trace=null;}if(seg.start!==s.pos){s.pos=seg.start;setRangeScale();}// only a moved playhead is framed at once; otherwise the eased planner takes over
+  if(sing&&s.sit&&!s.sit.expect)closeSitting('new');// only a lives rewind continues a video
+  if(film&&!s.sit)openSitting();
+  const cin=s.ctx.currentTime,speed=seg.speed,when=cin+(sing?(quick?.6:2.1):.12),offset=seg.start,end=seg.end,loop=seg.loop;
   s.transport={token,when,offset,end,speed,loop,counted:quick==='counted'};s.mode=sing?'singing':'listen';s.history=punch?punch.points.filter(p=>p.songT<offset).map(p=>({...p,raw:p.m})):[];s.current=null;s.liveSmooth=null;s.busy=false;s.live=null;
   const duration=scheduleSources(b,when,offset,end,speed,loop,token);
-  if(sing){const lag=prefs.latency/1000,meta=takeMeta(offset,end,speed);if(punch){meta.punchInto=punch.id;meta.keepUndo=room.keepUndo;s.trace=null;}s.pending.set(meta.id,meta);s.live=newScore(meta);s.worker.postMessage({type:'record',id:meta.id,start:when+lag,end:when+duration+lag,audio:meta.hasAudio});if(punch)say('Перезапис спроби '+punch.id+' від '+fmt(offset));}
+  if(sing){const lag=prefs.latency/1000,meta=takeMeta(offset,end,speed);if(punch){meta.punchInto=punch.id;meta.keepUndo=room.keepUndo;s.trace=null;}s.pending.set(meta.id,meta);s.live=newScore(meta);
+   if(s.sit){meta.hasAudio=true;sitBegin(meta,{when,cin,end});}s.worker.postMessage({type:'record',id:meta.id,start:when+lag,end:when+duration+lag,audio:meta.hasAudio});if(punch)say('Перезапис спроби '+punch.id+' від '+fmt(offset));}
   if(!loop)s.endTimer=setTimeout(()=>{if(s.transport?.token===token){if(s.mode==='singing'){s.worker?.postMessage({type:'stop',time:when+duration+prefs.latency/1000,reason:'end'});}else naturalEnd(token);}},(when-s.ctx.currentTime+duration+1.1)*1000);
   sync();say(sing?'Запис почнеться після відліку.':loop?'Повтор фрагмента без пауз.':'Відтворення.');
  }catch(e){if(token===s.cancel){error(micError(e),errorKind(e));await releaseMic();}}
@@ -496,7 +601,7 @@ function analyzeTake(meta,points,duration){
 // leaves this computer. Studio serves its own page and the trainers from the same origin, so a progress panel there
 // can read the very same base. Schema, retention and the export format: docs/HISTORY_SCHEMA.md.
 const HIST={name:'luma',version:1,dayEdge:4,keepTraces:20,minPhraseFrames:75,minSongFrames:200,songCover:.95,phraseCover:.8,lamp:85,trendRuns:30,sessionGap:45*60*1000,streakFrames:6000,noPitch:-32768};
-function historyAvailable(){return location.protocol!=='file:'&&typeof indexedDB!=='undefined'&&!!indexedDB;}
+function historyAvailable(){return !RENDER&&location.protocol!=='file:'&&typeof indexedDB!=='undefined'&&!!indexedDB;}
 function newRunId(){try{if(crypto.randomUUID)return crypto.randomUUID();}catch(_){}return 'r-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10);}
 // The song, not the file: re-preparing the same audio gives a new song.id but the same sourceId, so the history stays.
 function songHash(){return song.sourceId||song.id;}
@@ -914,7 +1019,11 @@ function sessionResult(t,saved){
  out.days=[...byDay].sort((a,b)=>a[0]<b[0]?-1:1).slice(-6).map(([day,v])=>({day,value:Math.round(trueMedian(v)),n:v.length}));
  return out;
 }
-function tellHost(t,saved){if(window.parent===window||!finishedTake(t))return;parent.postMessage({type:'luma:finished',file:hostFile(),match:scorePct(t.score),result:sessionResult(t,saved)},location.origin);}
+function tellHost(t,saved){if(window.parent===window||!finishedTake(t))return;
+ const post=()=>parent.postMessage({type:'luma:finished',file:hostFile(),match:scorePct(t.score),result:sessionResult(t,saved)},location.origin);
+ // Studio drops the frame on this message, so a camera video's take record must have reached Studio first (at most 10 s)
+ const wait=s.sitClosing;if(!wait)return post();let timer=0;
+ Promise.race([wait.then(()=>true,()=>true),new Promise(r=>{timer=setTimeout(()=>r(false),10000);})]).then(ok=>{clearTimeout(timer);if(!ok)act('video_upload',{ok:false,timeout:true});post();});}
 // A Studio session asks the trainer it opened to start singing by itself; the answer says whether it did, so Studio can
 // show a start button when the browser keeps the sound or the microphone off. Never a silent dead state. counted: Studio
 // has just run its own 3-2-1, so the short lead-in shows no number of its own, and the first-visit invitation stays away
@@ -952,8 +1061,11 @@ function onFinished(m){
  const meta=s.pending.get(m.id);if(!meta)return;
  if(s.mode==='singing'&&m.reason==='end'&&s.transport&&s.ctx){const end=s.transport.when+(s.transport.end-s.transport.offset)/s.transport.speed;if(s.ctx.currentTime<end-.01){setTimeout(()=>onFinished(m),(end-s.ctx.currentTime)*1000+20);return;}}
  s.pending.delete(m.id);const auto=s.mode==='singing'&&m.reason==='end'&&prefs.loop;s.awaitFinish=false;
+ // a lives rewind is the one thing that keeps a sitting's video going (decision 3); livesResume() is about to restart
+ const goesOn=s.resumeAt===null&&!!s.livesRetry&&s.livesRetry.id===m.id;
  if(s.transport)s.pos=Math.min(s.transport.end,meta.a+m.duration*meta.speed);s.parkedAt=s.transport&&!customRange()&&s.pos>=singEnd()-.1?s.pos:null;clearSources();s.transport=null;s.mode='idle';s.live=null;
- if(m.duration>.15&&(!m.hasAudio||m.blob?.size>44))storeTake(meta,m);
+ let stored=null;if(m.duration>.15&&(!m.hasAudio||m.blob?.size>44))stored=storeTake(meta,m);
+ if(s.sit){sitEnd(meta,m,stored);if(s.sit){if(goesOn)s.sit.expect=true;else closeSitting('end');}}
  if(['discontinuity','late-start'].includes(m.reason))error('Розрив аудіопотоку: запис завершено, щоб не зсувати його відносно пісні.');
  if(s.resumeAt!==null){const t=s.resumeAt;s.resumeAt=null;s.pos=t;sync();startTransport(true,true);return;}// seek during singing: new take from the new spot
  if(livesResume(m))return;// lives mode: the last life went, sing the fragment again
@@ -996,6 +1108,7 @@ function renderTakes(){refreshCloud();const root=$('takesList');root.replaceChil
  const exp=button('',()=>{t.filesOpen=!t.filesOpen;files.hidden=!t.filesOpen;exp.setAttribute('aria-expanded',String(!!t.filesOpen));},'Завантажити спробу '+String(t.id).padStart(2,'0')+' файлом');
  exp.className='take-export';exp.innerHTML=icon('download');exp.setAttribute('aria-expanded',String(!!t.filesOpen));exp.setAttribute('aria-controls',files.id);
  const cleared=t.cleared&&!s.hist.runs.some(r=>r.id===t.runId);
+ if(t.videoId){const v=button('',()=>{window.open('/#video/'+t.videoId,'_blank','noopener');},'Відео цієї спроби в Studio, «Мої відео»');v.className='take-video';v.innerHTML=icon('camera')+'<span>Відео</span>';actions.append(v);}
  actions.append(files,exp,button('×',()=>removeTake(t),t.historyError?'Видалити спробу з вкладки · в історії її немає':cleared?'Видалити спробу з вкладки · історію пісні очищено':'Видалити спробу з вкладки · в історії вона лишається'));
  el.append(play,title,st,actions);root.append(el);
  }
@@ -1327,22 +1440,22 @@ async function playTake(t){
  }catch(e){error(e.message);}finally{if(token===s.cancel){s.busy=false;sync();renderTakes();}}
 }
 // In the headset (app/xr.js) the chart takes the size of its place on the panel, not of the hidden page.
-function resize(){const r=s.xr?s.xr.chart:$('chartWrap').getBoundingClientRect(),q=$('timelineWrap').getBoundingClientRect();W=r.width;H=r.height;TW=q.width;TH=q.height;DPR=s.xr?s.xr.dpr:Math.min(window.devicePixelRatio||1,2);canvas.width=Math.round(W*DPR);canvas.height=Math.round(H*DPR);g.setTransform(DPR,0,0,DPR,0,0);tl.width=Math.round(TW*DPR);tl.height=Math.round(TH*DPR);tg.setTransform(DPR,0,0,DPR,0,0);measureStage();if(W>0&&H>0){s.dirty=false;draw(now());}else s.dirty=true;requestDraw();}
+function resize(){if(RENDER){renderSize();return;}const r=s.xr?s.xr.chart:$('chartWrap').getBoundingClientRect(),q=$('timelineWrap').getBoundingClientRect();W=r.width;H=r.height;TW=q.width;TH=q.height;DPR=s.xr?s.xr.dpr:Math.min(window.devicePixelRatio||1,2);canvas.width=Math.round(W*DPR);canvas.height=Math.round(H*DPR);g.setTransform(DPR,0,0,DPR,0,0);tl.width=Math.round(TW*DPR);tl.height=Math.round(TH*DPR);tg.setTransform(DPR,0,0,DPR,0,0);measureStage();if(W>0&&H>0){s.dirty=false;draw(now());}else s.dirty=true;requestDraw();}
 // The readout, the lyric band and the rail are flow items inside the stage; the plot takes what is left between them.
 // Measured on layout changes only (resize and sync), never per frame, so the piano roll can never be drawn under them.
-function measureStage(){if(s.xr){s.dense=false;s.headH=s.railH=0;return;}   // the panel draws the readout and the words above the chart
+function measureStage(){if(RENDER)return;if(s.xr){s.dense=false;s.headH=s.railH=0;return;}   // the panel draws the readout and the words above the chart
  const box=$('chartWrap').getBoundingClientRect();const below=el=>el&&!el.hidden?el.getBoundingClientRect().bottom-box.top:0;
  const dense=box.height<520||innerWidth<=720;if(dense!==s.dense){s.dense=dense;$('chartWrap').dataset.dense=dense?'1':'0';}
  s.headH=Math.max(below($('stageHead')),below($('lyricBand')));const rail=$('stageRail');s.railH=rail?box.bottom-rail.getBoundingClientRect().top:0;}
 // Phones, and phones held sideways: the page scrolls, so the stage takes exactly the height that leaves «Співати» on the first
 // screen — measured, not guessed, because the title, the hint banner and the browser chrome all move the space above it.
 // Never called from the resize observer: it writes a length, and the observer only reads.
-function fitStage(){const app=document.querySelector('.app');
+function fitStage(){if(RENDER)return;const app=document.querySelector('.app');
  if(!matchMedia('(max-width:720px),(max-height:560px)').matches){if(s.stageH){s.stageH=0;app.style.removeProperty('--stage-h');}return;}
  const box=$('chartWrap').getBoundingClientRect(),btn=$('singBtn').getBoundingClientRect();
  const h=Math.round(clamp(innerHeight-(box.top+scrollY)-(btn.bottom-box.bottom)-6,200,760));
  if(Math.abs(h-(s.stageH||0))>1){s.stageH=h;app.style.setProperty('--stage-h',h+'px');}}
-function bounds(){const narrow=W<720||s.dense,axis=narrow?22:26,left=narrow?42:56;
+function bounds(){const narrow=W<720||s.dense,axis=narrow?22:26,left=s.leftW||(narrow?42:56);
  // a folded head gets a thin lane instead of the 26 px the ЗАРАЗ caption needs
  const top=Math.min((s.headH||0)+(s.dense?12:26),H*.55),bottom=Math.max(top+40,H-(s.railH||0)-axis);
  return{left,right:W-16,top,bottom,laneTop:top-6};}
@@ -1363,7 +1476,8 @@ function drawWords(t,v,x,y,b,opt){
    g.fillStyle=on?'#f2f8ff':past?'#a6b3c8':'#c6d0e0';g.fillText(w.w,xx,yy);if(on){g.fillStyle='#a1eed8';g.fillRect(xx,yy+3.5,tw,1.8);}
    g.globalAlpha=1;}}
 }
-function view(t){const span=W<550?7:W<1100?10:12,behind=span*.34;return{a:t-behind,b:t+span-behind,span};}
+// a camera video keeps 40 % of the roll behind the playhead: the HUD column stands on that part (app/render.js)
+function view(t){const span=W<550?7:W<1100?10:12,behind=span*(RENDER?.4:.34);return{a:t-behind,b:t+span-behind,span};}
 function tracePaths(points,x,y,frames,upTo){
  const paths={1:new Path2D(),2:new Path2D(),0:new Path2D()};let last=null;
  for(const p of points){if(p.songT>upTo)break;if(p.m===null||p.m===undefined){last=null;continue;}
@@ -1397,18 +1511,18 @@ function packTake(t){let p=cloud.packs.get(t.points);if(p)return p;const o=t.oct
 function cloudWorker(){
  if(cloud.worker||cloud.failed)return cloud.worker;
  try{let url=URL.createObjectURL(new Blob([$('cloud-source').textContent],{type:'text/javascript'}));const w=new Worker(url),drop=()=>{if(url)URL.revokeObjectURL(url);url='';};cloud.worker=w;
-  w.onmessage=e=>{drop();const d=e.data;
+  w.onmessage=e=>{drop();const d=e.data;cloud.heard?.();
    if(d.type==='specks'){if(d.gen!==cloud.gen)return;if(!d.draws){cloudOff();return;}cloud.done=d.gen;cloud.n=d.n;cloud.takes=d.takes;cloud.workMs=d.ms;}
    else if(d.type==='layer'){if(d.id===cloud.asked)cloud.asked=0;if(!d.bitmap)return;
     if(d.gen!==cloud.gen&&cloud.layer?.gen===cloud.gen){d.bitmap.close();return;}
-    cloud.layer?.bitmap.close();cloud.layer={...d,at:performance.now()};cloud.builds++;cloud.layerMs=d.ms;}
+    cloud.layer?.bitmap.close();cloud.layer={...d,at:wallNow()*1000};cloud.builds++;cloud.layerMs=d.ms;}
    s.dirty=true;requestDraw();};
   w.onerror=()=>{drop();cloudOff();};
  }catch(_){cloud.failed=true;}
  return cloud.worker;}
 // A browser whose workers cannot paint gets no dust; singing goes on exactly as before.
 function cloudOff(){cloud.failed=true;cloud.worker?.terminate();cloud.worker=null;cloud.layer?.bitmap.close();cloud.layer=null;cloud.n=0;cloud.asked=0;s.dirty=true;requestDraw();}
-function refreshCloud(){
+function refreshCloud(){if(RENDER)return;// the video's dust comes from the take record (renderDust)
  const list=cloudTakes(),packs=list.map(packTake),sig=packs.map(p=>p.id).join(',');if(sig===cloud.sig)return;
  cloud.sig=sig;cloud.ids=list.map(t=>t.id);const gen=++cloud.gen;
  if(!packs.length){cloud.done=gen;cloud.n=0;cloud.takes=0;cloud.layer?.bitmap.close();cloud.layer=null;s.dirty=true;requestDraw();return;}
@@ -1422,7 +1536,7 @@ function drawCloud(b,v,oct,holes){
  const pw=b.right-b.left,ph=b.bottom-b.top;cloud.fit=false;if(probe)cloud.probeHoles=holes||[];if(!cloud.n||cloud.hidden||!cloud.worker||pw<1||ph<1)return;
  const pxs=pw/v.span,L=cloud.layer,same=!!L&&L.pxs===pxs&&L.ph===ph&&L.dpr===DPR&&L.oct===oct,covers=same&&v.a>=L.ta&&v.b<=L.tb;
  const fresh=covers&&L.gen===cloud.gen&&L.lo===s.rangeLo&&L.hi===s.rangeHi,easing=s.rangeLo!==sc.goalLo||s.rangeHi!==sc.goalHi;
- if(!cloud.asked&&(!covers||v.b>L.tb-DUST.ahead*v.span||(!fresh&&(L.gen!==cloud.gen||!easing||performance.now()-L.at>=DUST.settle))))askLayer(v,pxs,ph,oct);
+ if(!cloud.asked&&(!covers||v.b>L.tb-DUST.ahead*v.span||(!fresh&&(L.gen!==cloud.gen||!easing||wallNow()*1000-L.at>=DUST.settle))))askLayer(v,pxs,ph,oct);
  cloud.fit=fresh;if(!covers)cloud.misses++;if(!same)return;
  // the source rectangle may run past the layer's end after a jump: drawImage clips it and the destination with it
  const y=m=>b.bottom-(m-s.rangeLo)/(s.rangeHi-s.rangeLo)*ph,top=y(L.hi);
@@ -1437,11 +1551,11 @@ function draw(t){
  // stage light: the roll sits on a lit surface that falls off downwards instead of a flat field
  const lit=g.createLinearGradient(0,0,0,H);lit.addColorStop(0,'#121a27');lit.addColorStop(.5,'#0e131d');lit.addColorStop(1,'#0a0e16');
  g.fillStyle=lit;g.fillRect(0,0,W,H);
- g.fillStyle='#090d15';g.fillRect(0,0,b.left-7,H);// pitch rail: note names keep their own strip, off the roll
- g.strokeStyle='#ffffff0a';g.lineWidth=1;g.beginPath();g.moveTo(b.left-6.5,0);g.lineTo(b.left-6.5,H);g.stroke();
+ // pitch rail: note names keep their own strip, off the roll; a camera video is one stage, its names on the stage light
+ const kw=b.left-7,bk=Math.round(kw*.58),k0=Math.floor(s.rangeLo)-1,k1=Math.ceil(s.rangeHi)+1;
+ if(!RENDER){g.fillStyle='#090d15';g.fillRect(0,0,kw,H);g.strokeStyle='#ffffff0a';g.lineWidth=1;g.beginPath();g.moveTo(b.left-6.5,0);g.lineTo(b.left-6.5,H);g.stroke();
  // the rail is a piano keyboard on its side, one semitone per row: a black key on every sharp row, white keys around
  // them. That is why the named notes sit unevenly: E–F and B–C are one row apart (no black key between), the rest two.
- const kw=b.left-7,bk=Math.round(kw*.58),k0=Math.floor(s.rangeLo)-1,k1=Math.ceil(s.rangeHi)+1;
  g.save();g.beginPath();g.rect(0,b.top,kw,b.bottom-b.top);g.clip();
  const ivory=g.createLinearGradient(0,0,kw,0);ivory.addColorStop(0,'#8995a8');ivory.addColorStop(1,'#c9d2df');g.fillStyle=ivory;g.fillRect(0,b.top,kw,b.bottom-b.top);
  g.strokeStyle='#3b4456';g.lineWidth=1;g.beginPath();
@@ -1450,14 +1564,16 @@ function draw(t){
   else if(BLACK.has(pc)){const yy=Math.round(y(n))+.5;g.moveTo(bk,yy);g.lineTo(kw,yy);}}   // elsewhere the split runs out of the black key's middle
  g.stroke();
  for(let n=k0;n<=k1;n++){if(!BLACK.has((n%12+12)%12))continue;g.fillStyle='#0b0f17';g.beginPath();g.roundRect(0,y(n+.5)+.5,bk,Math.max(1,rowH-1),[0,2.5,2.5,0]);g.fill();}
- g.restore();
+ g.restore();}
  // piano-roll rows: black keys in a darker band, C lines drawn and named clearly, every other semitone a whisper
- const named=n=>{const pc=(n%12+12)%12;return pc===0||(rowH>=16?bk>=26||!BLACK.has(pc):rowH>=11?!BLACK.has(pc):rowH>=7&&(pc===4||pc===7));};
+ const named=n=>{const pc=(n%12+12)%12;return pc===0||(rowH>=16?RENDER||bk>=26||!BLACK.has(pc):rowH>=11?!BLACK.has(pc):rowH>=7&&(pc===4||pc===7));};
  g.textAlign='right';g.textBaseline='middle';
  for(let n=Math.ceil(s.rangeLo);n<=s.rangeHi;n++){const yy=y(n),pc=(n%12+12)%12,isC=pc===0,black=BLACK.has(pc);
   if(black){g.fillStyle='#ffffff05';g.fillRect(b.left,y(n+.5),b.right-b.left,rowH);}
   g.strokeStyle=isC?'#9fb4d133':'#93a8c40f';g.lineWidth=1;g.beginPath();g.moveTo(b.left,y(n+.5));g.lineTo(b.right,y(n+.5));g.stroke();
-  if(!named(n))continue;g.font=(isC?'700 ':'600 ')+(black?'9px ':'11px ')+mono;
+  if(!named(n))continue;
+  if(RENDER){g.font=(isC?'600 ':'')+'11px '+mono;g.fillStyle=isC?'#d3deee':black?'#93a2b8':'#b3c1d6';g.fillText(name(n),b.left-11,yy);continue;}
+  g.font=(isC?'700 ':'600 ')+(black?'9px ':'11px ')+mono;
   // the keys end at the plot's edges: a name that would cross one is left out, since its ink would run onto the dark strip
   const lab=name(n),m=g.measureText(lab);if(yy-m.actualBoundingBoxAscent<b.top||yy+m.actualBoundingBoxDescent>b.bottom)continue;
   g.fillStyle=black?'#aab6c8':isC?'#0a101a':'#2a3343';g.fillText(lab,black?bk-3:kw-4,yy);}
@@ -1469,6 +1585,7 @@ function draw(t){
  // loop region edges on the plot
  if(customRange()){for(const edge of [s.range.a,s.range.b]){const xe=x(edge);if(xe<b.left||xe>b.right)continue;g.strokeStyle='#b4a2eb82';g.lineWidth=1;g.setLineDash([5,4]);g.beginPath();g.moveTo(xe,b.top);g.lineTo(xe,b.bottom);g.stroke();g.setLineDash([]);}
   g.fillStyle='#b4a2eb0c';const xa=clamp(x(s.range.a),b.left,b.right),xb=clamp(x(s.range.b),b.left,b.right);if(xb>xa)g.fillRect(xa,b.top,xb-xa,b.bottom-b.top);}
+ if(RENDER)window.LumaRender?.backdrop(canvas);// the stage before anything sung or targeted: what the HUD column of a video stands on
  g.save();g.beginPath();g.rect(b.left,b.top,b.right-b.left,b.bottom-b.top);g.clip();const opt=effective(),sc=activeScore(),pts=activePoints();
  const tolH=Math.max(4,opt.tolerance/100*rowH*2),barH=clamp(rowH*.74,7,26);
  // past takes as dust, under everything the target and the voice draw; in the notes view it keeps out of the bars
@@ -1577,11 +1694,11 @@ function updateReadout(t){
  renderLyric(t);placeCountdown();
  if($('settingsDialog').open)$('diagnostics').textContent='YIN · '+(s.ctx?(s.ctx.sampleRate/1000).toFixed(1)+' kHz':'мікрофон вимкнено')+'\nВікно аналізу: '+s.windowMs.toFixed(1)+' мс\nОбчислення останнього кадру: '+s.computeMs.toFixed(2)+' мс\nЦе не вимір повної затримки.\nКалібрування: ручний зсув '+prefs.latency+' мс';
 }
-function requestDraw(){if(!s.raf&&!document.hidden&&!s.xr)s.raf=requestAnimationFrame(tick);}   // the headset's frames call tick() in VR
+function requestDraw(){if(!s.raf&&!document.hidden&&!s.xr&&!RENDER)s.raf=requestAnimationFrame(tick);}   // the headset's frames call tick() in VR
 function tick(wall){s.raf=0;const moving=s.mode!=='idle'||!!s.stream||s.busy;if(wall-s.lastDraw>=(reduced.matches?32:15)){const t=now(),wasDirty=s.dirty;
  if(s.mode==='singing'&&s.live&&s.transport){scoreAdvance(s.live,s.history,Math.min(t-.18*s.transport.speed,s.transport.end));livesStep();}
  if(wasDirty||moving){s.dirty=false;draw(t);s.lastDraw=wall;}if(wall-s.lastUI>55||wasDirty){updateReadout(t);s.lastUI=wall;}}if(moving||s.dirty)requestDraw();}
-function modal(id){$(id).showModal();if(id==='settingsDialog')populateMics();if(id==='qualityDialog')$('confirmTarget').checked=rangeVerified();}
+function modal(id){$(id).showModal();if(id==='settingsDialog'){populateMics();startCamPreview();}if(id==='qualityDialog')$('confirmTarget').checked=rangeVerified();}
 function openEditor(){if(s.mode!=='idle')return;const ns=song.notes.filter(n=>n.b>s.range.a&&n.a<s.range.b);const sel=$('editNoteSelect');sel.replaceChildren();for(const n of ns)sel.add(new Option(fmt(n.a)+' · '+name(n.m)+' · '+(n.b-n.a).toFixed(2)+' с',String(n.id)));if(!ns.length){toast('У цьому фрагменті немає нот для редагування. Обери інший фрагмент або підготуй кращу ціль.');return;}const near=ns.find(n=>n.b>s.pos)||ns[0];selectEdit(near.id);sel.value=String(near.id);modal('editDialog');}
 function selectEdit(id){const n=song.notes.find(n=>n.id===+id);if(!n)return;s.edit=structuredClone(n);$('editNoteName').textContent=name(s.edit.m);$('editStart').value=n.a;$('editEnd').value=n.b;$('editIgnore').checked=!!n.ignored;}
 function exportTarget(){const data={...song,verified:s.verified};download(new Blob([JSON.stringify(data)],{type:'application/json'}),'Luma_'+song.title+'_target.json');}
@@ -1606,6 +1723,9 @@ function markRange(which){if(s.busy||s.awaitFinish)return;const t=now();const ok
 $('markA').onclick=()=>markRange('a');$('markB').onclick=()=>markRange('b');$('rangeSettings').onclick=()=>{modal('settingsDialog');$('rangeA').focus();};$('prevMiss').onclick=()=>jumpMiss(-1);$('nextMiss').onclick=()=>jumpMiss(1);$('closeReview').onclick=closeTrace;$('takesToggle').onclick=()=>{prefs.takesOpen=!prefs.takesOpen;savePrefs();sync();};
 for(const [id,tab]of [['tabTakes','takes'],['tabProgress','progress']])$(id).onclick=()=>{prefs.tab=tab;savePrefs();s.progressSig='';renderProgress();};
 $('recordAudio').onchange=()=>{prefs.audio=$('recordAudio').checked;savePrefs();sync();toast(prefs.audio?'Голос записується у WAV: спробу можна буде переслухати.':'Запис голосу вимкнено. Лінія й оцінка зберігаються як завжди.');};
+$('cameraMode').onchange=()=>{prefs.camera=$('cameraMode').checked;s.cam.reason=null;s.cam.told=false;savePrefs();
+ if(prefs.camera)startCamPreview();else{stopCamPreview();if(liveVideo(s.stream)&&s.mode==='idle'&&!s.busy)releaseMic();}sync();};
+$('settingsDialog').addEventListener('close',stopCamPreview);
 $('livesMode').onchange=()=>{prefs.lives=$('livesMode').checked;if(!prefs.lives){s.lives=null;$('livesNotice').hidden=true;}savePrefs();sync();toast(prefs.lives?'Режим життів увімкнено: '+prefs.livesCount+' '+plural(prefs.livesCount,'життя','життя','життів')+' на спробу.':'Режим життів вимкнено.');};
 $('livesCount').onchange=()=>{const n=+$('livesCount').value;if(LIVES.sizes.includes(n))prefs.livesCount=n;s.lives=null;savePrefs();sync();};
 $('historyFile').onchange=()=>{importHistoryFile($('historyFile').files[0]);$('historyFile').value='';};$('lyricsBtn').onclick=()=>{prefs.lyrics=!prefs.lyrics;savePrefs();s.lyricKey='~';resize();sync();};
@@ -1779,6 +1899,70 @@ function synthTrace({lag=0,octave=0,kind='voice',late=0,seed=1},run){
   if(m===null){cents[i]=HIST.noPitch;conf[i]=0;db[i]=-70;}else{cents[i]=Math.round(m*100+(rnd()-.5)*30);conf[i]=242;db[i]=-20;}}
  return {hop,segments:[{t0:0,cents,conf,db}]};
 }
+// ── Render mode: the game layer of a camera video, frame by frame (docs/design/CAMERA_VIDEO_BUILD_BRIEF.md §5.3) ────────
+// Output second u is AudioContext time when₁ + u. Inside segment k the playhead stands where the trainer's stood
+// (a_k + (u − u0_k) × speed), a stored point appears once the playhead reaches it and the score runs 0.18 s behind, as
+// tick() has it; the lives are the ones the trainer recorded. Between two segments the last frame of the first holds
+// while its heart burns, then the count-in of the re-sing plays at the rewind point. app/render.js draws the overlays
+// (hearts, %, lyric band, camera seat, count-in) and encodes.
+const R={segs:[],dust:{},packs:new Map(),key:'',n:0,last:-1};
+// The frame is drawn at 960×540 and DPR 2, so the roll's type, lines and labels come out at twice the trainer's size in
+// the 1080p frame. The roll fills the frame above the lyric band (x 112–1888, y 80–848 in the frame, the ЗАРАЗ caption
+// above it); the hearts, the % and the camera circle of app/render.js stand on its past part, left of the playhead at
+// x 822, and the roll fades out before it reaches them, so no note, word or line runs under the HUD or the camera.
+function renderSize(){W=960;H=540;DPR=2;TW=TH=1;canvas.width=1920;canvas.height=1080;g.setTransform(2,0,0,2,0,0);s.headH=14;s.railH=90;s.leftW=56;s.dense=false;s.dirty=true;}
+function renderLoad(take){
+ if(validNotes(take.notes,song.duration)){song.notes=take.notes.map(n=>({...n})).sort((a,b)=>a.a-b.a);invalidateMap();}
+ if(Array.isArray(take.verified))s.verified=take.verified.filter(r=>Number.isFinite(r.a)&&Number.isFinite(r.b)&&r.b>r.a);
+ if(take.view==='notes'||take.view==='contour')prefs.view=take.view;prefs.octave=[-12,0,12].includes(take.octave)?take.octave:0;prefs.lyrics=true;
+ if([1,2,.5].includes(take.scaleZoom))$('scaleSelect').value=String(take.scaleZoom);
+ const t1=take.segments[0].when;R.dust=take.dust||{};
+ R.segs=take.segments.map(g=>{const run=g.history.runs[0],L=LEVELS[run.level]||LEVELS.normal,pts=unpackTrace(decodeTrace(g.history.traces[0]));
+  const meta={a:g.a,b:g.b,speed:g.speed,octave:run.octave||0,view:run.view,tolerance:run.tolerance,slack:L.slack,ratio:L.ratio,octaveFree:L.octaveFree,level:run.level,latency:g.latency,verified:structuredClone(s.verified)};
+  const an=analyzeTake(meta,pts,g.stop-g.when-g.latency/1000);
+  return {...g,meta,points:an.points,u0:g.when-t1,u1:g.stop-t1,uc:g.cin-t1,losses:(g.lives?.losses||[]).map(x=>({...x,u:g.when-t1+(x.at-g.a)/g.speed}))};});
+ prefs.lives=R.segs.some(x=>x.lives);s.mode='singing';s.vclock=0;s.lastFrame=0;R.key='';R.last=-1;
+ return {segments:R.segs.length,duration:R.segs.at(-1).u1,frames:Math.ceil(R.segs.at(-1).u1*30)};
+}
+// The past takes a segment started with, painted by the same worker and drawCloud() as on the stage.
+function renderDust(ids){
+ const key=ids.join(',');if(key===cloud.sig)return;cloud.sig=key;const gen=++cloud.gen,packs=[];
+ for(const id of ids){const d=R.dust[id];if(!d)continue;let buf=R.packs.get(id);if(!buf){buf=unb64(d.buf,Float32Array);R.packs.set(id,buf);}packs.push({seed:d.seed,buf});}
+ if(!packs.length){cloud.done=gen;cloud.n=0;cloud.layer?.bitmap.close();cloud.layer=null;return;}
+ cloudWorker()?.postMessage({type:'takes',gen,takes:packs});
+}
+// Which segment's stage is on screen at output time u, and whether u falls in the gap before it (frozen or counting in).
+function renderAt(u){
+ const S=R.segs;let k=0;for(let i=1;i<S.length;i++)if(u>=S[i].uc)k=i;
+ const seg=S[k];if(u>=seg.uc&&u<seg.u0&&k>0)return {k,seg,phase:'count'};
+ if(u<seg.uc&&k>0)return {k,seg,phase:'play'};// unreachable: k moves on at uc
+ const next=S[k+1];return {k,seg,phase:u>seg.u1&&next?'hold':'play'};
+}
+async function renderFrame(u){
+ s.vclock=u;const at=renderAt(u),seg=at.seg,key=at.k+':'+(at.phase==='count'?'c':'p');
+ // a new attempt: fresh score and line, its own dust, the playhead framed at once where it starts (startTransport)
+ if(key!==R.key||u<R.last){const fresh=key!==R.key;R.key=key;s.live=newScore(seg.meta);s.history=[];R.n=0;s.pos=seg.a;if(fresh){renderDust(seg.dust||[]);if(at.phase==='count'||at.k===0)setRangeScale();}}
+ R.last=u;
+ const t=at.phase==='count'?seg.a:Math.min(seg.b,seg.a+(Math.min(u,seg.u1)-seg.u0)*seg.speed);
+ if(at.phase!=='count'){const P=seg.points;while(R.n<P.length&&P[R.n].songT<=t){s.history.push({...P[R.n],raw:P[R.n].m});R.n++;}scoreAdvance(s.live,s.history,Math.min(t-.18*seg.speed,seg.b));}
+ s.pos=t;const paint=()=>{draw(t);};paint();
+ // the dust arrives from the worker: the frame waits for the layer it asked for, as the stage would get it a frame later
+ for(let i=0;i<60&&cloud.worker&&!cloud.failed&&(cloud.done!==cloud.gen||cloud.asked);i++){
+  await new Promise(ok=>{const timer=setTimeout(ok,1000);cloud.heard=()=>{clearTimeout(timer);cloud.heard=null;ok();};});paint();}
+ // lives: this segment's own, or during the count-in the full set of the re-sing; the burns that are still going
+ const prev=at.phase==='count'?R.segs[at.k-1]:null,lv=seg.lives,burns=[];let left=lv?lv.total:null;
+ if(lv&&at.phase!=='count')for(const x of seg.losses)if(x.u<=u){left=x.left;burns.push({i:x.left,ms:(u-x.u)*1000});}
+ if(prev)for(const x of prev.losses)if((u-x.u)*1000<window.LumaBurn.ms)burns.push({i:x.left,ms:(u-x.u)*1000});
+ const pct=scorePct(s.live),L=song.lyrics||[];let lyric=null;
+ if(L.length){const {cur,next,i}=lyricAt(t);let line=cur;if(!cur&&next&&next.a-t<4)line=next;const after=line?L[i+1]:null;
+  if(line)lyric={words:line.words.map(w=>({w:w.w,state:line===next?'soon':t>=w.a&&t<w.b+.08?'on':t>=w.b?'past':''})),next:after?after.words.map(w=>w.w).join(' '):''};}
+ const fitDrawn=!!cloud.layer&&cloud.n>0&&!cloud.hidden,b=bounds(),v=view(t),plot=[b.left,b.top,b.right,b.bottom,b.left+(t-v.a)/v.span*(b.right-b.left)].map(q=>q*DPR);
+ return {u,t,segment:at.k,plot,gap:at.phase!=='play',phase:at.phase,total:lv?lv.total:null,left,burns,lossMs:burns.length?Math.max(...burns.map(b=>b.ms)):null,
+  refill:at.phase==='count'&&lv?{ms:(u-seg.uc)*1000,wait:prev?prev.losses.map(x=>({i:x.left,ms:Math.max(0,window.LumaBurn.ms-(seg.uc-x.u)*1000)})):[]}:null,
+  notice:at.phase==='count'&&lv?'Ще раз з '+fmt(seg.lives.retryFrom??seg.a):null,count:at.phase==='count'?Math.max(1,Math.ceil(seg.u0-u-1e-9)):null,pct,lyric,
+  dust:{ids:(seg.dust||[]).length,specks:cloud.n,fit:cloud.fit,drawn:fitDrawn},
+  notes:song.notes.filter(n=>n.b>=view(t).a&&n.a<=view(t).b).map(n=>({id:n.id,kind:noteKind(s.live,n.id)})).filter(n=>n.kind)};
+}
 // Test hooks for the history: everything below is read-only except seedRun, which exists so a suite can build a
 // week of practice without a microphone and without waiting for real time to pass.
 const historyHooks={
@@ -1824,8 +2008,8 @@ const historyHooks={
  latency:()=>({prefs:prefs.latency,result:s.lat?.result?{...s.lat.result}:null,hint:s.latHint,check:localStorage.getItem(LAT.key)})
 };
 // The headset (app/xr.js): a panel in VR over the room mirrors this page; the chart is drawn at its place on the panel,
-// on the headset's frames.
-window.LumaXR?.attach({chart:canvas,begin(place){s.xr=place;resize();sync();act('xr',{state:'enter'});},end(){s.xr=null;resize();sync();act('xr',{state:'exit'});},
+// on the headset's frames. A camera video's render page has no headset.
+if(!RENDER)window.LumaXR?.attach({chart:canvas,begin(place){s.xr=place;resize();sync();act('xr',{state:'enter'});},end(){s.xr=null;resize();sync();act('xr',{state:'exit'});},
  frame(wall){const was=s.lastDraw;s.lastDraw=-Infinity;tick(wall);if(s.lastDraw===wall)return true;s.lastDraw=was;return false;},audio:ensureContext,
  hidden(){if(s.mode!=='idle'){prefs.loop=false;stopTransport('hidden');toast('Шолом знято або відкрите меню: відтворення зупинено.');}},
  time:()=>({t:now(),duration:song.duration,range:customRange()?{a:s.range.a,b:s.range.b}:null}),seek:applySeek,say:toast});
@@ -1849,14 +2033,24 @@ window.Luma={diagnostics:()=>({mode:s.mode,busy:s.busy,pending:s.awaitFinish,tim
    if(!s.ctx||!('_fake' in s.ctx))s.ctx={currentTime:0,state:'running',sampleRate:48000,resume(){},get _fake(){return true;}};const when=s.ctx.currentTime;s.transport={token:++s.cancel,when,offset:a,end:b,speed,loop:null};s.mode='singing';s.history=[];s.live=newScore(meta);s.pending.set(id,meta);sync();return {id,when};},
   fakeTick:(ctxTime)=>{if(s.ctx&&'_fake' in s.ctx)s.ctx.currentTime=ctxTime;const t=now();if(s.mode==='singing'&&s.live&&s.transport){scoreAdvance(s.live,s.history,Math.min(t-.18*s.transport.speed,s.transport.end));livesStep();}draw(t);updateReadout(t);return t;},
   fakeFinish:()=>{const id=s.takeCounter,meta=s.pending.get(id);if(!meta)return null;const pts=s.history.map(p=>({t:(p.songT-meta.a)/meta.speed,f:p.f,confidence:p.confidence,db:p.db}));s.pending.delete(id);const duration=(s.pos=now())-meta.a;s.transport=null;s.mode='idle';s.live=null;const m={id,blob:meta.hasAudio?silentWav(duration/meta.speed):null,hasAudio:!!meta.hasAudio,clipped:false,sampleRate:48000,duration:duration/meta.speed,start:0,end:duration/meta.speed,reason:'end',points:pts,gap:0};const t=storeTake(meta,m);sync();return {id:t.id,pct:scorePct(t.score)};},
+  // camera video: the open sitting, and a camera that goes away the way an unplugged one does
+  camera:()=>({on:camOn(),reason:s.cam.reason,sitting:s.sit?{id:s.sit.id,segments:s.sit.segs.length,recording:s.sit.rec.recording,failed:s.sit.rec.failed,cur:!!s.sit.cur}:null,video:!!liveVideo(s.stream),badge:!$('camBadge').hidden,
+   takes:s.takes.map(t=>({id:t.id,runId:t.runId,videoId:t.videoId||null}))}),
+  loseCamera:()=>{const t=liveVideo(s.stream);if(!t)return false;t.stop();t.onended?.();return true;},
+  closing:()=>s.sitClosing?s.sitClosing.then(r=>r):Promise.resolve(null),
+  // an attempt's own WAV (base64) and its stored points scored up to a song time: what the video's render must agree with
+  wav:async id=>{const t=s.takes.find(x=>x.id===id);return t?.blob?b64(new Uint8Array(await t.blob.arrayBuffer())):null;},
+  takeScore:(runId,upTo)=>{const t=s.takes.find(x=>x.runId===runId);if(!t)return null;const sc=newScore(t);scoreAdvance(sc,t.points,upTo);
+   return {pct:scorePct(sc),kinds:[...sc.notes.keys()].map(id=>[id,noteKind(sc,id)]).filter(k=>k[1])};},
   wordless:()=>{const w=scoredSpans();return {on:w.on,spans:w.spans.map(x=>[...x]),last:w.last,raw:t=>targetAt(t,effective(),true)};},
   history:historyHooks}};
-populateSong();fitStage();resize();setRangeScale();updateReadout(s.pos);loadHistory();
+if(RENDER)window.Luma.render={load:renderLoad,frame:async u=>{const info=await renderFrame(u);window.LumaRender?.overlay(g,info);return info;}};
+populateSong();fitStage();resize();setRangeScale();updateReadout(s.pos);if(!RENDER)loadHistory();
 // The record line («Рекорд») gave way to the dust of past takes, which has no switch: a saved `shadow` is dropped, never
 // read as «cloud off», which nothing could turn back on (docs/design/TAKE_CLOUD.md).
 try{if('shadow' in JSON.parse(localStorage.getItem('luma.trainer.settings')||'{}'))savePrefs();}catch(_){}
 // A profile that has never opened Luma before did not live through the change, so it is told nothing; the flag is set
 // either way, so the notice can never surface later.
-if(!prefs.audioNotice){const upgrade=hadSettings;prefs.audioNotice=true;savePrefs();
+if(!prefs.audioNotice&&!RENDER){const upgrade=hadSettings;prefs.audioNotice=true;savePrefs();
  if(upgrade)setTimeout(()=>toast('Запис голосу у WAV тепер вимикається і типово вимкнений. Слід і оцінка кожної спроби зберігаються завжди — вкладка «Прогрес». WAV вмикається в налаштуваннях.'),900);}
 })();

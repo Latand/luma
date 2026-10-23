@@ -328,16 +328,24 @@ class StudioHTTPTests(unittest.TestCase):
                      json.dumps({'events': [ok, {**ok, 'data': {'pad': 'x' * 17000}}]}).encode()):
             self.assertEqual(self.request('/activity', body, 'POST')[0], 400, body[:60])
         post = lambda origin: Request(self.url + '/activity', data=json.dumps({'events': [ok]}).encode(), method='POST', headers={'Origin': origin})
+        # a camera video's first chunk, under a fresh id each time: the trainer's other write, behind the same origin rule
+        ids = iter(f'00000000-0000-4000-8000-{n:012d}' for n in range(100))
+        chunk = lambda origin: Request(self.url + f'/video/{next(ids)}/camera?seq=0', data=b'webm', method='PUT', headers={'Origin': origin})
+        videos = Path(self.directory.name) / 'videos'
         host, port = '127.0.0.1', self.server.server_port
         # another site, and near misses of the page's own https origin (the LAN TLS proxy's): another host, another port,
         # the host as a prefix of a longer name, another scheme
         for origin in ('https://example.com', f'https://127.0.0.2:{port}', f'https://localhost:{port}', f'https://{host}:{port + 1}',
                        f'https://{host}', f'https://{host}:{port}.example.com', f'wss://{host}:{port}', 'null'):
-            with self.assertRaises(HTTPError, msg=origin) as refused: urlopen(post(origin), timeout=3)
-            self.assertEqual(refused.exception.code, 403, 'another origin cannot write into the log: ' + origin)
+            for write, what in ((post, 'the log'), (chunk, 'a video')):
+                with self.assertRaises(HTTPError, msg=origin) as refused: urlopen(write(origin), timeout=3)
+                self.assertEqual(refused.exception.code, 403, f'another origin cannot write into {what}: {origin}')
         self.assertFalse(folder.exists() and any(folder.iterdir()), 'nothing refused reaches the file')
+        self.assertFalse(videos.exists() and any(p for p in videos.iterdir() if not p.name.startswith('.')), 'no refused chunk makes a video')
         for origin in (self.url, f'https://{host}:{port}'):
             with urlopen(post(origin), timeout=3) as response: self.assertEqual(response.status, 204, 'the Studio origin may write: ' + origin)
+            with urlopen(chunk(origin), timeout=3) as response: self.assertEqual(response.status, 200, 'the Studio origin may send a chunk: ' + origin)
+        self.assertEqual(len([p for p in videos.iterdir() if (p / 'camera.webm').exists()]), 2, 'both chunks of the own origin were stored')
 
     def test_activity_script_is_served(self):
         status, body = self.request('/activity.js')

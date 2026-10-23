@@ -20,12 +20,13 @@ export LUMA_STUDIO_URL="http://127.0.0.1:$STUDIO_PORT/"
 export LUMA_TEST_LIBRARY="$TEST_LIBRARY"   # lessons.mjs generates the built-in lessons into this empty library
 RUN=${LUMA_JS:-bun}; command -v "$RUN" >/dev/null || RUN=node
 status=0
-for t in scoring audio ux studio scale lessons finish history progress lives activity session wordless autopick latency cloud xr; do echo "== $t"; LUMA_SHOT="tests/e2e/shot_$t.png" "$RUN" "tests/e2e/$t.mjs" || status=1; done
+for t in scoring audio ux studio scale lessons finish history progress lives activity session wordless autopick latency cloud video xr; do echo "== $t"; LUMA_SHOT="tests/e2e/shot_$t.png" "$RUN" "tests/e2e/$t.mjs" || status=1; done
 "$PY" tests/studio_test.py || status=1
 "$PY" tests/separation_test.py || status=1
 "$PY" tests/lyrics_text_test.py || status=1
 "$PY" tests/lyrics_align_test.py || status=1
 "$PY" tests/retranscribe_song_test.py || status=1
 "$PY" tests/pitch_quality_test.py || status=1
+"$PY" tests/video_test.py || status=1
 "$PY" tests/audio_stems_test.py || status=1   # last: it rebuilds the demo, so it must not race the suites served from it
 exit $status

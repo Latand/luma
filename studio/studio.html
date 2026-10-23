@@ -77,10 +77,21 @@ body.locked{overflow:hidden}
 .why{display:flex;gap:6px 8px;align-items:center;flex-wrap:wrap;font-size:12.5px;color:#c7d2e2}.why .chip{text-transform:none;letter-spacing:0}
 .chip.up{color:var(--mint)}.chip.up i{background:var(--mint)}.chip.same{color:var(--violet)}.chip.same i{background:var(--violet)}.chip.down{color:var(--amber)}.chip.down i{background:var(--amber)}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;margin:0}
+/* «Мої відео» (docs/design/CAMERA_VIDEO_BUILD_BRIEF.md §6.3): the composed camera videos, newest first, and a player. */
+.lib.videos{grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}.vid{display:flex;flex-direction:column;gap:8px}.vid .title{font-size:15px;font-weight:600;overflow-wrap:anywhere}
+.vthumb{display:block;position:relative;aspect-ratio:16/9;border-radius:10px;overflow:hidden;background:var(--stage);border:1px solid var(--border);width:100%}.vthumb img{display:block;width:100%;height:100%;object-fit:cover}
+.vid .facts{display:flex;flex-wrap:wrap;gap:4px 6px;font-size:13px;color:#c7d2e2;align-items:center}.vid .facts span+span::before{content:'·';margin-right:6px;color:var(--dim)}.vid .facts .chip{margin-left:auto}.vid .facts .chip::before{content:none}
+.vid .actions{display:flex;gap:8px}.vid .actions .primary{flex:1}
+dialog.player{background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:14px;padding:18px;width:min(960px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto}dialog.player::backdrop{background:#05080ecc}
+.phead{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:12px}.phead b{font-size:16px;font-weight:600;overflow-wrap:anywhere;min-width:0}.phead .secondary{width:40px;padding:0;justify-content:center;flex:none}
+/* the browser's control bar (about 73 px) gets a strip of its own under the 16:9 picture, so pausing never covers the
+   lyric band or the camera circle */
+.pvid{container-type:inline-size}.player video{display:block;width:100%;height:calc(100cqw * 9 / 16 + 80px);object-fit:contain;object-position:top;background:#000;border-radius:10px}.player .st{margin:10px 0 0}.player .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
 @keyframes rise{from{opacity:0;transform:translateY(10px)}}@keyframes fade{from{opacity:0}}
 @keyframes blink{50%{opacity:.35}}@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 @media(max-width:560px){.bar{padding:10px 14px}.wrap{padding:18px 14px 40px}.row{flex-direction:column;align-items:stretch}.row label,.row .primary{width:100%}.card{padding:14px}.lib{grid-template-columns:1fr}.bar .status{display:none}
  .lib.songs{grid-template-columns:repeat(2,minmax(0,1fr))}.songs .song{padding:10px}.songs .song .title{font-size:14.5px}.songs .song .primary{padding:0 8px;font-size:12.5px}.hero .primary{width:100%}
+ .vid .actions .primary,.vid .actions .secondary,.player .actions>*{height:44px}.phead .secondary{width:44px;height:44px}.player .actions>*{flex:1;justify-content:center}dialog.player{padding:14px}
  .sbar{padding:0 10px;gap:8px}.sbar .sclose{width:40px;padding:0;justify-content:center}.sbar .sclose span,.sstep{display:none}.sbar .sskip{font-size:12.5px;padding:0 10px}.spicker{padding:18px 14px 32px}.hero .btns,.hero .btns>*{width:100%}.sintro{padding:12px;align-items:flex-start}.sintro .card{padding:18px}.sintro .primary{flex:1 1 100%}.sintro .secondary{flex:1;justify-content:center}.rnum b{font-size:20px}.rhead{font-size:24px}}
 </style></head><body>
 <header class="bar"><div class="brand"><svg viewBox="0 0 34 34" fill="none" aria-hidden="true"><path d="M3 22c5 0 4-14 8-14s3 19 7 19 3-13 7-13 3 5 5 5" stroke="currentColor" stroke-width="1.8"/></svg>luma<span>studio</span></div><button class="secondary add" id="addSong" type="button">Додати пісню</button><div class="status" id="serverStatus"><i></i><span id="serverStatusText">ПІДКЛЮЧАЮСЬ</span></div></header>
@@ -100,6 +111,11 @@ body.locked{overflow:hidden}
 <h2>Бібліотека <span class="count" id="libCount"></span></h2>
 <div class="lib songs" id="lib"><p class="st">Завантажуємо бібліотеку…</p></div>
 <div class="library-actions"><button class="secondary" id="importTrainer" type="button">Додати готовий тренажер</button><a class="secondary" href="/demo" target="_blank" rel="noopener">Спробувати демо</a><input id="trainerFile" type="file" accept=".html" hidden></div>
+<section id="videosSection" hidden aria-labelledby="videosTitle">
+<h2 id="videosTitle">Мої відео <span class="count" id="videosCount"></span></h2>
+<p class="st" id="videosUsed" style="margin:0 0 12px"></p>
+<div class="lib videos" id="videos"></div>
+</section>
 <details class="card upload" id="uploadPanel"><summary>Додати свою пісню<small>вокал і мелодію Studio визначить на цьому комп’ютері</small></summary>
 <div class="drop" id="drop"><b id="fileName">Перетягни аудіофайл сюди</b><button class="secondary" id="choose" type="button">Вибрати аудіофайл</button><small>m4a, mp3, flac, wav, ogg · до 40 хв · до 1 ГБ · назва «Пісня - Виконавець» заповнює поля сама</small><input type="file" id="file" accept="audio/*,.m4a,.mp3,.flac,.wav,.ogg" hidden></div>
 <form id="prepareForm" class="row"><label for="title">Назва пісні<input id="title" autocomplete="off"></label><label for="artist">Виконавець<input id="artist" autocomplete="off"></label><button class="primary" id="go" disabled>Підготувати</button></form>
@@ -116,6 +132,9 @@ body.locked{overflow:hidden}
 <div class="sbody" id="sessionBody"></div>
 <p class="sr" id="sessionLive" aria-live="polite"></p>
 </section>
+<dialog class="player" id="player" aria-labelledby="playerTitle"><div class="phead"><b id="playerTitle">Відео</b><button class="secondary" id="playerClose" type="button" aria-label="Закрити">×</button></div>
+<div class="pvid"><video id="playerVideo" controls playsinline preload="metadata"></video></div><p class="st" id="playerMeta"></p>
+<div class="actions" id="playerActions"><a class="primary" id="playerDownload" download>Завантажити</a><button class="secondary" id="playerDelete" type="button">Видалити</button></div></dialog>
 <script src="/activity.js"></script>
 <script>
 const $=id=>document.getElementById(id);
@@ -201,12 +220,58 @@ function renderSongs(songs){librarySongs=songs;const key=JSON.stringify(songs);i
  if(!songs.length){root.append(el('p','Тут поки немає пісень. Додай свою пісню кнопкою вгорі, постав готовий тренажер або відкрий демо.','empty'));return;}
  for(const s of songs)root.append(songCard(s,false));}
 function setStatus(kind,text){const el=$('serverStatus');el.className='status'+(kind?' '+kind:'');$('serverStatusText').textContent=text;}
+// ── «Мої відео»: camera videos Studio composed from sittings in the trainers (studio/video.py) ──────────────────────
+let videos=[],videosKey='',videosLoaded=false;
+const VSTATE={recording:'Записується',queued:'Чекає на монтаж',aligning:'Монтую',rendering:'Монтую',composing:'Монтую',failed:'Не вдалося',ready:'Готово'};
+// under 0,1 ГБ in МБ, so a few short videos never read as nothing
+const gb=n=>(n/1073741824).toFixed(1).replace('.',',')+' ГБ',size=n=>n>0&&n<107374182?Math.max(1,Math.round(n/1048576))+' МБ':gb(n);
+// whole seconds, cut the way the player's own clock cuts them
+const vlen=t=>clock(Math.floor(t||0));
+const two=n=>String(n).padStart(2,'0');
+function when(iso){const d=new Date(iso);return isNaN(d)?'':two(d.getDate())+'.'+two(d.getMonth()+1)+'.'+d.getFullYear()+' '+two(d.getHours())+':'+two(d.getMinutes());}
+function videoFile(v){const d=new Date(v.startedAt),t=isNaN(d)?'':'_'+d.getFullYear()+'-'+two(d.getMonth()+1)+'-'+two(d.getDate())+'_'+two(d.getHours())+'-'+two(d.getMinutes());return 'Luma_'+String(v.title||'video').replace(/[^\p{L}\p{N}_-]+/gu,'_')+t+'.mp4';}
+function stateText(v){if(v.state==='rendering'&&v.progress!==null)return 'Монтую · '+Math.round(100*v.progress)+' %';if(v.state==='failed')return 'Не вдалося: '+(v.error||'причина невідома');return VSTATE[v.state]||v.state;}
+function renderVideos(d){
+ const key=JSON.stringify(d);videos=d.videos;videosLoaded=true;if(key===videosKey)return;videosKey=key;
+ $('videosSection').hidden=!videos.length;$('videosCount').textContent=videos.length?String(videos.length):'';
+ $('videosUsed').textContent='Займають '+size(d.used)+' з '+gb(d.budget)+' · найстаріші видаляються самі';
+ const root=$('videos');root.replaceChildren();
+ for(const v of videos){const card=el('article',null,'card vid'),title=v.title||'Пісня';
+  const thumb=el(v.state==='ready'?'button':'div',null,'vthumb');if(v.state==='ready'){thumb.type='button';thumb.setAttribute('aria-label','Дивитися: '+title);thumb.onclick=()=>openPlayer(v.id);const img=el('img');img.alt='';img.loading='lazy';img.src='/video/'+v.id+'/thumb.jpg';img.onerror=()=>img.remove();thumb.append(img);}
+  const facts=el('div',null,'facts');if(v.startedAt)facts.append(el('span',when(v.startedAt)));if(v.duration)facts.append(el('span',vlen(v.duration),'len'));
+  const chip=el('span',null,'chip '+(v.state==='ready'?'done':v.state==='failed'?'failed':'running'));chip.append(el('i'),el('span',stateText(v)));facts.append(chip);
+  card.append(thumb,el('div',title,'title'),facts);
+  if(v.state==='ready'){const acts=el('div',null,'actions'),b=el('button','Дивитися','primary');b.type='button';b.onclick=()=>openPlayer(v.id);acts.append(b);card.append(acts);}
+  root.append(card);}
+ if(pendingVideo)openPlayer(pendingVideo);
+}
+async function refreshVideos(){try{const r=await fetch('/videos');if(r.ok)renderVideos(await r.json());}catch(_){}return videos.some(v=>!['ready','failed'].includes(v.state));}
+// /#video/<id> opens the player: from an attempt's «Відео» button in the trainer, or a link kept from earlier.
+let pendingVideo=null;
+function openPlayer(id){
+ if(!videosLoaded){pendingVideo=id;return;}pendingVideo=null;const v=videos.find(x=>x.id===id),dlg=$('player'),video=$('playerVideo');
+ $('playerTitle').textContent=v?(v.title||'Відео'):'Відео';
+ const ready=v&&v.state==='ready';video.hidden=!ready;$('playerActions').hidden=!ready;
+ if(ready){if(!video.src.endsWith('/video/'+id+'/video.mp4'))video.src='/video/'+id+'/video.mp4';$('playerDownload').href='/video/'+id+'/video.mp4';$('playerDownload').download=videoFile(v);dlg.dataset.id=id;
+  $('playerMeta').textContent=[when(v.startedAt),v.approximateSync?'голос може трохи розходитися з музикою':null].filter(Boolean).join(' · ');}
+ else{video.removeAttribute('src');video.load();dlg.dataset.id='';$('playerMeta').textContent=v?stateText(v):'Цього відео вже немає: найстаріші видаляються самі, щоб відео займали не більше 5 ГБ.';}
+ if(!dlg.open)dlg.showModal();activity.log('video_open',{id,found:!!v});
+}
+function closePlayer(){const dlg=$('player');if(dlg.open)dlg.close();}
+$('player').addEventListener('close',()=>{const v=$('playerVideo');v.pause();if(location.hash.startsWith('#video/'))history.replaceState(null,'',location.pathname+location.search);});
+$('playerClose').onclick=closePlayer;
+$('playerDownload').onclick=()=>activity.log('video_download',{id:$('player').dataset.id});
+$('playerDelete').onclick=async()=>{const id=$('player').dataset.id;if(!id||!confirm('Видалити це відео з Studio? Повернути його не вийде.'))return;
+ try{const r=await fetch('/video/'+id,{method:'DELETE'});if(!r.ok&&r.status!==404)throw Error(String(r.status));closePlayer();await refreshVideos();}catch(e){$('playerMeta').textContent='Не вдалося видалити відео. Спробуй ще раз.';}};
+function hashVideo(){const m=/^#video\/([0-9a-f-]{36})$/.exec(location.hash);if(m)openPlayer(m[1]);}
+addEventListener('hashchange',hashVideo);
 async function refresh(){clearTimeout(timer);if(refreshing)return;refreshing=true;let delay=5000;
  try{const r=await fetch('/status');if(!r.ok)throw Error('status');const d=await r.json();if(!Array.isArray(d.jobs)||!Array.isArray(d.songs))throw Error('format');$('connectionNotice').hidden=true;renderJobs(d.jobs);
   const files=d.songs.map(s=>s.name).filter(n=>LESSON_FILE.test(n)).sort().join('|');
   if(files&&files!==lessonsFor)await loadLessons(files);   // first poll, and again whenever a lesson is added, renamed or removed
   const built=new Set(d.songs.map(s=>s.name)),shown=(lessons||[]).filter(l=>built.has(l.html));
-  renderLessons(shown);renderEntry(shown);renderSongs(d.songs.filter(s=>!shown.some(l=>l.html===s.name)));syncAutopick();const working=d.jobs.some(j=>['running','queued'].includes(j.state));setStatus(working?'busy':'live',working?'ГОТУЄМО ПІСНЮ':'STUDIO ПРАЦЮЄ');delay=working?2000:15000;}
+  renderLessons(shown);renderEntry(shown);renderSongs(d.songs.filter(s=>!shown.some(l=>l.html===s.name)));syncAutopick();const working=d.jobs.some(j=>['running','queued'].includes(j.state));setStatus(working?'busy':'live',working?'ГОТУЄМО ПІСНЮ':'STUDIO ПРАЦЮЄ');delay=working?2000:15000;
+  if(await refreshVideos())delay=Math.min(delay,2000);}
  catch(e){if($('connectionNotice').hidden)activity.log('notice',{id:'connectionNotice'});$('connectionNotice').hidden=false;setStatus('','НЕМАЄ ЗВ’ЯЗКУ');}
  finally{refreshing=false;timer=setTimeout(refresh,delay);}
 }
@@ -246,7 +311,7 @@ function dropFrame(){const f=S.frame;S.frame=null;S.loaded=false;S.wantOpen=fals
  // Removing the document stops its audio and frees the microphone without a beforeunload prompt; an attempt still in
  // progress is dropped, a finished one is already in the history.
  setTimeout(()=>f.remove(),ms(200));}
-function makeFrame(src){dropFrame();const f=el('iframe',null,'sframe');f.src=src;f.title='Тренажер';f.allow='microphone; autoplay; fullscreen; xr-spatial-tracking';f.inert=true;f.tabIndex=-1;
+function makeFrame(src){dropFrame();const f=el('iframe',null,'sframe');f.src=src;f.title='Тренажер';f.allow='microphone; camera; autoplay; fullscreen; xr-spatial-tracking';f.inert=true;f.tabIndex=-1;
  f.addEventListener('load',()=>{if(S.frame!==f)return;S.loaded=true;if(S.wantOpen)showFrame();});S.frame=f;$('sessionBody').append(f);return f;}
 function showFrame(){const f=S.frame;if(!f)return;S.wantOpen=false;
  const card=$('sessionBody').querySelector('.sintro');if(card){card.classList.add('out');setTimeout(()=>card.remove(),ms(180));}
@@ -509,5 +574,5 @@ addEventListener('message',e=>{const d=e.data;
  if(S.phase==='lesson'&&d.file===S.steps[S.i].html)finishLesson(d);
  else if(S.phase==='song'&&S.song&&d.file===S.song.name)finishSong(d);});
 $('sessionStart').onclick=startSession;$('autopickHome').onclick=()=>startAutopick('home');$('sessionClose').onclick=leaveSession;$('sessionSkip').onclick=skipStep;
-$('refreshBtn').onclick=refresh;refresh();
+$('refreshBtn').onclick=refresh;refresh();hashVideo();
 </script></body></html>

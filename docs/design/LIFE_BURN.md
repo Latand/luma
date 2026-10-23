@@ -5,8 +5,8 @@ Operator, 2026-10-11: «когда жизнь сгорает, чтобы оно 
 
 In lives mode ([docs/SCORING.md](../SCORING.md#lives-mode-режим-життів)), a heart that is lost flashes, swells, shakes,
 burns from its tip upward and throws embers for 0.8 s. After that only the outline of a lost heart is left. One pure canvas function draws it, so the camera video's render mode can draw the
-same pixels at the same times. The camera video design is `docs/design/CAMERA_VIDEO.md` from its own lane (not on main
-yet); its §5.2 is the render mode and §5.6 the burn, and §4 below is written against them.
+same pixels at the same times. The camera video design is [CAMERA_VIDEO.md](CAMERA_VIDEO.md), built per
+[CAMERA_VIDEO_BUILD_BRIEF.md](CAMERA_VIDEO_BUILD_BRIEF.md); its §5.2 is the render mode and §5.6 the burn, and §4 below is written against them.
 
 ## 1. Storyboard (variant 1 «Згоряє знизу», 800 ms)
 

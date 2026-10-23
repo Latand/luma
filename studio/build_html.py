@@ -21,8 +21,9 @@ END = '};</script>'
 def parts():
     head = (APP / 'head.html').read_text(encoding='utf-8'); workers = (APP / 'workers.html').read_text(encoding='utf-8')
     # The activity logger runs first, so the app can hand it events; it stays silent outside Luma Studio. The latency
-    # estimator (pure functions) and the headset's panel (xr.js) come before the app that calls them.
-    script = ''.join('<script>' + (APP / f).read_text(encoding='utf-8') + '</script>' for f in ('activity.js', 'latency.js', 'burn.js', 'xr.js', 'app.js')) + '</body></html>'
+    # estimator, the burn, the camera recorder (no DOM of their own) and the headset's panel (xr.js) come before the app
+    # that calls them; the render mode of a camera video comes after it and stays idle on every other page.
+    script = ''.join('<script>' + (APP / f).read_text(encoding='utf-8') + '</script>' for f in ('activity.js', 'latency.js', 'burn.js', 'camera.js', 'xr.js', 'app.js', 'render.js')) + '</body></html>'
     return head, workers, script
 
 def wrap(song: dict, data_line: str) -> str:

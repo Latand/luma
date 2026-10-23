@@ -93,6 +93,8 @@ Lines from one session can land in different batches and, past midnight, in two 
 | `notice` | the upload notice shown (`id: uploadNotice`, `text`), or the connection lost (`id: connectionNotice`) |
 | `session_result` | «Заняття» showed a result card: `kind` (`lesson` / `song`), `file`, `score` %, `median` % of the earlier full passes, `prev` (how many; `null` when the trainer could not read its history), `delta`, `full` (a full pass), `saved` (in the trainer's history), `next` (the file that comes next, `picker`, or `null` after the last song) |
 | `session_next` | the session moved on: `from`, `to` (files, `picker`), `how` (`countdown`, `now` = «Почати зараз» / «Почати урок», `repeat`, `skip`, `songs` = «До пісень», `picker` = a song picked in the list, `autopick` = a song «Обери за мене» picked) |
+| `video_open` | «Мої відео» opened the player: `id`, `found` (`false` for a link to a deleted video) |
+| `video_download` | «Завантажити» in the player: `id` |
 | `autopick` | «Обери за мене» picked a song ([design/AUTOPICK.md](design/AUTOPICK.md)): `why` (`start`; after a result `up`, `down`, `stay`, `silent` = nobody sang, `lives` = a pass that did not start at 0), `from` and `to` step (1–4; `from` is `null` on a first start), `songHash` picked, `D`, `Dp` (D′ after the personal shift), `baseline` (the usual score), `score` (`null` on start), `pool` (songs the step offered after skipping recent picks; 0 when it fell back to the oldest pick), `origin` on start (`picker` tile / `home` button) |
 | `session_autostart` | a trainer answered Studio's request to start singing: `file`, `ok`, `reason` (`audio` sound refused, `mic`, `busy`, `other`), `ms` from the request to the answer |
 
@@ -112,6 +114,8 @@ Opening a song or a lesson from Studio is a `click` whose `href` is `song:<file>
 | `latency_estimate` | the microphone offset estimated from the attempts ([design/LATENCY_AUTOCAL.md](design/LATENCY_AUTOCAL.md)): `latency` ms suggested (`null` with too few usable attempts), `ci90` [low, high] ms, `n` usable attempts in the window, `current` setting ms, `onset` ms of extra lateness at phrase starts (`null` when not measured), `ms` the computation took, `auto` (`true` for the daily check after an attempt, `false` for the button), `hint` (the daily check showed the hint) |
 | `latency_apply` | «Застосувати» set the suggested offset: `from`, `to` ms |
 | `xr` | the VR session in a headset ([README](../README.md#in-a-vr-headset-quest), `app/xr.js`): `state` (`enter` = the session started, `exit` = it ended, by «Вийти» or by the headset) |
+| `video_capture` | camera video ([design/CAMERA_VIDEO_BUILD_BRIEF.md](design/CAMERA_VIDEO_BUILD_BRIEF.md)): a sitting opened its recorder (`ok: true`) or went on without one (`ok: false`, `reason`: `denied`, `absent`, `busy` when the camera could not be opened, `recorder` when the browser refused to record, `lost` when the camera went away mid-take, `slow` / `refused` when Studio stopped taking the chunks) |
+| `video_upload` | a sitting closed: `ok`, `ms` from its start, `bytes` of webm sent, `segments` (attempts in it), `composed` (Studio queued it), `reason` (`short` under 30 s, `upload`, `offline`, `invalid`); `timeout: true` when a «Заняття» frame stopped waiting after 10 s |
 
 Play, record and stop are `state` changes of `mode` (and the `click` on `listenBtn`, `singBtn`, `stopBtn`, or the
 `key` Space / Escape that caused them). Loop and A–B ranges are `state` changes of `loop`, `rangeId` and `range`.
