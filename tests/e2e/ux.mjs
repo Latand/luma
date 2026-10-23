@@ -111,6 +111,26 @@ for(const [width,height] of [[1440,900],[1024,700],[844,390],[390,844]]){
   assert(geo.top>=geo.head&&geo.bottom<=geo.rail&&geo.bottom>geo.top,
     'the plot keeps clear of the head and the rail at '+width+'x'+height+' '+JSON.stringify(geo));
 }
+// ── the lyric band keeps its height on the last line, which has no line after it: the plot top measured there must still
+// leave the next line clear of the keys when a seek brings it back (390 px: the words start at the left edge, over the rail)
+{await p.setViewportSize({width:390,height:844});await p.waitForTimeout(220);
+  const lyr=await p.evaluate(()=>{const L=window.LUMA_SONG.lyrics,w=l=>l.words.map(x=>x.w).join(' ');return{end:L.at(-1).words.at(-1).a+.05,start:L[0].words[0].a+.05,next:w(L[1]),duration:window.Luma.song().duration};});
+  await p.locator('#timelineWrap').scrollIntoViewIfNeeded();const tlBox=await p.locator('#timelineWrap').boundingBox();
+  const click=async t=>{await p.mouse.click(tlBox.x+tlBox.width*t/lyr.duration,tlBox.y+6);};
+  await click(lyr.end);await p.waitForFunction(()=>document.getElementById('lyricNext').textContent==='');
+  await p.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
+  await click(lyr.start);await p.waitForFunction(n=>document.getElementById('lyricNext').textContent===n,lyr.next);
+  await p.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
+  const band=await p.evaluate(()=>{const T=window.Luma.test,DPR=T.dpr(),chart=document.getElementById('chart'),box=document.getElementById('chartWrap').getBoundingClientRect();
+    const range=document.createRange();range.selectNodeContents(document.getElementById('lyricNext'));const tr=range.getBoundingClientRect();
+    T.draw();const pl=T.plot(),copy=document.createElement('canvas');copy.width=chart.width;copy.height=chart.height;
+    const g=copy.getContext('2d',{willReadFrequently:true});g.drawImage(chart,0,0);
+    // the text range in canvas pixels, over the rail's keys (left of the plot): an ivory pixel there is light grey under light grey type
+    const x0=Math.max(0,Math.floor((tr.left-box.left)*DPR)),x1=Math.ceil(Math.min(tr.right-box.left,pl.left-7)*DPR),y0=Math.max(0,Math.floor((tr.top-box.top)*DPR)),y1=Math.ceil((tr.bottom-box.top)*DPR);
+    let ivory=0;if(x1>x0&&y1>y0){const d=g.getImageData(x0,y0,x1-x0,y1-y0).data;for(let i=0;i<d.length;i+=4)if(Math.min(d[i],d[i+1],d[i+2])>100)ivory++;}
+    scrollTo(0,0);return{text:document.getElementById('lyricNext').textContent,textBottom:+(tr.bottom-box.top).toFixed(2),plotTop:+pl.top.toFixed(2),ivory,checked:[x0,y0,x1,y1]};});
+  assert(band.text===lyr.next&&band.textBottom<=band.plotTop+.01&&band.ivory===0,'after a seek to the last line and back the next lyric line stays above the plot and off the keys at 390x844 '+JSON.stringify(band));
+}
 // ── the pitch rail's note names stay on the keyboard: the ivory and the black keys end at the plot's edges, so a name
 // whose text box crosses an edge would be dark ink half over the dark strip. Read from the fillText calls of real frames.
 for(const [width,height] of [[390,844],[900,800],[1440,900]])for(const zoom of ['1','2','0.5']){
@@ -118,13 +138,14 @@ for(const [width,height] of [[390,844],[900,800],[1440,900]])for(const zoom of [
   await p.evaluate(z=>{const sel=document.getElementById('scaleSelect');sel.value=z;sel.dispatchEvent(new Event('change'));},zoom);
   const rail=await p.evaluate(async()=>{const T=window.Luma.test,C=CanvasRenderingContext2D.prototype,fill=C.fillText,out=[];let frames=0,pl=null;// only the frames this test draws: the app's own frames between them are drawn on other bounds
     const dur=window.Luma.song().duration;
-    C.fillText=function(text,x,y){if(pl&&/^[A-G]#?-?\d$/.test(text)&&x<pl.left-7){const m=this.measureText(text);
+    C.fillText=function(text,x,y){if(pl&&/^[A-G][#♯]?-?\d$/.test(text)&&x<pl.left-7){const m=this.measureText(text);
       out.push({text,plot:[pl.top,pl.bottom],top:+(y-m.actualBoundingBoxAscent).toFixed(2),bottom:+(y+m.actualBoundingBoxDescent).toFixed(2),cut:y-m.actualBoundingBoxAscent<pl.top||y+m.actualBoundingBoxDescent>pl.bottom});}
       return fill.apply(this,arguments);};
     // every position across the song, three frames each so the range eases between the drawn frames
     try{for(let t=0;t<dur;t+=dur/24){T.seek(t);for(let i=0;i<3;i++){await new Promise(r=>requestAnimationFrame(r));pl=T.plot();T.draw();pl=null;frames++;}}}finally{C.fillText=fill;}
-    return {frames,names:out.length,cut:out.filter(n=>n.cut).slice(0,4)};});
-  assert(rail.names>0&&rail.cut.length===0,'no pitch rail name crosses the plot edge at '+width+'x'+height+' scale '+zoom+' '+JSON.stringify(rail));
+    return {frames,names:out.length,sharps:out.filter(n=>/[#♯]/.test(n.text)).length,cut:out.filter(n=>n.cut).slice(0,4)};});
+  // the 9 px names on the black keys show where the rows and the keys are big enough for them (1440 px at scales 1 and 2)
+  assert(rail.names>0&&rail.cut.length===0&&(width<1440||zoom==='0.5'||rail.sharps>0),'no pitch rail name crosses the plot edge at '+width+'x'+height+' scale '+zoom+' '+JSON.stringify(rail));
 }
 await p.evaluate(()=>{const sel=document.getElementById('scaleSelect');sel.value='1';sel.dispatchEvent(new Event('change'));});
 await p.setViewportSize({width:1440,height:900});

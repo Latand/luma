@@ -58,6 +58,27 @@ for (const [mic, say] of [['denied', 'Без мікрофона в шоломі 
     'a refused session with the microphone ' + mic + ' stays out of VR and says so: ' + JSON.stringify(r));
 }
 
+// A session that opens but cannot be drawn in (a shader that fails to compile): it ends again, the page stays out of
+// VR and says why, and the press leaves no rejected promise behind.
+await page.evaluate(() => {
+  const G = WebGL2RenderingContext.prototype, X = navigator.xr;
+  window.__keep = {param: G.getShaderParameter, log: G.getShaderInfoLog, request: X.requestSession};
+  G.getShaderParameter = function (s, p) { return p === this.COMPILE_STATUS ? false : window.__keep.param.call(this, s, p); };
+  G.getShaderInfoLog = () => 'stub: the shader failed';
+  window.__broken = {opened: false, ended: false};
+  X.requestSession = async (...a) => { const s = await window.__keep.request.apply(X, a); window.__broken.opened = true; s.addEventListener('end', () => { window.__broken.ended = true; }); return s; };
+  document.getElementById('toast').textContent = '';
+});
+await page.click('#xrBtn');
+await page.waitForFunction(() => window.__broken.ended && document.getElementById('toast').textContent.includes('VR'), null, {timeout: 5000}).catch(() => {});
+const broken = await page.evaluate(() => {
+  const G = WebGL2RenderingContext.prototype, k = window.__keep;
+  G.getShaderParameter = k.param; G.getShaderInfoLog = k.log; navigator.xr.requestSession = k.request;
+  return {...window.__broken, inXr: document.body.classList.contains('in-xr'), run: !!window.__lumaXr, toast: document.getElementById('toast').textContent};
+});
+assert(broken.opened && broken.ended && !broken.inXr && !broken.run && broken.toast.startsWith('VR не запустився') && !logs.length,
+  'a session the panel cannot be drawn in ends again, out of VR, with a toast that says so: ' + JSON.stringify({...broken, logs}));
+
 await page.click('#xrBtn');
 await page.waitForFunction(() => window.__lumaXr && window.__lumaXr.frames > 10, null, {timeout: 15000}).catch(() => {});
 const entered = await page.evaluate(() => {

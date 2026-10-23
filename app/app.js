@@ -1778,6 +1778,8 @@ document.addEventListener('visibilitychange',()=>{if(s.xr)return;if(document.hid
  if(s.raf)cancelAnimationFrame(s.raf);s.raf=0;if(s.mode!=='idle'){prefs.loop=false;stopTransport('hidden');toast('Вкладку приховано — відтворення зупинено.');}}else{s.dirty=true;requestDraw();}});
 addEventListener('resize',fitStage);
 new ResizeObserver(resize).observe($('chartWrap'));new ResizeObserver(resize).observe($('timelineWrap'));
+// the head and the lyric band change height with their text (a wrapped score, a line of words), between syncs too
+{const remeasure=new ResizeObserver(()=>{const h=s.headH;measureStage();if(s.headH!==h){s.dirty=true;requestDraw();}});remeasure.observe($('stageHead'));remeasure.observe($('lyricBand'));}
 // ── «Розрахувати затримку» (docs/design/LATENCY_AUTOCAL.md): the microphone offset the recorded attempts imply ──────
 // The newest attempts of every song, newest first, until 30 of them are usable; other songs' melodies come from Studio's
 // /targets, with this browser's note edits applied. Only what the score counts is matched: no ignored note, no

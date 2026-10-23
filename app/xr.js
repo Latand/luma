@@ -487,8 +487,9 @@ async function enter() {
     const view = $('xrView'), gl = view.getContext('webgl2', {xrCompatible: true, alpha: true, antialias: true});
     if (!gl) { session.end().catch(() => {}); host.say('Немає WebGL2: VR не запуститься.'); return; }
     view.width = Math.round(innerWidth * (devicePixelRatio || 1)); view.height = Math.round(innerHeight * (devicePixelRatio || 1));
-    run = new Run(session, gl, view);
-    try { await run.start(); } catch (e) { run = null; session.end().catch(() => {}); host.say('VR не запустився: ' + (e?.message || e)); }
+    // a shader that fails to build throws in the constructor: the open session ends with it, never left drawing nothing
+    try { run = new Run(session, gl, view); await run.start(); }
+    catch (e) { run = null; session.end().catch(() => {}); host.say('VR не запустився: ' + (e?.message || e)); }
   } finally { entering = false; }
 }
 

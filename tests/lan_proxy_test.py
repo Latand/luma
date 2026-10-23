@@ -287,7 +287,9 @@ class LanProxyTest(unittest.TestCase):
         self.assertEqual((status, body), (200, SMALL))
         held.close()
         self.assertEqual(self.answers_within(port, 5), (200, SMALL), 'the place comes back when the held one closes')
-        self.assertEqual(self.stop(proc), 'lan_proxy: busy, dropped 127.0.0.1 (1 open)\n')
+        # one busy line for the refused connection, and one more for each retry that came before the proxy saw the close
+        lines = self.stop(proc).splitlines()
+        self.assertTrue(lines and all(line == 'lan_proxy: busy, dropped 127.0.0.1 (1 open)' for line in lines), lines)
 
     def test_silent_client_is_dropped_after_the_handshake_timeout(self):
         proc, port = self.start(self.http.server_address[1], extra=('--max-conns', '1', '--handshake-timeout', '0.5'))
