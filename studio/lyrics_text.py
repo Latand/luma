@@ -3,13 +3,14 @@
 
   lyrics_text.py <package_dir>...             fetch/reuse the published lyrics, correct the text, rebuild the HTML
   lyrics_text.py --text lyrics.txt <package>  use lyrics supplied by the operator instead of fetching them
+  lyrics_text.py --synced lines.lrc <pkg>     constrain correction to validated synced line boundaries
   lyrics_text.py --from mix|vocal <package>   correct against a specific stored transcript instead of the one the
                                                song is already published from
   lyrics_text.py --force <package>            write even when the gate would otherwise refuse
   lyrics_text.py --dry-run <package_dir>...   report what would change and write nothing
   lyrics_text.py --dry-run --json <pkg>...    the same report as machine-readable metrics
 
-The ASR words in <package>/lyrics/{mix,vocal}.json are the only input read and are never modified, so every run
+The ASR words in <package>/lyrics/{mix,vocal}.json are never modified, so every run
 re-derives its output from the same source and two runs in a row are byte-identical. Correction starts from
 whichever transcript the song is already published from (the 'vocal stem' marker in lyricsSource is the signal, or
 --from to say so explicitly) — a song deliberately kept on the mix transcript never silently jumps to the other one.
@@ -20,7 +21,7 @@ published from, so it can never regress a correction back to the raw ASR transcr
 different: it moves the song to the vocal transcript and replays the same correction there, keeping it only if it
 still passes the gate on that new transcript — if it doesn't, the command writes the raw vocal words instead, with
 no correction at all, and the previously-corrected text is gone from the published song until it's corrected again.
-The
+Without synced input, the
 true lyric text is sequence-aligned against the normalized ASR words: a matched word keeps the ASR timing; a
 substituted word takes the timing of the word(s) it replaces, unless it sits next to a run of inserted words whose
 own window has no room, in which case it moves too (see fill_gaps) — only a matched word's time is ever off limits;
@@ -47,6 +48,19 @@ placement and a song-wide count refuses an ordinarily dense song on its everyday
 catches a real crowd. Every reason that applies is named
 in the refusal, not just the first one found.
 
+Optional `--synced` accepts a local LRC file. Three-word phrase matches establish
+its clock against ASR; at least three distinct occurrences must agree within 1.5 s.
+A coherent offset up to 30 s is reported and compensated; changed clocks refuse.
+Each line also needs a recorded vocal attack within 1.5 s. Matching and gap filling
+stay inside that line's voiced window, empty timed rows bound instrumental breaks,
+and complete performance text is used without repeat restoration. Every final word,
+including matched words, is checked for voice support and section boundaries.
+Unsupported or crowded lines refuse with line number and time, even with --force.
+Pitch-mask omissions can therefore require a better verified timeline or vocal
+analysis before the correction can be applied. Successful writes cache LRC content
+with source metadata; realignment and retranscription revalidate it on replay.
+Dry runs read these inputs and never populate caches.
+
 Fetching is a single free lookup (api.lyrics.ovh, no key) keyed by the title/artist in <package>/manifest.json. The
 raw text — fetched or operator-supplied — is cached in <package>/lyrics/source.txt (with the title/artist it was
 fetched for, in lyrics/source.meta.json) once a run actually writes it, so a second run needs no network and a
@@ -66,6 +80,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'studio'))
 import align_lyrics as al
+import lyrics_synced as synced
 from prepare_song import sha256
 
 AUDIO_EXTENSIONS = {'.flac', '.mp3', '.m4a', '.wav'}   # every audio file the safety guard must fingerprint
@@ -127,6 +142,16 @@ def cached_source_text(pkg: Path) -> str | None:
     title, artist = _manifest_title_artist(pkg)
     if meta.get('title') != title or meta.get('artist') != artist: return None
     return cache.read_text(encoding='utf-8')
+
+def cached_synced_text(pkg: Path) -> str | None:
+    """Replay the timing input cached with a still-valid verified text source.
+
+    Every replay validates the clock against the current transcript and recording.
+    Old caches have no timing input and keep the original correction behaviour.
+    """
+    if cached_source_text(pkg) is None: return None
+    meta = json.loads((pkg / 'lyrics' / 'source.meta.json').read_text(encoding='utf-8'))
+    return meta.get('synced_lrc')
 
 def resolve_source_text(pkg: Path, text_file: str | None) -> tuple[str, str, dict | None]:
     """The raw lyric text to use, a short note of where it came from, and — only when the source should be cached
@@ -587,14 +612,30 @@ def gate_verdict(conf: str, before_metrics: dict | None, after_metrics: dict) ->
     return True, None
 
 # ---------------------------------------------------------------- the shared correction pipeline
-def build_correction(pkg: Path, song: dict, asr_words: list[dict], ctx: dict, raw_text: str, asr_src: str) -> dict:
+def build_correction(pkg: Path, song: dict, asr_words: list[dict], ctx: dict, raw_text: str, asr_src: str,
+                     synced_text: str | None = None) -> dict:
     """The one path from a lyrics source to seeded, realigned lines, used by lyrics_text.py, align_lyrics.py and the
     vocal retranscription command alike, so a realignment or a fresh transcription always runs the same checks a
-    direct correction would and never regresses or over-applies one."""
+    direct correction would and never regresses or over-applies one.
+
+    Optional synced LRC is checked for a coherent recording clock and vocal attacks
+    before use. It bounds matching and gap filling to sections and disables repeat
+    invention. Unsafe timelines raise LyricsSourceError naming the line and time;
+    --force cannot override this. With no timeline the original path is unchanged.
+    """
     true_tokens = tokenize(raw_text)
     if not true_tokens: raise LyricsSourceError(f'{pkg.name}: no words found in the lyrics source')
-    true_tokens, entries, repeats_restored = restore_repeats(asr_words, true_tokens)
-    entries = fill_gaps(entries, ctx)
+    anchor_checks, anchor_clock = [], None
+    if synced_text is None:
+        true_tokens, entries, repeats_restored = restore_repeats(asr_words, true_tokens)
+        entries = fill_gaps(entries, ctx)
+    else:
+        try:
+            entries, anchor_checks, anchor_clock, ctx = synced.seed_sections(
+                true_tokens, asr_words, ctx, synced_text, fill_gaps)
+        except synced.SyncedLyricsError as e:
+            raise LyricsSourceError(str(e)) from e
+        repeats_restored = 0
     seed = seed_words(entries, asr_words)
     lines = al.realign(seed, ctx)
     assert [w['w'] for w in al.flat(lines)] == true_tokens, 'the true lyric text must survive re-alignment untouched'
@@ -607,6 +648,19 @@ def build_correction(pkg: Path, song: dict, asr_words: list[dict], ctx: dict, ra
     flat_words = al.flat(lines)
     max_shift = max(substituted_shifts(asr_words, entries, flat_words), default=0.0)
     blocking, info = placement_problems(entries, flat_words, ctx, before_lines, before_m, after_m, max_shift)
+    anchor_errors = synced.placement_errors(anchor_checks, flat_words, ctx)
+    blocking.extend(anchor_errors)
+    if anchor_checks and blocking:
+        # Name the actual section even for a generic crowding or movement refusal.
+        for row in anchor_checks:
+            local_entries = entries[row['index']:row['end_index']]
+            local_words = flat_words[row['index']:row['end_index']]
+            local_shift = max(substituted_shifts(asr_words, local_entries, local_words), default=0.)
+            faults, _ = placement_problems(local_entries, local_words, ctx,
+                                           before_lines, max_substituted_shift=local_shift)
+            if faults:
+                anchor_errors.append(f"synced line {row['line']} at {row['a']:.2f}s: " + '; '.join(faults))
+        blocking.extend(e for e in anchor_errors if e not in blocking)
     # every blocking reason is named, not just the first one found: a harm-gate refusal and a placement refusal can
     # both apply to the same correction, and an operator deciding whether --force is safe needs to see both
     reasons = ([reason] if reason else []) + (['placement: ' + '; '.join(blocking)] if blocking else [])
@@ -615,7 +669,9 @@ def build_correction(pkg: Path, song: dict, asr_words: list[dict], ctx: dict, ra
             'agreement_pct': agreement['agreement_pct'], 'repeats_restored': repeats_restored,
             'before_metrics': before_m, 'after_metrics': after_m, 'passed': passed, 'reason': reason,
             'max_substituted_shift_s': round(max_shift, 3),
-            'placement_problems': blocking + info, 'asr_source': asr_src}
+            'placement_problems': blocking + info, 'asr_source': asr_src,
+            'synced_clock': anchor_clock, 'anchor_checks': anchor_checks,
+            'unsafe_synced': bool(synced_text is not None and not passed)}
 
 # ---------------------------------------------------------------- report
 def word_error_rate(a_norm: list[str], t_norm: list[str]) -> float:
@@ -669,20 +725,24 @@ def corrected_note(existing: str, src: str) -> str:
 
 # ---------------------------------------------------------------- package plumbing
 def process_package(pkg: Path, text_file: str | None, write: bool, rebuild: bool = True, prefer: str = 'auto',
-                     force: bool = False) -> dict:
+                     force: bool = False, synced_file: str | None = None) -> dict:
     song = json.loads((pkg / 'target.json').read_text(encoding='utf-8'))
     asr_lines, asr_src = resolve_transcript(pkg, song, prefer)
     asr_words = al.flat(asr_lines)
     raw_text, text_note, cache_meta = resolve_source_text(pkg, text_file)
+    synced_text = (Path(synced_file).expanduser().read_text(encoding='utf-8') if synced_file else
+                   cached_synced_text(pkg) if text_file is None else None)
     ctx = al.context(pkg, song)
-    c = build_correction(pkg, song, asr_words, ctx, raw_text, asr_src)
+    c = build_correction(pkg, song, asr_words, ctx, raw_text, asr_src, synced_text)
     out = {'package': pkg.name, 'asr_source': c['asr_source'], 'lyrics_source': text_note, 'confidence': c['confidence'],
            'agreement_pct': c['agreement_pct'], 'repeated_sections_recovered': c['repeats_restored'],
            'placement_problems': c['placement_problems'],
+           'before': c['before_metrics'], 'after': c['after_metrics'], 'synced_clock': c['synced_clock'],
            **report_metrics(asr_words, c['true_tokens'], c['entries'], c['lines'])}
     if not c['passed']:
-        out['skipped'] = c['reason'] + ' (use --force to override)'
-    if write and (c['passed'] or force):
+        out['skipped'] = c['reason'] + (' (synced timing cannot be forced)' if c['unsafe_synced']
+                                        else ' (use --force to override)')
+    if write and (c['passed'] or force) and not c['unsafe_synced']:
         before_audio = audio_fingerprint(pkg)
         before_snapshot = strip_lyrics(json.loads((pkg / 'target.json').read_text(encoding='utf-8')))
         note = corrected_note(song.get('lyricsSource') or '', c['asr_source'])
@@ -697,7 +757,10 @@ def process_package(pkg: Path, text_file: str | None, write: bool, rebuild: bool
             raise
         tmp.replace(pkg / 'target.json')
         out.pop('skipped', None)
-        if cache_meta is not None:
+        if cache_meta is not None or synced_file or (text_file and cached_synced_text(pkg) is not None):
+            title, artist = _manifest_title_artist(pkg)
+            cache_meta = dict(cache_meta or {'title': title, 'artist': artist})
+            if synced_text is not None: cache_meta['synced_lrc'] = synced_text
             cache_dir = pkg / 'lyrics'; cache_dir.mkdir(exist_ok=True)
             (cache_dir / 'source.txt').write_text(raw_text, encoding='utf-8')
             (cache_dir / 'source.meta.json').write_text(json.dumps(cache_meta, ensure_ascii=False), encoding='utf-8')
@@ -718,6 +781,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('package', nargs='+')
     ap.add_argument('--text', help='lyrics file to use instead of fetching (only with a single package)')
+    ap.add_argument('--synced', help='optional LRC line boundaries, validated against the recording (single package)')
     ap.add_argument('--from', dest='prefer', default='auto', choices=['auto', 'vocal', 'mix'],
                      help='which stored transcript to correct against (default: the one the song is already published from)')
     ap.add_argument('--force', action='store_true', help='write even when the gate would otherwise refuse')
@@ -726,11 +790,13 @@ def main():
     ap.add_argument('--no-html', action='store_true', help='update target.json but do not rebuild the trainer')
     a = ap.parse_args()
     if a.text and len(a.package) > 1: ap.error('--text applies to a single package')
+    if a.synced and len(a.package) > 1: ap.error('--synced applies to a single package')
     report = []
     for p in a.package:
         pkg = Path(p).expanduser().resolve()
         try:
-            r = process_package(pkg, a.text, write=not a.dry_run, rebuild=not a.no_html, prefer=a.prefer, force=a.force)
+            r = process_package(pkg, a.text, write=not a.dry_run, rebuild=not a.no_html, prefer=a.prefer,
+                                force=a.force, synced_file=a.synced)
         except LyricsSourceError as e:
             r = {'package': pkg.name, 'error': str(e)}
         report.append(r)

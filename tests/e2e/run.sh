@@ -25,6 +25,7 @@ for t in scoring audio ux studio scale lessons finish history progress lives act
 "$PY" tests/separation_test.py || status=1
 "$PY" tests/lyrics_text_test.py || status=1
 "$PY" tests/lyrics_align_test.py || status=1
+"$PY" tests/lyrics_synced_test.py || status=1
 "$PY" tests/retranscribe_song_test.py || status=1
 "$PY" tests/pitch_quality_test.py || status=1
 "$PY" tests/video_test.py || status=1

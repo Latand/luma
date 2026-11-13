@@ -257,7 +257,7 @@ def corrected_seed(pkg: Path, song: dict, asr_words: list[dict], ctx: dict) -> d
     import lyrics_text as lt
     raw_text = lt.cached_source_text(pkg)
     if raw_text is None: return None
-    return lt.build_correction(pkg, song, asr_words, ctx, raw_text, 'cached')
+    return lt.build_correction(pkg, song, asr_words, ctx, raw_text, 'cached', lt.cached_synced_text(pkg))
 
 def corrected_note_for(existing: str, src: str) -> str:
     import lyrics_text as lt
