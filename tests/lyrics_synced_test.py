@@ -60,6 +60,23 @@ def majority_fixture(shift=0., offset=0.):
     return ctx, words, {'lyrics': al.realign(words, ctx)}, '\n'.join(phrases), lrc
 
 
+def supported_majority_fixture(support, shift=-4., offset=0.):
+    """Add an incidental attack at the disputed timestamp, independent of ASR."""
+    ctx, words, song, text, lrc = majority_fixture(shift, offset)
+    t = 51. + shift
+    ctx['energy_db'][int(t * 100):int((t + 2) * 100)] = -20.
+    ctx['stem_onsets'] = np.sort(np.r_[ctx['stem_onsets'], t])
+    if support == 'pitch':
+        ctx['voiced'][int(t * 100):int((t + 2) * 100)] = True
+        ctx['onsets'] = np.sort(np.r_[ctx['onsets'], [t + j * .4 for j in range(5)]])
+    else:
+        ctx['voiced'][5100:5300] = False
+        ctx['onsets'] = ctx['onsets'][(ctx['onsets'] < 51.) | (ctx['onsets'] >= 53.)]
+    ctx['regions'] = al.regions(ctx['voiced'])
+    ctx['phrases'] = al.sung_phrases(ctx['regions'])
+    return ctx, words, song, text, lrc
+
+
 class MajorityContradictionTests(unittest.TestCase):
     def correct(self, ctx, words, song, text, lrc):
         return lt.build_correction(Path('synthetic'), song, words, ctx, text, 'mix', lrc)
@@ -84,6 +101,40 @@ class MajorityContradictionTests(unittest.TestCase):
         # Negative offset keeps all supplied timestamps nonnegative.
         with self.assertRaisesRegex(lt.LyricsSourceError, r'line 6 at 47.00s: .*residual \+4.000s.*offset -4.000s'):
             self.correct(*majority_fixture(shift=-4., offset=-4.))
+
+    def test_pitch_and_energy_cannot_bypass_contradictory_phrase_evidence(self):
+        for support in ['pitch', 'energy']:
+            for shift in [-4., 4.]:
+                for offset in [0., -4.]:
+                    with self.subTest(support=support, shift=shift, offset=offset), self.assertRaisesRegex(
+                            lt.LyricsSourceError, r'line 6 at (47|55).00s: phrase evidence contradicts timestamp: .*51.00s'):
+                        self.correct(*supported_majority_fixture(support, shift, offset))
+
+    def test_supported_lines_accept_ordinary_latency_and_refuse_beyond_tolerances(self):
+        # ASR can be early by the onset tolerance, or late by the song's normal
+        # latency plus that tolerance. An incidental attack cannot expand it.
+        for support in ['pitch', 'energy']:
+            for latency, delta, accepted in [(0., 0., True), (.6, .6, True),
+                                             (0., 1.5, True), (0., 1.51, False),
+                                             (.6, -1.5, True), (.6, -1.51, False),
+                                             (.6, 2.1, True), (.6, 2.11, False)]:
+                with self.subTest(support=support, latency=latency, delta=delta):
+                    ctx, words, song, text, lrc = supported_majority_fixture(support, shift=0.)
+                    words = [dict(w, a=w['a'] + (delta if 15 <= i < 18 else latency),
+                                  b=w['b'] + (delta if 15 <= i < 18 else latency))
+                             for i, w in enumerate(words)]
+                    if not accepted:
+                        with self.assertRaisesRegex(lt.LyricsSourceError, r'line 6 at 51.00s: phrase evidence contradicts'):
+                            self.correct(ctx, words, song, text, lrc)
+                        continue
+                    result = self.correct(ctx, words, song, text, lrc)
+                    self.assertTrue(result['passed'], result['reason'])
+                    row = result['anchor_checks'][5]
+                    self.assertEqual(row['start'], 51.)
+                    if support == 'energy':
+                        self.assertEqual(row['timing_source'], 'vocal_stem_energy')
+                    elif delta == latency:
+                        self.assertEqual(row['timing_source'], 'pitch_supported')
 
     def test_correct_timestamp_and_missing_quiet_phrase_still_pass(self):
         ctx, words, song, text, lrc = majority_fixture()
@@ -123,40 +174,61 @@ class MajorityContradictionTests(unittest.TestCase):
             self.correct(ctx, words, song, text, lrc)
 
     def test_cli_refuses_in_fresh_processes_including_force_and_keeps_package_unchanged(self):
-        ctx, words, song, text, lrc = majority_fixture(shift=-4.)
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            pkg = synthetic_package(root, bursts=[(i * 10 + 1., i * 10 + 3.) for i in range(12)],
-                                    asr_words=[f'flim{i}' for i in range(12)], duration=120.)
-            target = json.loads((pkg / 'target.json').read_text())
-            target['lyrics'] = song['lyrics']
-            (pkg / 'target.json').write_text(json.dumps(target))
-            (pkg / 'lyrics/mix.json').write_text(json.dumps({'source': 'mix', 'lines': song['lyrics']}))
-            verified = root / 'verified.txt'; verified.write_text(text)
-            timeline = root / 'lines.lrc'; timeline.write_text(lrc)
-            before = {str(p.relative_to(pkg)): p.read_bytes() for p in pkg.rglob('*') if p.is_file()}
-            command = [sys.executable, str(ROOT / 'studio/lyrics_text.py'), '--text', str(verified),
-                       '--synced', str(timeline), '--json', str(pkg)]
-            reports = []
-            for flags in [['--dry-run'], ['--force'], ['--dry-run']]:
-                result = subprocess.run(command + flags, capture_output=True, timeout=90)
-                self.assertEqual(result.returncode, 0)  # Per-package refusal is returned as JSON.
-                report = json.loads(result.stdout)
-                self.assertRegex(report['error'], r'line 6 at 47.00s: phrase evidence contradicts timestamp: .*51.00s')
-                reports.append(result.stdout)
-                self.assertEqual({str(p.relative_to(pkg)): p.read_bytes() for p in pkg.rglob('*') if p.is_file()}, before)
-            self.assertEqual(reports[0], reports[2])
-            # Both realignment and retranscription replay this cache consumer.
-            (pkg / 'lyrics/source.txt').write_text(text)
-            (pkg / 'lyrics/source.meta.json').write_text(json.dumps({
-                'title': target['title'], 'artist': target['artist'], 'synced_lrc': lrc}))
-            cached_before = {str(p.relative_to(pkg)): p.read_bytes() for p in pkg.rglob('*') if p.is_file()}
-            with self.assertRaisesRegex(lt.LyricsSourceError, r'line 6 at 47.00s: phrase evidence contradicts'):
-                al.corrected_seed(pkg, target, words, ctx)
-            with patch.object(al, 'context', return_value=ctx), self.assertRaisesRegex(
-                    lt.LyricsSourceError, r'line 6 at 47.00s: phrase evidence contradicts'):
-                lt.process_package(pkg, None, True, rebuild=False, force=True)
-            self.assertEqual({str(p.relative_to(pkg)): p.read_bytes() for p in pkg.rglob('*') if p.is_file()}, cached_before)
+        for support in ['quiet', 'pitch', 'energy']:
+            with self.subTest(support=support):
+                ctx, words, song, text, lrc = majority_fixture(shift=-4.)
+                with tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    bursts = [(i * 10 + 1., i * 10 + 3.) for i in range(12)]
+                    if support != 'quiet':
+                        bursts = sorted(bursts + [(47., 49.)])
+                    pkg = synthetic_package(root, bursts=bursts,
+                                            asr_words=[f'flim{i}' for i in range(len(bursts))], duration=120.)
+                    target = json.loads((pkg / 'target.json').read_text())
+                    target['lyrics'] = song['lyrics']
+                    if support == 'energy':
+                        for point in target['points']:
+                            if 47. <= point[0] < 49.:
+                                point[1:] = [None, 0., 0]
+                        target['notes'] = [n for n in target['notes'] if n['a'] != 47.]
+                    ctx = al.context(pkg, target)
+                    (pkg / 'target.json').write_text(json.dumps(target))
+                    (pkg / 'lyrics/mix.json').write_text(json.dumps({'source': 'mix', 'lines': song['lyrics']}))
+                    verified = root / 'verified.txt'; verified.write_text(text)
+                    timeline = root / 'lines.lrc'; timeline.write_text(lrc)
+                    before = {str(p.relative_to(pkg)): p.read_bytes() for p in pkg.rglob('*') if p.is_file()}
+                    command = [sys.executable, str(ROOT / 'studio/lyrics_text.py'), '--text', str(verified),
+                               '--synced', str(timeline), '--json', str(pkg)]
+                    reports = []
+                    for flags in [['--dry-run'], ['--force'], ['--dry-run']]:
+                        result = subprocess.run(command + flags, capture_output=True, timeout=90)
+                        self.assertEqual(result.returncode, 0)  # Per-package refusal is returned as JSON.
+                        report = json.loads(result.stdout)
+                        self.assertRegex(report['error'], r'line 6 at 47.00s: phrase evidence contradicts timestamp: .*51.00s')
+                        reports.append(result.stdout)
+                        self.assertEqual({str(p.relative_to(pkg)): p.read_bytes() for p in pkg.rglob('*') if p.is_file()}, before)
+                    self.assertEqual(reports[0], reports[2])
+                    # Both realignment and retranscription replay this cache consumer.
+                    (pkg / 'lyrics/source.txt').write_text(text)
+                    (pkg / 'lyrics/source.meta.json').write_text(json.dumps({
+                        'title': target['title'], 'artist': target['artist'], 'synced_lrc': lrc}))
+                    cached_before = {str(p.relative_to(pkg)): p.read_bytes() for p in pkg.rglob('*') if p.is_file()}
+                    cached_command = [sys.executable, str(ROOT / 'studio/lyrics_text.py'), '--json', str(pkg)]
+                    cached_reports = []
+                    for flags in [['--dry-run'], ['--force'], ['--dry-run']]:
+                        result = subprocess.run(cached_command + flags, capture_output=True, timeout=90)
+                        self.assertEqual(result.returncode, 0)
+                        self.assertRegex(json.loads(result.stdout)['error'],
+                                         r'line 6 at 47.00s: phrase evidence contradicts timestamp: .*51.00s')
+                        cached_reports.append(result.stdout)
+                        self.assertEqual({str(p.relative_to(pkg)): p.read_bytes() for p in pkg.rglob('*') if p.is_file()}, cached_before)
+                    self.assertEqual(cached_reports[0], cached_reports[2])
+                    with self.assertRaisesRegex(lt.LyricsSourceError, r'line 6 at 47.00s: phrase evidence contradicts'):
+                        al.corrected_seed(pkg, target, words, ctx)
+                    with patch.object(al, 'context', return_value=ctx), self.assertRaisesRegex(
+                            lt.LyricsSourceError, r'line 6 at 47.00s: phrase evidence contradicts'):
+                        lt.process_package(pkg, None, True, rebuild=False, force=True)
+                    self.assertEqual({str(p.relative_to(pkg)): p.read_bytes() for p in pkg.rglob('*') if p.is_file()}, cached_before)
 
 
 class ParserTests(unittest.TestCase):

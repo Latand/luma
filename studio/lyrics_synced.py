@@ -1,9 +1,10 @@
 """Optional LRC boundaries for text correction, validated against the stored recording.
 
 LRC supplies section boundaries; the verified text supplies words. A coherent clock
-offset needs several independent phrase matches. Unpitched passages use stem energy;
-quiet passages may use a separately validated clock unless their own phrase evidence
-contradicts it. Changed edits, unsupported clocks and unplaceable text raise
+offset needs several independent phrase matches. Every placement first checks its
+own phrase evidence against the timestamp and ordinary ASR latency. Unpitched
+passages use stem energy; quiet passages may use a separately validated clock.
+Changed edits, unsupported clocks and unplaceable text raise
 SyncedLyricsError with a line number and recording time.
 No file access or network access occurs here.
 """
@@ -77,7 +78,7 @@ def clock_offset(rows: list[dict], words: list[dict]) -> dict:
 
     Ordinary ASR latency is retained. Large, consistent offsets are reported and
     compensated. Distributed disagreement refuses an offset or a different edit.
-    Retain each line's evidence, including outliers, for the quiet-placement gate.
+    Retain each line's evidence, including outliers, for every placement branch.
     """
     norms = [al.norm(w['w']) for w in words]
     prefixes = [tuple(al.norm(w) for w in r['tokens'][:3]) for r in rows]
@@ -265,6 +266,15 @@ def seed_sections(tokens: list[str], words: list[dict], ctx: dict, lrc: str,
     entries, checks = [], []
     for k, row in enumerate(sung):
         lo = row['a']
+        # Check before any voice branch can discard or overwrite known times.
+        # Allow ASR near the compensated timestamp or its normal latency; an
+        # early ASR estimate within the onset tolerance is not a contradiction
+        # merely because the song-wide median is positive. Repeats are ambiguous.
+        match = row['clock_evidence']
+        if (match and match['unambiguous'] and abs(match['residual_s']) > CLOCK_TOLERANCE
+                and abs(match['asr_time_s'] - lo) > START_TOLERANCE):
+            fail(row, f"phrase evidence contradicts timestamp: unique ASR occurrence at "
+                 f"{match['asr_time_s']:.2f}s; clock residual {match['residual_s']:+.3f}s")
         next_row = next((r for r in bounds if r['a'] > lo), None)
         hi = next_row['a'] if next_row else ctx['duration']
         end = sung[k + 1]['index'] if k + 1 < len(sung) else len(tokens)
@@ -295,13 +305,6 @@ def seed_sections(tokens: list[str], words: list[dict], ctx: dict, lrc: str,
                 ctx['regions'] = al.regions(ctx['voiced'])
                 ctx['onsets'] = np.array(sorted(set(ctx['onsets']) | set(energy_attacks)))
             elif energy['available'] and clock['validated_without_voice']:
-                # Quiet placement also needs this line's evidence to agree.
-                # Check this line before discarding ASR or exempting its window
-                # from the harm gate. Repeated phrases remain ambiguous.
-                match = row['clock_evidence']
-                if match and match['unambiguous'] and abs(match['residual_s']) > CLOCK_TOLERANCE:
-                    fail(row, f"phrase evidence contradicts timestamp: unique ASR occurrence at "
-                         f"{match['asr_time_s']:.2f}s; clock residual {match['residual_s']:+.3f}s")
                 # The quiet passage cannot validate its own clock. Recheck the
                 # other lines, including stability of the inferred offset.
                 try:

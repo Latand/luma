@@ -1,6 +1,6 @@
 # Synced lyric correction: validation
 
-Evidence read 2026-11-14 02:54 UTC. Baseline: main at the lane start. Candidate: the source delivered with this report.
+Dry-run evidence read 2026-11-14 03:43 UTC. Project checks read back 2026-11-14 04:01 UTC. Baseline: main at the lane start. Candidate: the source delivered with this report.
 
 Both versions use the supplied verified text. Local synced files are supplied for songs E, G, J, K, L, N and Q. Each package command uses `studio/lyrics_text.py --text verified.txt --dry-run --json`; anchored commands add `--synced lines.lrc`. Runs use the project virtual environment, isolated scratch, and local inputs without fetching.
 
@@ -30,7 +30,7 @@ Values are coverage % / uncovered singing seconds / silent holes, measured with 
 | song R | 26.5/22.6/0 P | 26.5/22.6/0 P |
 | song S | 46.2/28.3/2 P | 46.2/28.3/2 P |
 
-All twelve text-only controls (songs A, B, C, D, F, H, I, M, O, P, R and S) retain identical complete metrics and word placement. Two consecutive fresh-process dry runs produce byte-identical JSON reports and complete word data for every song. Package content and metadata and the retained baseline hashes are unchanged.
+All twelve text-only controls (songs A, B, C, D, F, H, I, M, O, P, R and S) retain identical complete metrics and word placement. Two consecutive fresh-process dry runs produce byte-identical JSON reports and complete word data for every song. All 222 package files and 104 verified-input files retain their hashes, sizes, modification times and complete file set. All 357 line checks and original attack arrays match the independent review.
 
 The anchored harm gate checks independently accepted voice/clock windows and the existing 50 ms onset margin. Raw pitch-hole counts above retain rounding-edge holes and a timed outro in song N; those do not require invented words.
 
@@ -62,13 +62,13 @@ Quiet placement requires at least three independent matches, covering at least 5
 
 All seven pass the final voice/evidence and section-boundary gates. Maximum absolute synced-start residuals: song E 0.925 s, song G 0.448 s, song J 0.325 s, song K 0.359 s, song L 0.970 s, song N 1.350 s, song Q 1.190 s. Song G restores no ASR repeats. Song Q’s disputed backing-line start moves from 235.613 s to 273.260 s, against 273.310 s synced time.
 
-## Contradictory quiet-line regression
+## Contradictory phrase regression
 
-A stable majority could previously hide a single contradictory timestamp: twelve distinct synthetic phrases have two-second voiced regions at 1, 11, …, 111 s, but line 6 is stamped at 47 s instead of its 51 s vocal onset. Eleven coherent matches produced a zero-spread clock and allowed the first word at 47 s in silence. Both early and late four-second shifts fail the new regression on the reviewed revision.
+A stable majority could hide a single contradictory timestamp: twelve distinct synthetic phrases have two-second voiced regions at 1, 11, …, 111 s, but line 6 is stamped at 47 s instead of its 51 s vocal onset. Eleven coherent matches produced a zero-spread clock. The previous quiet-line veto still allowed an incidental pitch or stem-energy attack at 47 s to place that phrase four seconds early.
 
-`studio/lyrics_synced.py` now retains per-line phrase evidence, including outliers and occurrences beyond the clock search radius. Before entering the quiet fallback, it refuses an unambiguous phrase whose residual from the clock median exceeds 1.5 s. The error names the line, timestamp, ASR occurrence and residual; constant offsets and ordinary ASR latency are accounted for. Repeated phrases remain explicitly ambiguous, and a missing phrase can still use the other lines' validated clock. This runs before ASR is discarded and before any window is exempted from the harm check.
+`studio/lyrics_synced.py` retains per-line phrase evidence, including outliers and occurrences beyond the clock search radius. It now checks each line before selecting any placement branch, discarding ASR, replacing the first word's time or exempting a window from the harm gate. An unambiguous phrase refuses when both its distance from the compensated timestamp and its residual from the ASR clock median exceed 1.5 s. This allows ordinary ASR latency and early estimates within the onset tolerance. The error names the line, timestamp, ASR occurrence and residual. Repeated phrases remain explicitly ambiguous; a missing phrase can still use the other lines' validated clock.
 
-Focused command: `"$LUMA_PY" tests/lyrics_synced_test.py MajorityContradictionTests`. Seven synthetic cases cover early/late shifts, compensation, ambiguous repeats, missing quiet phrases, ordinary ASR delay, an occurrence outside the search radius, and fresh CLI processes including `--force`. Direct correction and both cache replay consumers share `build_correction`; refusals leave synthetic package bytes unchanged. The renewed nineteen-song outputs preserve all reviewed word data and all 357 anchored line starts.
+Focused command: `"$LUMA_PY" tests/lyrics_synced_test.py MajorityContradictionTests`. Nine synthetic test methods cover pitch, stem-energy and quiet-clock placement, early/late four-second contradictions, offset compensation, tolerance boundaries, ambiguous repeats, missing phrases, and out-of-search-range evidence. The new pitch/energy and boundary cases fail on the reviewed source and pass with the guard. Real synthetic-audio CLI runs test explicit input and cached replay in separate processes, including `--force`; repeated reports are byte-identical and refusals leave package bytes unchanged. Both realignment and retranscription use the tested shared `corrected_seed` consumer.
 
 ## Project checks
 
@@ -104,9 +104,9 @@ Every suite ran as its own process by explicit file path, serially through the h
 | `tests/lan_proxy_test.py` | PASS (exit 0; also with `-I`) |
 | `tests/audio_stems_test.py` | PASS (exit 0) |
 
-The Python files pass 262 tests, including 71 synthetic synced-lyrics tests covering stem-supported voice, quiet-clock placement, clock/edit refusal, unrelated ASR, onset spacing and rounding, next-line attacks, cache replay, and CLI restarts.
+The Python files pass 264 tests, including 73 synthetic synced-lyrics tests covering stem-supported voice, quiet-clock placement, clock/edit refusal, unrelated ASR, onset spacing and rounding, next-line attacks, cache replay, and CLI restarts.
 
-The earlier session run initially missed its reduced-motion card limit by 6 ms (306 ms against 300 ms). Its subsequent alternating base, branch, base runs pass in fresh isolation; the suite and application code are unchanged. That earlier timing comparison remains preserved separately; the table above records this fix round's fresh per-file runs.
+All renewed individual suites pass, including Session and History. Earlier timeout and timing-failure evidence and the equivalent base/candidate comparisons remain preserved separately.
 
 ### Existing video failure
 

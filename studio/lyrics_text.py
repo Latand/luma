@@ -51,6 +51,9 @@ in the refusal, not just the first one found.
 Optional `--synced` accepts a local LRC file. Three-word phrase matches establish
 its clock against ASR; at least three distinct occurrences must agree within 1.5 s.
 A coherent offset up to 30 s is reported and compensated; changed clocks refuse.
+Before any placement, unique phrase evidence must agree with the compensated
+timestamp or its ordinary ASR latency within 1.5 s; contradictions refuse even
+when pitch or stem energy supplies an attack.
 Each line uses a pitch-supported attack or sustained vocal-stem energy within
 1.5 s. Quiet passages require the stronger clock validation documented in
 lyrics_synced.py and carry timing_source=synced_time_without_voice_support.
@@ -626,7 +629,8 @@ def build_correction(pkg: Path, song: dict, asr_words: list[dict], ctx: dict, ra
     Optional synced LRC is checked for a coherent recording clock and stem evidence
     before use. It bounds matching and gap filling to sections and disables repeat
     invention. Unsafe timelines raise LyricsSourceError naming the line and time;
-    a quiet line's unique phrase evidence can veto a majority-validated clock.
+    every line's unique phrase evidence can veto a majority-validated clock,
+    allowing the onset tolerance around its timestamp or ordinary ASR latency.
     --force cannot override this. With no timeline the original path is unchanged.
     """
     true_tokens = tokenize(raw_text)
