@@ -71,18 +71,20 @@ def transcribe(pkg: Path, lang: str, cache_only: bool, transcription_id: str | N
 def retranscribe(pkg: Path, lang: str, cache_only: bool = False, rebuild: bool = True, transcription_id: str | None = None) -> dict:
     song = json.loads((pkg / 'target.json').read_text(encoding='utf-8'))
     before = song.get('lyrics') or []
-    if before and 'vocal stem' not in (song.get('lyricsSource') or '') and not (pkg / 'lyrics' / 'mix.json').exists():
-        save_transcript(pkg, 'mix', before, song.get('lyricsSource') or '')   # keep the mix transcript it replaces
     payload = transcribe(pkg, lang, cache_only, transcription_id)
     words = merge_tokens(payload['tokens'])
     note = f'Soniox {payload["model"]} on the Demucs vocal stem, {payload["created"][:10]}, automatic word timings'
-    save_transcript(pkg, 'vocal', group_lines(words), note)
     ctx = context(pkg, song)
     correction = corrected_seed(pkg, song, words, ctx)   # a passing lyrics correction must survive a fresh transcription too
     applied = correction is not None and correction['passed']
     seed = correction['seed'] if applied else words
     lines = correction['lines'] if applied else realign(seed, ctx)
     assert [w['w'] for w in flat(lines)] == [w['w'] for w in seed], 'the transcript text must survive re-alignment'
+    # Cached synced evidence can refuse with an exception. Validate and align
+    # before persisting either transcript, keeping the package intact on refusal.
+    if before and 'vocal stem' not in (song.get('lyricsSource') or '') and not (pkg / 'lyrics' / 'mix.json').exists():
+        save_transcript(pkg, 'mix', before, song.get('lyricsSource') or '')   # keep the mix transcript it replaces
+    save_transcript(pkg, 'vocal', group_lines(words), note)
     write_song(pkg, song, lines, lt.corrected_note(note, 'vocal') if applied else aligned_note(note))
     correction_status = 'applied' if applied else (f"refused: {correction['reason']}" if correction is not None else None)
     out = {'package': pkg.name, 'words': len(words), 'lines': len(lines), 'words_before': len(flat(before)),

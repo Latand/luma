@@ -1,6 +1,6 @@
 # Synced lyric correction: validation
 
-Dry-run evidence completed 2026-11-14 09:35 UTC. Project checks read back 2026-11-14 09:31 UTC. The table retains the original main baseline before optional anchors. The follow-up also compares the pinned `9c2ac731` source with the candidate using identical anchors. Candidate: the source delivered with this report.
+Dry-run evidence completed 2026-11-14 10:46 UTC. Project checks completed 2026-11-14 11:10 UTC. The table retains the original main baseline before optional anchors. The follow-up also compares the pinned `9c2ac731` source with the candidate using identical anchors. Candidate: the source delivered with this report.
 
 Both versions use the supplied verified text. Local synced files are supplied for songs E, G, J, K, L, N and Q. Each package command uses `studio/lyrics_text.py --text verified.txt --dry-run --json`; anchored commands add `--synced lines.lrc`. Runs use the project virtual environment, isolated scratch, and local inputs without fetching.
 
@@ -30,7 +30,7 @@ Values are coverage % / uncovered singing seconds / silent holes, measured with 
 | song R | 26.5/22.6/0 P | 26.5/22.6/0 P |
 | song S | 46.2/28.3/2 P | 46.2/28.3/2 P |
 
-All nineteen retain the complete placements and metrics of `9c2ac731` and the retained independent review; no line start changes. All twelve text-only controls (songs A, B, C, D, F, H, I, M, O, P, R and S) retain identical complete metrics and word placement. Two consecutive fresh-process dry runs produce byte-identical JSON reports and complete word data for every song. Small private package inputs are copied to scratch before comparison so parallel publication cannot change a repeat run; large recordings are read through links, and every command uses `--dry-run`. All 234 package files and 104 verified-input files retain their hashes, sizes, modification times and complete file set. All 357 line checks and original attack arrays match the independent review.
+All nineteen retain the complete placements and metrics of `9c2ac731` and the retained independent review; no line start changes. All twelve text-only controls (songs A, B, C, D, F, H, I, M, O, P, R and S) retain identical complete metrics and word placement. Two consecutive fresh-process dry runs produce byte-identical JSON reports and complete word data for every song. Small private package inputs are copied to scratch before comparison so parallel publication cannot change a repeat run; large recordings are read through links, and every command uses `--dry-run`. All 234 package files and 104 verified-input files retain their hashes, sizes, modification times and complete file set. All 357 line starts and original attack arrays match the independent review.
 
 The anchored harm gate checks independently accepted voice/clock windows and the existing 50 ms onset margin. Raw pitch-hole counts above retain rounding-edge holes and a timed outro in song N; those do not require invented words.
 
@@ -70,7 +70,15 @@ A stable majority could hide a single contradictory timestamp: twelve distinct s
 
 The two follow-up findings concerned repeated prefixes disabling this veto, and one- or two-word lines receiving no evidence. `synced_clock.line_evidence[].occurrences` now retains all candidate times and residuals. Shared prefixes, including fragments inside longer timed phrases, extend through the first distinguishing word. Broader observations remain in `prefix_occurrences_s`; when the distinguishing words are absent, that fragment does not identify the line. Short matches unique in both ASR and the timed text provide per-line veto evidence; ambiguous fragments can still use independent placement evidence. The global clock still requires at least three independent matches of three or more words. Repetition alone cannot waive a contradiction. An occurrence already explained by another coherently timed row is retained with `explained_by_line`. It supplies no negative evidence for a missing repeat. When none of the occurrences are compatible, an unexplained conflicting occurrence still vetoes placement beside such explained observations. A missing phrase can still use the other lines' validated clock.
 
-Focused command: `"$LUMA_PY" tests/lyrics_synced_test.py MajorityContradictionTests`. Twenty synthetic test methods cover pitch, stem-energy and quiet-clock placement, early/late four-second contradictions, offset compensation, tolerance boundaries, valid repeats, distinguishing fourth and fifth words, unique and ambiguous one- and two-word lines, missing phrases, and out-of-search-range evidence. Real synthetic-audio CLI runs cover unique phrases, repeated phrases, shared prefixes and both short-line lengths through explicit input and cached replay in separate processes, including `--force`. Correctly timed controls pass; repeated refusal reports are byte-identical and leave package bytes unchanged. Both realignment and retranscription use the tested shared `corrected_seed` consumer.
+Focused command: `"$LUMA_PY" tests/lyrics_synced_test.py MajorityContradictionTests`. Twenty synthetic test methods cover pitch, stem-energy and quiet-clock placement, early/late four-second contradictions, offset compensation, tolerance boundaries, valid repeats, distinguishing fourth and fifth words, unique and ambiguous one- and two-word lines, missing phrases, and out-of-search-range evidence. Real synthetic-audio CLI runs cover unique phrases, repeated phrases, shared prefixes and both short-line lengths through explicit input and cached replay in separate processes, including `--force`. Correctly timed controls pass; repeated refusal reports are byte-identical and leave package bytes unchanged. Both realignment and retranscription use the shared `corrected_seed` consumer. The actual `retranscribe_song.py --cache-only --no-html` CLI is also tested in fresh processes: repeated and uniquely identified two-word contradictions with ordinary 0.6 s ASR latency leave every package file unchanged, with each combination of existing or absent mix/vocal transcripts. Valid controls still persist both transcripts and corrected words.
+
+## Review follow-up regressions
+
+Each parsed timestamp occurrence is identified by its physical line and time. ASR ownership therefore treats consecutive repeats at 51 and 61 s identically whether they use separate LRC rows or two timestamp tags on one row. Quiet-clock validation excludes only the current occurrence and retains other timestamps from the same physical row. The public `explained_by_line` diagnostic keeps the original physical line number.
+
+`MultipleTimestampRepeatTests` covers either missing ASR repeat through pitch, stem-energy and quiet-clock placement; it also covers the minimum independent clock evidence with a multi-tag repeat. Fresh-process CLI controls cover both formats through explicit inputs, cached replay and successful forced writes. Early/late unexplained contradictions beside an explained repeat still refuse through direct correction, cached CLI and `--force`, preserving the entire synthetic package and repeatable reports.
+
+`SyncedRetranscriptionCliTests` exercises the real cache-only retranscription consumer before any mix/vocal transcript write. It covers repeated and unique two-word lines, all four combinations of existing and absent transcripts, repeated process restarts, exit 1 and line/time reasons on refusal, and successful controls that save both transcripts. The input ASR cache is prepopulated, so the test makes no paid calls.
 
 ## Project checks
 
@@ -106,7 +114,7 @@ Every suite ran as its own process by explicit file path, serially through the h
 | `tests/lan_proxy_test.py` | PASS (exit 0; also with `-I`) |
 | `tests/audio_stems_test.py` | PASS (exit 0) |
 
-The Python files pass 275 tests, including 84 synthetic synced-lyrics tests covering stem-supported voice, quiet-clock placement, clock/edit refusal, unrelated ASR, onset spacing and rounding, next-line attacks, cache replay, and CLI restarts.
+The Python files pass 281 tests, including 88 synthetic synced-lyrics tests covering stem-supported voice, quiet-clock placement, clock/edit refusal, unrelated ASR, onset spacing and rounding, next-line attacks, cache replay, and CLI restarts.
 
 All renewed individual suites pass, including Session and History. Earlier timeout and timing-failure evidence and the equivalent base/candidate comparisons remain preserved separately.
 

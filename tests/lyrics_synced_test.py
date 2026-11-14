@@ -99,6 +99,134 @@ def phrase_identity_fixture(kind, support='pitch', shift=-4., offset=0.):
     return ctx, words, {'lyrics': al.realign(words, ctx)}, text, lrc
 
 
+def consecutive_repeat_fixture(combined=False, missing=None, shift=0.):
+    """Consecutive repeats with equivalent separate-row and multi-tag encodings."""
+    ctx, words, _, text, lrc = majority_fixture()
+    phrases = text.splitlines()
+    phrases[6] = phrases[5]
+    for word, token in zip(words[18:21], phrases[5].split()):
+        word['w'] = token
+    song = {'lyrics': al.realign(words, ctx)}
+    if missing is not None:
+        words = [w for w in words if not missing <= w['a'] < missing + 2]
+    rows = sy.parse_lrc(lrc)
+    rows[5]['a'] += shift
+    tags = [f"[{int(r['a'] // 60):02}:{r['a'] % 60:05.2f}]" for r in rows]
+    lines = [tag + ' ' + phrase for tag, phrase in zip(tags, phrases)]
+    if combined:
+        lines[5:7] = [tags[5] + tags[6] + ' ' + phrases[5]]
+    return ctx, words, song, '\n'.join(phrases), '\n'.join(lines)
+
+
+class MultipleTimestampRepeatTests(unittest.TestCase):
+    def test_missing_either_repeat_passes_in_both_encodings_and_voice_branches(self):
+        for combined in [False, True]:
+            for missing in [51., 61.]:
+                for support in ['pitch', 'energy', 'quiet']:
+                    with self.subTest(combined=combined, missing=missing, support=support):
+                        ctx, words, song, text, lrc = consecutive_repeat_fixture(combined, missing)
+                        if support == 'pitch':
+                            ctx['energy_db'][:] = -100.
+                        else:
+                            lo, hi = int(missing * 100), int((missing + 2) * 100)
+                            ctx['voiced'][lo:hi] = False
+                            ctx['regions'] = al.regions(ctx['voiced'])
+                            ctx['onsets'] = ctx['onsets'][(ctx['onsets'] < missing) | (ctx['onsets'] >= missing + 2)]
+                            if support == 'quiet':
+                                ctx['energy_db'][lo:hi] = -100.
+                        result = lt.build_correction(Path('synthetic'), song, words, ctx, text, 'mix', lrc)
+                        self.assertTrue(result['passed'], result['reason'])
+                        row = result['anchor_checks'][5 if missing == 51. else 6]
+                        self.assertEqual(row['start'], missing)
+                        self.assertIn('explained_by_line', row['clock_evidence']['occurrences'][0])
+                        self.assertEqual(row['timing_source'], {
+                            'pitch': 'pitch_supported', 'energy': 'vocal_stem_energy',
+                            'quiet': 'synced_time_without_voice_support'}[support])
+
+    def test_quiet_clock_excludes_only_current_timestamp_occurrence(self):
+        ctx, words, _ = fixture()
+        phrases = [PHRASES[0], PHRASES[0], *PHRASES[2:]]
+        for word, token in zip(words[3:6], PHRASES[0].split()):
+            word['w'] = token
+        song = {'lyrics': al.realign(words, ctx)}
+        ctx['voiced'][100:300] = False
+        ctx['regions'] = al.regions(ctx['voiced'])
+        ctx['onsets'] = ctx['onsets'][ctx['onsets'] >= 5.]
+        ctx['energy_db'] = np.full(1700, -100.)
+        for combined in [False, True]:
+            tags = [f'[00:{t:05.2f}]' for t in TIMES]
+            lines = [tag + ' ' + phrase for tag, phrase in zip(tags, phrases)]
+            if combined:
+                lines[:2] = [tags[0] + tags[1] + ' ' + phrases[0]]
+            with self.subTest(combined=combined):
+                result = lt.build_correction(Path('synthetic'), song, words, ctx,
+                                             '\n'.join(phrases), 'mix', '\n'.join(lines))
+                self.assertTrue(result['passed'], result['reason'])
+                self.assertEqual(result['anchor_checks'][0]['timing_source'], 'synced_time_without_voice_support')
+                self.assertEqual(result['anchor_checks'][0]['start'], 1.)
+
+    def check_cli(self, combined, missing=None, shift=0.):
+        ctx, words, song, text, lrc = consecutive_repeat_fixture(combined, missing, shift)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pkg = synthetic_package(root, bursts=[(i * 10 + 1., i * 10 + 3.) for i in range(12)],
+                                    asr_words=['flim'] * 12, duration=120.)
+            target = json.loads((pkg / 'target.json').read_text())
+            target['lyrics'] = song['lyrics']
+            (pkg / 'target.json').write_text(json.dumps(target))
+            (pkg / 'lyrics/mix.json').write_text(json.dumps({'source': 'mix', 'lines': [{'words': words}]}))
+            verified = root / 'verified.txt'; verified.write_text(text)
+            timeline = root / 'lines.lrc'; timeline.write_text(lrc)
+            base = [sys.executable, str(ROOT / 'studio/lyrics_text.py'), '--json', '--no-html', str(pkg)]
+            def snapshot():
+                return {str(p.relative_to(pkg)): p.read_bytes() for p in pkg.rglob('*') if p.is_file()}
+            for mode in ['direct', 'cached']:
+                if mode == 'cached':
+                    (pkg / 'lyrics/source.txt').write_text(text)
+                    (pkg / 'lyrics/source.meta.json').write_text(json.dumps({
+                        'title': target['title'], 'artist': target['artist'], 'synced_lrc': lrc}))
+                command = base + (['--text', str(verified), '--synced', str(timeline)] if mode == 'direct' else [])
+                before = snapshot()
+                reports = []
+                for flags in [['--dry-run'], ['--force'] if shift else ['--dry-run']]:
+                    result = subprocess.run(command + flags, capture_output=True, timeout=90)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    report = json.loads(result.stdout)
+                    if shift:
+                        self.assertRegex(report['error'], rf'line 6 at {51. + shift:.2f}s: .*contradicts.*51.00s')
+                    else:
+                        self.assertNotIn('error', report)
+                        self.assertNotIn('skipped', report)
+                    self.assertEqual(snapshot(), before)
+                    reports.append(result.stdout)
+                self.assertEqual(reports[0], reports[1])
+            if not shift:
+                result = subprocess.run(base + ['--force'], capture_output=True, timeout=90)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertNotIn('error', json.loads(result.stdout))
+                saved = json.loads((pkg / 'target.json').read_text())
+                self.assertEqual([w['w'] for w in al.flat(saved['lyrics'])], text.split())
+                starts = [line['words'][0]['a'] for line in saved['lyrics']]
+                self.assertEqual(len(starts), 12)
+                for actual, expected in zip(starts, [i * 10 + 1. for i in range(12)]):
+                    self.assertAlmostEqual(actual, expected, delta=.05)  # The audio frame's onset margin.
+
+    def test_cli_accepts_missing_repeats_in_direct_cache_and_force_calls(self):
+        for combined in [False, True]:
+            for missing in [51., 61.]:
+                with self.subTest(combined=combined, missing=missing):
+                    self.check_cli(combined, missing)
+
+    def test_cli_keeps_unexplained_early_and_late_contradictions(self):
+        for combined in [False, True]:
+            for shift in [-4., 4.]:
+                with self.subTest(combined=combined, shift=shift):
+                    ctx, words, song, text, lrc = consecutive_repeat_fixture(combined, shift=shift)
+                    with self.assertRaisesRegex(lt.LyricsSourceError, 'line 6 .*contradicts.*51.00s'):
+                        lt.build_correction(Path('synthetic'), song, words, ctx, text, 'mix', lrc)
+                    self.check_cli(combined, shift=shift)
+
+
 class MajorityContradictionTests(unittest.TestCase):
     def correct(self, ctx, words, song, text, lrc):
         return lt.build_correction(Path('synthetic'), song, words, ctx, text, 'mix', lrc)

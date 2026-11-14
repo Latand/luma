@@ -161,14 +161,17 @@ def clock_offset(rows: list[dict], words: list[dict]) -> dict:
                 if end >= len(norms) or norms[end] != al.norm(token):
                     break
                 end += 1
-            explained_spans.append((index, end, other['line']))
+            explained_spans.append((index, end, other['line'], other['a']))
     for match in line_evidence:
         match['residual_s'] = round(match['asr_delta_s'] - median, 3)
         phrase = match.pop('_phrase')
         for occurrence, index in zip(match['occurrences'], match.pop('_indices')):
             occurrence['residual_s'] = round(occurrence['asr_delta_s'] - median, 3)
-            for lo, hi, owner_line in explained_spans:
-                if owner_line != match['line'] and lo <= index and index + len(phrase) <= hi:
+            for lo, hi, owner_line, owner_time in explained_spans:
+                # Multiple timestamp tags on one physical LRC line are distinct
+                # timed occurrences, just like the same tags on separate lines.
+                if ((owner_line, owner_time) != (match['line'], match['synced_time_s'])
+                        and lo <= index and index + len(phrase) <= hi):
                     # A missed repeat cannot consume evidence already explained
                     # by another coherently timed row. Keep that observation and
                     # its owner; it supplies no negative evidence for this row.
@@ -360,7 +363,9 @@ def seed_sections(tokens: list[str], words: list[dict], ctx: dict, lrc: str,
                 # The quiet passage cannot validate its own clock. Recheck the
                 # other lines, including stability of the inferred offset.
                 try:
-                    other_clock = clock_offset([r for r in clock_rows if r['line'] != row['line']], words)
+                    other_clock = clock_offset([
+                        r for r in clock_rows
+                        if (r['line'], r['a'] + clock['offset_s']) != (row['line'], row['a'])], words)
                 except SyncedLyricsError:
                     fail(row, 'clock not validated by the other lines; no voice support')
                 if (not other_clock['validated_without_voice'] or
