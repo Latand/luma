@@ -687,10 +687,14 @@ function mul(a, b) { const o = mat4(); for (let i = 0; i < 4; i++) for (let j = 
 function softwareGL() {
   try { const gl = document.createElement('canvas').getContext('webgl2', {antialias: false}); if (!gl) return false; const d = gl.getExtension('WEBGL_debug_renderer_info'); return /swiftshader|llvmpipe|software|softpipe/i.test(d ? gl.getParameter(d.UNMASKED_RENDERER_WEBGL) : ''); } catch (_) { return false; }
 }
+// The head is drawn into a multisampled framebuffer of its own and copied onto the canvas at the frame's end. Drawn into
+// the canvas's own multisampled buffer (antialias: true), a desktop graphics driver (ANGLE over OpenGL ES) at times left
+// out whole draws of a frame (the far half's teeth, the skin, the air's lines), and a paused head kept that frame.
 function makeGL(canvas) {
   const software = softwareGL();
-  const gl = canvas.getContext('webgl2', {alpha: true, antialias: !software, premultipliedAlpha: true, preserveDrawingBuffer: false, powerPreference: 'low-power'});
+  const gl = canvas.getContext('webgl2', {alpha: true, antialias: false, premultipliedAlpha: true, preserveDrawingBuffer: false, powerPreference: 'low-power'});
   if (!gl) return null;
+  const samples = software && window.__lumaTractGL !== 'force-ms' ? 0 : Math.min(4, gl.getParameter(gl.MAX_SAMPLES) || 0);
   const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS) && !gl.isContextLost()) throw Error(gl.getShaderInfoLog(s)); return s; };
   const prog = (v, f) => { const p = gl.createProgram(); gl.attachShader(p, sh(gl.VERTEX_SHADER, v)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, f)); gl.linkProgram(p); if (!gl.getProgramParameter(p, gl.LINK_STATUS) && !gl.isContextLost()) throw Error(gl.getProgramInfoLog(p)); const u = {}; for (let i = 0, n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS); i < n; i++) { const a = gl.getActiveUniform(p, i); u[a.name] = gl.getUniformLocation(p, a.name); } return {p, u}; };
   const mesh = prog(VS, FS), quad = prog(QVS, QFS), pts = prog(PVS, PFS);
@@ -699,7 +703,23 @@ function makeGL(canvas) {
   const partBuf = buf(new Float32Array(6 * 240), gl.ARRAY_BUFFER, gl.DYNAMIC_DRAW);
   const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
   for (const [p, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, p, v);
-  return {gl, mesh, quad, pts, buf, quadBuf, partBuf, tex, texReady: false, body: null, software};
+  return {gl, mesh, quad, pts, buf, quadBuf, partBuf, tex, texReady: false, body: null, software, samples, ms: null};
+}
+// the multisampled colour and depth the head is drawn into, at the canvas's size (none without multisampling, where it
+// is drawn straight onto the canvas)
+function target(G, w, h) {
+  const {gl} = G;
+  if (!G.samples) return null;
+  if (G.ms && G.ms.w === w && G.ms.h === h) return G.ms;
+  if (G.ms) { gl.deleteFramebuffer(G.ms.fb); gl.deleteRenderbuffer(G.ms.color); gl.deleteRenderbuffer(G.ms.depth); G.ms = null; }
+  const fb = gl.createFramebuffer(), color = gl.createRenderbuffer(), depth = gl.createRenderbuffer();
+  gl.bindRenderbuffer(gl.RENDERBUFFER, color); gl.renderbufferStorageMultisample(gl.RENDERBUFFER, G.samples, gl.RGBA8, w, h);
+  gl.bindRenderbuffer(gl.RENDERBUFFER, depth); gl.renderbufferStorageMultisample(gl.RENDERBUFFER, G.samples, gl.DEPTH_COMPONENT24, w, h);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb); gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, color); gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depth);
+  const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  if (!ok) { gl.deleteFramebuffer(fb); gl.deleteRenderbuffer(color); gl.deleteRenderbuffer(depth); G.samples = 0; return null; }
+  return (G.ms = {fb, color, depth, w, h});
 }
 // what one body needs on the GPU: the skin's colours and far-half triangles, the hair, the parts behind the cut
 function uploadBody(G, body) {
@@ -745,11 +765,22 @@ function airPath(body, p, nasal, path) {
   path.n = n; path.L[0] = 0;
   for (let i = 1; i < n; i++) path.L[i] = path.L[i - 1] + Math.hypot(path.x[i] - path.x[i - 1], path.y[i] - path.y[i - 1]);
   path.len = path.L[n - 1];
+  // where the air leaves the head, as an arc length: the lips (the centreline's last point) or the nostril
+  path.exit = nasal ? path.L[n - 2] : path.L[1 + NC];
   // where the mouth's way is narrowest (a closure: the tongue's tip on the ridge, the lips together), as an arc length
   path.stop = path.len;
   if (!nasal) { let m = 2; for (let i = 3; i < 2 + NC; i++) if (path.a[i] < path.a[m]) m = i; path.stop = path.L[m]; }
   return path;
 }
+const speed = (U, a, k) => 2.2 * Math.log1p(U / Math.max(.05, a) / 30) * k;
+// the time the air takes from the windpipe to each point of the path (into tau when given), and to its end
+function transit(path, U, k, tau) {
+  let s = 0; if (tau) tau[0] = 0;
+  for (let i = 1; i < path.n; i++) { s += (path.L[i] - path.L[i - 1]) / Math.max(1e-4, speed(U, (path.a[i - 1] + path.a[i]) / 2, k)); if (tau) tau[i] = s; }
+  return s;
+}
+// a time taken from the windpipe → the arc length reached by then (piecewise linear over the path's points)
+function arcAt(path, tau, s) { let i = 1; while (i < path.n - 1 && tau[i] < s) i++; const f = clamp((s - tau[i - 1]) / Math.max(1e-9, tau[i] - tau[i - 1]), 0, 1); return path.L[i - 1] + (path.L[i] - path.L[i - 1]) * f; }
 function along(path, u, o) {
   const {x, y, a, L, n} = path; let i = 1; while (i < n - 1 && L[i] < u) i++;
   const t = clamp((u - L[i - 1]) / Math.max(1e-6, L[i] - L[i - 1]), 0, 1), dx = x[i] - x[i - 1], dy = y[i] - y[i - 1], l = Math.hypot(dx, dy) || 1;
@@ -789,11 +820,12 @@ function attach(host) {
   }
   // WebGL2 on a graphics processor draws the solid half-head. Without WebGL2, after a lost context, and on a renderer
   // that rasterises on the processor (SwiftShader, llvmpipe: its threads took frames from the roll under load), the panel
-  // draws the cut face flat. (window.__lumaTractGL = 'force' keeps WebGL2 on such a renderer: the tests' way to reach it.)
+  // draws the cut face flat. (window.__lumaTractGL = 'force' keeps WebGL2 on such a renderer, and 'force-ms' its
+  // multisampled framebuffer too: the tests' ways to reach them.)
   function ensureGL(b) {
     if (st.glFailed || st.lost) return null;
     if (!st.G) {
-      if (window.__lumaTractGL !== 'force' && softwareGL()) st.software = true;
+      if (!/^force/.test(window.__lumaTractGL || '') && softwareGL()) st.software = true;
       else try { st.G = makeGL(glc); } catch (_) { st.G = null; }
       if (!st.G) { st.glFailed = true; glc.hidden = true; c2d.hidden = false; return null; }
     }
@@ -818,7 +850,7 @@ function attach(host) {
   const outlines = new Map();
   function keyframe(b, G, id) {
     const okey = b.tag + '|' + id; let outline = outlines.get(okey), posed = null;
-    const make = () => (posed ??= (st.changed = true, b.pose(b.posture(id))));
+    const make = () => (posed ??= b.pose(b.posture(id)));
     const e = G ? skinKey(G, b, id, make) : null;
     if (!outline) { outline = b.outline(make()); outlines.set(okey, outline); if (outlines.size > 64) outlines.delete(outlines.keys().next().value); }
     return {e, outline};
@@ -870,32 +902,40 @@ function attach(host) {
     return {mvp: mul(pr, v), eye, key, fill, v, pr};
   }
 
-  // particles: each on the mouth's or the nose's path, at an arc position, with a place across the airway
-  function particles(n) { const r = rng(7919), out = []; for (let i = 0; i < n; i++) out.push({u: r(), v: r() * 2 - 1, life: r(), seed: r()}); return out; }
-  // the streaks of air, into a kept buffer as the GPU takes them: per particle its tail and its head, each x, y, alpha
-  const airBuf = new Float32Array(6 * 120), path = newPath(), at = {}, tail = {};
+  // The streaks of air. Particle i stands at a share of the time the air takes from the windpipe out of the head: its
+  // own offset (i/n, a little shaken) plus one clock that runs at the flow's pace. The shares lie evenly over that time,
+  // so the streaks crowd where the air runs slowly and thin out where it runs fast, and as many stand in front of the
+  // mouth at a held note's end as at its start. How fast the air runs along the way is the voiced flow's; another flow on
+  // the mouth's way (a hiss, a closure) changes only how fast the clock runs and moves no streak, while a turn between
+  // the mouth's way and the nose's puts each streak at its share of the other way. Each time a particle leaves the head
+  // it comes in again at the windpipe at a new place across it.
+  function particles(n) { const r = rng(7919), out = []; for (let i = 0; i < n; i++) out.push({off: (i + .8 * (r() - .5)) / n, u: 0, v: 0, lap: NaN}); return out; }
+  // the streaks, into a kept buffer as the GPU takes them: per particle its tail and its head, each x, y, alpha
+  const airBuf = new Float32Array(6 * 120), path = newPath(), at = {}, tail = {}, tau = new Float32Array(PATH_MAX);
   function stepAir(b, p, air, dt, reduced) {
-    const n = (st.box?.w || 300) < 260 ? 60 : 120;
+    const n = (st.box?.w || 300) < 260 ? 60 : 120, U = FLOW[air] ?? 0, k = b.k;
     if (!st.parts || st.parts.length !== n) st.parts = particles(n);
-    airPath(b, p, air === 'nasal', path); const U = FLOW[air] ?? 0;
-    let m = 0;
+    airPath(b, p, air === 'nasal', path);
+    const T = transit(path, FLOW.voiced, k, tau);
+    if (!reduced && dt > 0 && U > 0) st.clock = (st.clock || 0) + dt / (U === FLOW.voiced ? T : transit(path, U, k, null));
+    let m = 0, out = 0, i = 0;
     for (const q of st.parts) {
-      let u = q.u * path.len;
-      if (!reduced && dt > 0 && U > 0) {
-        along(path, u, at); const vel = 2.2 * Math.log1p(U / Math.max(.05, at.a) / 30) * b.k;
-        u += vel * dt; q.life -= dt * .25;
-        if (u > path.len || q.life <= 0) { q.seed = (q.seed * 9301 + .4927) % 1; u = q.seed * .25 * path.len; q.v = ((q.seed * 7.13) % 1) * 2 - 1; q.life = .6 + ((q.seed * 3.7) % 1) * .8; }
-        q.u = u / path.len;
-      }
+      const share = q.off + (st.clock || 0), lap = Math.floor(share);
+      if (lap !== q.lap) { const h = Math.sin(i * 12.9898 + lap * 78.233) * 43758.5453; q.lap = lap; q.v = 2 * (h - Math.floor(h)) - 1; }
+      i++;
+      q.u = share - lap; const u = arcAt(path, tau, q.u * T);
       if (U <= 0 && air !== 'closed') continue;
       // while a closure holds no air passes it: what is beyond it is not drawn
       if (air === 'closed' && u > path.stop) continue;
-      along(path, u, at); const half = .42 * Math.sqrt(Math.max(.05, at.a)) * .8, len = Math.min(.9 * b.k, .12 * b.k + (U > 0 ? .0006 * U * b.k : 0));
+      along(path, u, at); const half = .42 * Math.sqrt(Math.max(.05, at.a)) * .8, len = Math.min(.9 * k, .12 * k + (U > 0 ? .0006 * U * k : 0));
       along(path, Math.max(0, u - len), tail);
-      const alpha = clamp(Math.min(1, q.life * 1.6), 0, 1) * (air === 'closed' ? .35 : .8);
+      // it fades in where the windpipe is cut and out over the last centimetre of the breath in front of the face
+      const alpha = smooth(u / (.5 * k)) * smooth((path.len - u) / (1.2 * k)) * (air === 'closed' ? .35 : .8);
+      if (u > path.exit && alpha > .1) out++;
       airBuf[m++] = tail.x + tail.nx * half * q.v; airBuf[m++] = tail.y + tail.ny * half * q.v; airBuf[m++] = alpha;
       airBuf[m++] = at.x + at.nx * half * q.v; airBuf[m++] = at.y + at.ny * half * q.v; airBuf[m++] = alpha;
     }
+    st.airOut = out;
     return m;
   }
 
@@ -934,20 +974,17 @@ function attach(host) {
     } else draw2D(b, p, lines, w, h);
     const cap = caption(q); if (cap !== st.caption) { st.caption = cap; sound.textContent = cap; }
     const ms = performance.now() - t0; st.workMs.push(ms); if (st.workMs.length > 120) st.workMs.shift();
-    // while nothing plays, a frame that posed a new keyframe or took a new cut face is drawn once more on the next
-    // animation frame: on one desktop driver the first such frame after a seek at times came out without the skin
-    if (st.changed && !st.moving) { st.changed = false; requestAnimationFrame(() => { if (st.shown && !document.hidden && !st.moving) render(); }); }
-    st.changed = false;
   }
   function drawGL(G, b, q, p, lines, ka, kb, w, h) {
     const {gl} = G;
     if (glc.width !== w || glc.height !== h) { glc.width = w; glc.height = h; }
     if (st.fresh && st.bitmap) {
       gl.bindTexture(gl.TEXTURE_2D, G.tex); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, st.bitmap); G.texReady = true; st.fresh = false; st.changed = true;
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, st.bitmap); G.texReady = true; st.fresh = false;
     }
     const ck = w + '|' + h + '|' + st.yaw + '|' + !!st.box?.crop; if (st.camKey !== ck) { st.cam = camera(b, w, h); st.camKey = ck; }
     const cam = st.cam, M = G.mesh;
+    const ms = target(G, w, h); gl.bindFramebuffer(gl.FRAMEBUFFER, ms ? ms.fb : null);
     gl.viewport(0, 0, w, h); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.enable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE); gl.disable(gl.BLEND);
     gl.useProgram(M.p); gl.uniformMatrix4fv(M.u.uMVP, false, cam.mvp); gl.uniform3fv(M.u.uEye, cam.eye); gl.uniform3fv(M.u.uKey, cam.key); gl.uniform3fv(M.u.uFill, cam.fill);
@@ -985,6 +1022,7 @@ function attach(host) {
       bind(0, G.partBuf, 3, 24, 12); gl.drawArrays(gl.POINTS, 0, lines / 6);
       gl.disable(gl.BLEND);
     }
+    if (ms) { gl.bindFramebuffer(gl.READ_FRAMEBUFFER, ms.fb); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null); gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST); gl.bindFramebuffer(gl.FRAMEBUFFER, null); }
   }
   // without WebGL2: the cut face alone, with the air drawn on it
   function draw2D(b, p, lines, w, h) {
@@ -1044,7 +1082,7 @@ function attach(host) {
         velum: s ? (s[SC.port] > .05 || s[SC.velum] > .2 ? 'lowered' : 'raised') : null, jaw: s ? +s[SC.jaw].toFixed(3) : null,
         word: cur?.q.info?.w ?? null, approx: !!cur?.q.info?.approx, sound: sound.textContent, painted: st.paintN, paintMs: +st.paintMs.toFixed(2), worker: painter.worker,
         software: !!(st.software || st.G?.software), workMs: st.workMs.slice(), buildMs: st.buildMs ?? null, yaw: st.yaw, outline: b ? outlineSummary(b) : null, particles: st.parts ? st.parts.map(q => +q.u.toFixed(5)) : [],
-        crop: !!st.box?.crop, streaks: Array.from({length: (st.lines || 0) / 6}, (_, i) => [+airBuf[6 * i + 3].toFixed(2), +airBuf[6 * i + 4].toFixed(2)]),
+        crop: !!st.box?.crop, samples: st.G ? (st.G.ms ? st.G.samples : 0) : null, airOut: st.airOut ?? 0, streaks: Array.from({length: (st.lines || 0) / 6}, (_, i) => [+airBuf[6 * i + 3].toFixed(2), +airBuf[6 * i + 4].toFixed(2)]),
         skinKeys: st.G?.body ? [...st.G.body.keys.keys()] : [], segments: st.tl ? st.tl.segs.length : 0};
     },
     timeline() { const b = body(); return b ? tl(b) : null; },

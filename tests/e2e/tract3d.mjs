@@ -3,17 +3,18 @@
 // the synthetic demo and a made-up word put into a copy of the demo's package; nothing else.
 //   1  the column beside the roll at 1440 px (the roll's right edge and every word left of it; the chosen head marked as
 //      the roll's chosen view), at 900 px with the whole head; the overlay on the sung part at 390 px (no word on it, the
-//      playhead and the next 2 s of notes clear of it, the body's tag in its corner, a ✕ when enlarged; before a choice
-//      the two buttons and the prompt each whole)
+//      playhead and the next 2 s of notes clear of it, the body's tag in its corner; enlarged, a ✕ and the stage covered
+//      from edge to edge; before a choice the two buttons and the prompt each whole, one block in the overlay's middle)
 //   2  «Чоловік» / «Жінка» survive a reload; the body's scale; the two heads' outlines differ
 //   3  lesson 1 on «ма»: after the rest the /m/ long enough to be seen (nasal air, lips closed, soft palate lowered), the
-//      vowel on the note, then the held /a/ (voiced)
+//      vowel on the note, then the held /a/ (voiced), with as much air leaving the mouth at its end as at its start
 //   4  demo «ta»: the closure (no air in front of the face), then voiced after the release; inside a phrase the onset
 //      keeps its short length
 //   5  a word missing from LUMA_PHONES: approx, and «приблизно» and every sound of it whole on screen at three widths
 //   6  the demo from file://: listening moves the head; no network request
 //   7  --rebuild keeps the song's data line byte for byte and writes LUMA_PHONES; a changed word changes the table
-//   8  the frame budget (§6) at 390 and 1440 px under 1× and 4× CPU throttle
+//   8  the frame budget (§6) at 390 and 1440 px under 1× and 4× CPU throttle; the 3D head through its own multisampled
+//      framebuffer gives the same picture each time a paused moment is drawn
 //   9  «Голова» off: the roll's plot is today's
 //  10  no WebGL2: the 2D cut face, no console error
 //  11  in VR and in a hidden tab the head draws no frames
@@ -131,6 +132,11 @@ execFileSync(py, ['studio/build_html.py', odd, '-o', oddHtml], {encoding: 'utf8'
   await m.p.click('#tractView'); await m.p.waitForFunction(() => window.Luma.test.tract().big);
   const big = await m.p.evaluate(() => { const b = document.getElementById('tractClose'), r = b.getBoundingClientRect(); return {hidden: b.hidden, w: r.width, h: r.height, x0: r.left, x1: r.right, y0: r.top, label: b.getAttribute('aria-label'), vw: innerWidth}; });
   assert(!big.hidden && big.w >= 40 && big.h >= 40 && big.x0 >= 0 && big.x1 <= big.vw && big.y0 >= 0 && big.label, '390 px, enlarged: a ✕ in the header, ' + big.w + '×' + big.h + ' px, inside the screen');
+  // it covers the stage from edge to edge over the plot's whole height: no strip of the piano rail's keys beside it
+  const cover = await m.p.evaluate(() => { const r = id => { const b = document.getElementById(id).getBoundingClientRect(); return {x0: b.left, y0: b.top, x1: b.right, y1: b.bottom}; };
+    const wrap = r('chartWrap'), b = window.Luma.test.plot(); return {panel: r('tract'), wrap, rail: {x0: wrap.x0, x1: wrap.x0 + b.left, y0: wrap.y0 + b.top, y1: wrap.y0 + b.bottom}}; });
+  assert(cover.panel.x0 <= cover.wrap.x0 + .5 && cover.panel.x1 >= cover.wrap.x1 - .5 && cover.panel.y0 <= cover.rail.y0 && cover.panel.y1 >= cover.rail.y1 - .5,
+    '390 px, enlarged: the head covers the stage from edge to edge, the piano rail included ' + JSON.stringify(cover));
   await m.p.click('#tractClose');
   const back = await m.p.evaluate(() => ({t: window.Luma.test.tract(), close: document.getElementById('tractClose').hidden}));
   assert(!back.t.big && back.t.overlay && back.close, '390 px: the ✕ returns the head to the small overlay and hides itself');
@@ -142,10 +148,14 @@ execFileSync(py, ['studio/build_html.py', odd, '-o', oddHtml], {encoding: 'utf8'
   const ask = await u.p.evaluate(() => { const box = e => { const b = e.getBoundingClientRect(); return {x0: b.left, y0: b.top, x1: b.right, y1: b.bottom}; };
     const p = document.getElementById('tractPick'), rg = document.createRange(); rg.selectNodeContents(p);
     const text = [...rg.getClientRects()].filter(r => r.width > 0).map(r => ({x0: r.left, y0: r.top, x1: r.right, y1: r.bottom}));
-    return {mode: window.Luma.test.tract().mode, panel: box(document.getElementById('tract')), male: box(document.getElementById('tractMale')), female: box(document.getElementById('tractFemale')), text, words: p.innerText.trim()}; });
+    return {mode: window.Luma.test.tract().mode, panel: box(document.getElementById('tract')), group: box(document.querySelector('#tract .tract-body')), male: box(document.getElementById('tractMale')), female: box(document.getElementById('tractFemale')), text, words: p.innerText.trim(), caption: document.getElementById('tractSound').getBoundingClientRect().height}; });
   const inside = (a, b) => a.x0 >= b.x0 - .5 && a.x1 <= b.x1 + .5 && a.y0 >= b.y0 - .5 && a.y1 <= b.y1 + .5;
   assert(ask.mode === 'overlay' && ask.words === 'Обери голову' && ask.text.length > 0 && ask.text.every(r => inside(r, ask.panel) && !overlap(r, ask.male) && !overlap(r, ask.female)) && inside(ask.male, ask.panel) && inside(ask.female, ask.panel) && !overlap(ask.male, ask.female) && ask.male.y1 - ask.male.y0 >= 40,
     '390 px, nothing chosen: «Чоловік», «Жінка» and «Обери голову» each whole in the overlay, none over another ' + JSON.stringify(ask));
+  // the buttons and the prompt stand as one block in the middle of the overlay: the empty caption takes no room
+  const above = ask.group.y0 - ask.panel.y0, below = ask.panel.y1 - Math.max(...ask.text.map(r => r.y1));
+  assert(ask.caption === 0 && Math.abs(above - below) <= 4,
+    `390 px, nothing chosen: ${above.toFixed(1)} px above the buttons and ${below.toFixed(1)} px below the prompt (the caption ${ask.caption} px high)`);
   await done(u, '390 px before a choice');
 }
 
@@ -178,6 +188,14 @@ execFileSync(py, ['studio/build_html.py', odd, '-o', oddHtml], {encoding: 'utf8'
     'lesson 1, «ма», on the /m/ (its start and its end): ' + JSON.stringify([sm, sm2].map(q => ({phoneme: q.phoneme, air: q.air, lips: q.lips, velum: q.velum, word: q.word}))));
   assert(sa.phoneme === 'a' && sa.air === 'voiced' && sa.lips === 'open' && sa.velum === 'raised' && !sa.approx && sa.sound === '«ма»\nm [a]',
     'lesson 1, «ма», the held /a/: ' + JSON.stringify({phoneme: sa.phoneme, air: sa.air, lips: sa.lips, velum: sa.velum, sound: sa.sound}));
+  // the held /a/ played through, a frame per animation frame: as many streaks of air stand in front of the lips at its
+  // end as at its start (they once died on the way and the breath stopped leaving the mouth before the note ended)
+  const held = await o.p.evaluate(async ([a0, a1]) => { const T = window.Luma.test, out = [];
+    for (let t = a0 + .1; t < a1; t += 1 / 30) { await new Promise(r => requestAnimationFrame(r)); const d = T.tractFrame(t, true); if (d?.drew) out.push(T.tract().airOut); }
+    return out; }, [a.a, a.b]);
+  const part = Math.max(1, Math.floor(held.length / 5)), mean = v => v.reduce((s, x) => s + x, 0) / v.length;
+  assert(held.length >= 30 && Math.min(...held) > 0 && Math.min(...held) >= .75 * Math.max(...held) && mean(held.slice(-part)) >= .9 * mean(held.slice(0, part)),
+    `lesson 1, the held /a/ (${a.a.toFixed(2)}–${a.b.toFixed(2)} s) playing: streaks of air in front of the lips over ${held.length} frames, ${Math.min(...held)}–${Math.max(...held)}, the first fifth ${mean(held.slice(0, part)).toFixed(1)} and the last ${mean(held.slice(-part)).toFixed(1)} on average`);
   await done(o, 'lesson 1');
 
   const d = await page(url, {settings: seeded('female')}); await ready(d.p);
@@ -295,6 +313,22 @@ for (const [width, height, rate] of [[1440, 900, 1], [390, 844, 4]]) {
   if (rate === 1) assert(r.headMed <= 2 && r.headP95 <= 4, `${width} px, ${rate}× CPU, the 3D head: its own work, median ${r.headMed} ms ≤ 2, p95 ${r.headP95} ms ≤ 4`);
   else assert(r.headP95 <= 8, `${width} px, ${rate}× CPU, the 3D head: its own work, p95 ${r.headP95} ms ≤ 8`);
   await done(o, width + ' px 3D head');
+}
+// on a graphics processor the head is drawn into a multisampled framebuffer of its own and copied onto the canvas (drawn
+// into the canvas's own multisampled buffer, one desktop driver at times left whole draws out of a paused frame): that
+// path, forced onto this renderer, draws the half-head, and the same paused moment drawn again gives the same picture
+{
+  const o = await page(url, {viewport: {width: 1440, height: 900}, dpr: 2, settings: seeded('male'), init: () => { window.__lumaTractGL = 'force-ms'; }}); await ready(o.p);
+  const t = await o.p.evaluate(() => { const T = window.Luma.test.tractTimeline(), g = T.segs.find(g => g.sym === 'ɑ' && T.words[g.word]?.w === 'na'); return (g.a + g.b) / 2; });
+  await at(o.p, t); await o.p.waitForFunction(() => window.Luma.test.tract().painted > 1, null, {timeout: 20000}); await frames(o.p, 3);
+  const box = await o.p.evaluate(() => { const r = document.getElementById('tractView').getBoundingClientRect(); return {x: r.left, y: r.top, width: r.width, height: r.height}; });
+  const shots = [];
+  for (let i = 0; i < 6; i++) { await o.p.evaluate(t => window.Luma.test.tractFrame(t, false), t); await frames(o.p, 1); shots.push((await o.p.screenshot({clip: box})).toString('base64')); }
+  const ink = await o.p.evaluate(async b64 => { const img = new Image(); img.src = 'data:image/png;base64,' + b64; await img.decode(); const c = new OffscreenCanvas(img.width, img.height), g = c.getContext('2d'); g.drawImage(img, 0, 0); const d = g.getImageData(0, 0, img.width, img.height).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i] - d[i + 2] > 40) n++; return {n, of: d.length / 4}; }, shots[0]);
+  const s = await o.p.evaluate(() => window.Luma.test.tract());
+  assert(s.renderer === 'webgl2' && s.samples > 0 && ink.n > ink.of * .08 && new Set(shots).size === 1,
+    `1440 px, the 3D head through its own multisampled framebuffer (${s.samples} samples): drawn (${ink.n} of ${ink.of} pixels warm), the paused moment drawn ${shots.length} times gives ${new Set(shots).size} picture(s)`);
+  await done(o, '3D head, multisampled');
 }
 
 // ── 9 · «Голова» off: the roll is today's ─────────────────────────────────────────────────────────────────────────────

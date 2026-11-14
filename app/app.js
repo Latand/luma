@@ -1462,7 +1462,8 @@ function placeTract(box){const el=$('tract');s.tractW=0;s.tractBox=null;
  const picked=prefs.tractBody==='male'||prefs.tractBody==='female';let r;
  if(box.width>=720){const wide=box.width>=1100,w=Math.round(clamp(box.width*.28,wide?300:240,wide?420:300));s.tractW=w+12;const b=bounds();r={x:box.width-w-12,y:b.top-4,w,h:b.bottom-b.top+4,mode:'column',crop:false};}
  else{const b=bounds();
-  if(s.tractBig)r={x:8,y:8,w:box.width-16,h:b.bottom-8,mode:'overlay',big:true};
+  // enlarged, it covers the stage from edge to edge down to the plot's bottom, the piano rail included
+  if(s.tractBig)r={x:0,y:0,w:box.width,h:b.bottom,mode:'overlay',big:true};
   else{const h=Math.round((b.bottom-b.top)*.4),w=Math.round(.34*(b.right-b.left)-16);r={x:b.left+4,y:b.bottom-4-h,w,h,mode:'overlay',crop:true};s.tractBox={x0:r.x,y0:r.y,x1:r.x+w,y1:r.y+h};}}
  el.style.left=r.x+'px';el.style.top=r.y+'px';el.style.width=r.w+'px';el.style.height=r.h+'px';el.dataset.mode=r.mode;el.dataset.big=r.big?'1':'0';el.dataset.picked=picked?'1':'0';
  $('tractPick').hidden=picked;$('tractClose').hidden=!r.big;$('tractTag').hidden=!picked||r.mode!=='overlay'||!!r.big;$('tractTag').textContent=picked?window.LumaTract.LABEL[prefs.tractBody]:'';

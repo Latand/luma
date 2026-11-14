@@ -164,11 +164,17 @@ button[aria-pressed=true]{color:var(--mint);border-color:#a1eed840;background:#a
 .tract[data-mode=overlay] .tract-head{padding:5px 5px 0}
 .tract[data-mode=overlay]:not([data-big="1"]) .tract-body{flex-direction:column;width:100%}
 .tract[data-mode=overlay] .tract-sound{padding:0 6px 4px;font-size:11px}
-.tract[data-mode=overlay]:not([data-big="1"]) .tract-sound{white-space:normal;line-height:1.35;height:calc(2.7em + 4px);min-height:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere}
-.tract[data-mode=overlay][data-big="1"]{background:#0c1018}
+.tract[data-mode=overlay][data-picked="1"]:not([data-big="1"]) .tract-sound{white-space:normal;line-height:1.35;height:calc(2.7em + 4px);min-height:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere}
+.tract[data-mode=overlay][data-big="1"]{background:#0c1018;border-width:0 0 1px;border-radius:0}
+.tract[data-mode=overlay][data-big="1"] .tract-head{padding:13px 13px 0}
+.tract[data-mode=overlay][data-big="1"] .tract-sound{padding:0 14px 8px}
 .tract[data-mode=overlay] .tract-pick{padding:4px;font-size:12px;line-height:1.3}
 .tract[data-mode=overlay]:not([data-big="1"]) .tract-pick-more{display:none}
 .tract[data-mode=overlay][data-picked="0"]{background:#0c1018}
+/* before a choice the small overlay holds the two buttons and the prompt as one block, centred top to bottom */
+.tract[data-mode=overlay][data-picked="0"]:not([data-big="1"]){justify-content:center}
+.tract[data-mode=overlay][data-picked="0"]:not([data-big="1"]) .tract-view{flex:none}
+.tract[data-mode=overlay][data-picked="0"]:not([data-big="1"]) .tract-pick{position:static}
 .tract-tag{position:absolute;right:4px;bottom:4px;margin:0;padding:0 5px;border-radius:var(--r-xs);background:#0c1018d9;font-size:11px;line-height:18px;color:var(--ink-1);pointer-events:none;z-index:1}
 .tract-tag[hidden]{display:none}
 /* a toast on a phone sits over the bottom of the roll, where the small overlay stands: its words step aside meanwhile */

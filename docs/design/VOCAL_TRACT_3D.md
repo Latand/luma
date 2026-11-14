@@ -305,6 +305,13 @@ counts and the licences. Like every generated file, it is regenerated and never 
 Recommendation: **WebGL2**. In a side view at panel size, the painted cut face carries the picture; the skin's sheen
 matters least. If the visual critic fails the skin's look specifically, three.js at the cost above is the way back.
 
+Changed in the build: the head is drawn into a multisampled framebuffer of its own (4 samples) and copied onto the
+canvas at the end of each frame; the canvas itself has no antialiasing. Drawn into the canvas's own multisampled buffer,
+desktop Chromium on ANGLE over OpenGL ES, on a desktop graphics processor, at times left whole draws out of a frame: the
+far half's teeth and palate, the skin, the air's lines. A paused head kept such a frame. Measured on 2026-11-14, a
+paused head redrawn 186 times lost a draw in 8 and 10 of them in two runs; drawn through its own framebuffer, 0 and 0,
+every redraw the same picture.
+
 ## 4. The elements
 
 ### 4.1 (a) Male and female head
@@ -422,6 +429,12 @@ perceptual scale, the formula main's head uses (`anatomy3d.ts:1182`: 2.2 · ln(1
 fixed teaching flow `U` per state. The flow splits between mouth and nose by the port's area against the mouth's
 smallest area.
 
+Changed in the build: each particle stands at an even share of the time the air takes from the windpipe out of the
+head, moved on by one clock. Particles crowd where the air runs slowly, and as many stand in front of the mouth at a held
+note's end as at its start. Another flow on the mouth's way (a hiss, a closure) changes only how fast the clock runs and
+moves no streak; a turn between the mouth's way and the nose's puts each streak at its share of the other way. Particles that aged out and came back low in the throat had thinned the breath in front of the lips
+to nothing up to 0.8 s before a long note ended.
+
 | Sound | Folds | Air |
 |---|---|---|
 | Vowel | vibrating, drawn at a slowed rate | pulses in step with the folds; a steady stream out of the lips |
@@ -494,7 +507,7 @@ moment while idle or scrubbing.
 |---|---|
 | ≥ 1100 px | a column on the right inside the stage, 28 % of the stage's width clamped to 300–420 px, the plot's full height. The roll's right edge moves left by it: `bounds()` (`app/app.js:1458`) gets `s.tractW`, measured in `measureStage()` beside `headH` and `railH` (named for the tract because `app.js` already uses `head` for the stage header, `s.headH` and `#stageHead`). The span stays 12 s |
 | 720–1099 px | the same column at 240–300 px, with the whole head (changed in the build: a mouth-to-larynx crop below 280 px cut the skull, the hair and the nose while the whole head fits the column at the same scale as at 1440 px) |
-| < 720 px | the head stands on the sung third of the roll (between the pitch rail and the playhead), bottom left, at 40 % of the plot's height. The roll fades under it, as the camera video's overlays do ([CAMERA_VIDEO.md](CAMERA_VIDEO.md)); its rectangle goes into `drawWords`' list of placed labels first (`app/app.js:1465`–`1472`), so a word that would fall under it climbs above it the way overlapping words already do. It shows the mouth to the larynx: from the spine to past the nostril, from the neck's cut (or 2 cm under the glottis) to above the nasal cavity, and «Чоловік» or «Жінка» stands in its bottom right corner, in front of the neck. Before a choice it holds the two buttons and «Обери голову». A tap while idle enlarges it to the stage's height; a second tap, the ✕ in its header or Esc returns |
+| < 720 px | the head stands on the sung third of the roll (between the pitch rail and the playhead), bottom left, at 40 % of the plot's height. The roll fades under it, as the camera video's overlays do ([CAMERA_VIDEO.md](CAMERA_VIDEO.md)); its rectangle goes into `drawWords`' list of placed labels first (`app/app.js:1465`–`1472`), so a word that would fall under it climbs above it the way overlapping words already do. It shows the mouth to the larynx: from the spine to past the nostril, from the neck's cut (or 2 cm under the glottis) to above the nasal cavity, and «Чоловік» or «Жінка» stands in its bottom right corner, in front of the neck. Before a choice it holds the two buttons and «Обери голову», one block in its middle. A tap while idle enlarges it over the stage from edge to edge, the piano rail included, down to the plot's bottom (changed in the build: inset by 8 px it left a strip of the rail's keys beside it); a second tap, the ✕ in its header or Esc returns |
 
 - **Switch:** «Голова» in the stage rail beside «Слова» (`aria-pressed`), preference `tract`, on by default. The panel's
   header holds «Чоловік · Жінка» and ⓘ. Both preferences join the activity state beside `lyrics` (`app/app.js:359`).
@@ -601,14 +614,16 @@ the breath in before phrases, the «вдих» and «з легень» labels, r
 2. «Чоловік» and «Жінка» survive a reload. `Luma.test.tract()` reports the body and its scale (1.0 and 0.9), and the
    two heads' outlines differ (MakeHuman's two shapes).
 3. Lesson 1, «Витримана нота» on «ма»: at the /m/ the hook reports phoneme `m`, air `nasal`, lips closed, soft palate
-   lowered; on the held /a/ it reports `a` and air `voiced`.
+   lowered; on the held /a/ it reports `a` and air `voiced`, and played through, as many streaks stand in front of the
+   lips at its end as at its start (added in the build).
 4. Demo song: on «ta» or «do» the closure reports `closed`, then `voiced` after the release.
 5. A fixture word missing from `LUMA_PHONES` reports `approx: true`, and «приблизно» is visible.
 6. The demo opened from `file://`: listening moves the head (the phoneme changes), and request interception sees no
    network request.
 7. `--rebuild` keeps the data line byte for byte and writes `LUMA_PHONES`; a changed word in `target.json` changes the
    table at the next rebuild.
-8. The budget of §6 at 390 and 1440 px, 1× and 4× throttle.
+8. The budget of §6 at 390 and 1440 px, 1× and 4× throttle. (Added in the build: the 3D head through its own
+   multisampled framebuffer draws the same picture each time a paused moment is drawn again.)
 9. With «Голова» off, `Luma.test.plot()` equals today's at the same moment and width.
 10. With WebGL2 creation stubbed to fail, the 2D cut face shows, with no console error.
 11. In a VR session (the `iwer` emulator, as `xr.mjs`) and in a hidden tab, the head draws no frames.

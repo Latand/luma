@@ -216,13 +216,14 @@ a restart, Range and the player, the layout at 390, 900 and 1440 px, and no proc
 checks the alignment through Opus, the eviction order, the render deadline, the ffmpeg graph and that the thumbnail
 falls inside a sung segment, without a browser.
 `tract3d.mjs` checks «Голова»: the column at 1440 px and 900 px (the whole head) and the overlay at 390 px clear of the
-words, the playhead and the next notes, the overlay before a choice and enlarged (its ✕), the chosen head marked as the
-roll's chosen view, the body's choice across a reload, lesson 1's «ма» (after the rest an /m/ long enough to be seen,
-through the nose, then the held /a/ on the note), the demo's «ta» (closure with no air in front of the face, then
+words, the playhead and the next notes, the overlay before a choice (the buttons and the prompt in its middle) and
+enlarged (its ✕, the stage covered from edge to edge), the chosen head marked as the roll's chosen view, the body's
+choice across a reload, lesson 1's «ма» (after the rest an /m/ long enough to be seen, through the nose, then the held
+/a/ on the note, its air leaving the mouth as densely at its end as at its start), the demo's «ta» (closure with no air in front of the face, then
 voiced), a made-up word marked «приблизно» with every sound whole at three widths, `--rebuild` keeping the song data
 and writing the word sounds, listening from `file://` without a network request, the frame budget at 390 px and 1440 px
 under 1× and 4× CPU throttle (the flat cut face, which a renderer without a graphics processor gets; the 3D head forced
-onto it for its own work), «Голова» off leaving today's roll, the flat cut face without WebGL2, no head drawn in VR or in a hidden tab, and
+onto it for its own work, and through its own multisampled framebuffer the same picture at each redraw), «Голова» off leaving today's roll, the flat cut face without WebGL2, no head drawn in VR or in a hidden tab, and
 still air with reduced motion. `tests/phonemes_test.py` checks the build's word sounds (CMUdict and the Ukrainian rules).
 `xr.mjs` enters VR on Meta's WebXR emulator (the `iwer` dev dependency) as a Quest 3: the panel 1.5 m ahead with the
 chart at its size, «Слухати», «Вокал» and a seek on the progress bar by a controller's trigger, «Сюди» by a pinch,
