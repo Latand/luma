@@ -17,7 +17,8 @@ sys.path.insert(0, str(ROOT / 'tests'))
 import align_lyrics as al
 import retranscribe_song as rt
 from lyrics_align_test import synthetic_package, TEXT
-from lyrics_synced_test import phrase_identity_fixture, synthetic_package as timed_package
+from lyrics_synced_test import (phrase_identity_fixture, consecutive_repeat_fixture,
+                                gapped_phrase_fixture, synthetic_package as timed_package)
 from prepare_song import sha256
 
 
@@ -68,6 +69,17 @@ class RetranscribeCorrectionReplayTests(unittest.TestCase):
 
 
 class SyncedRetranscriptionCliTests(unittest.TestCase):
+    def test_gapped_short_line_refusal_preserves_the_entire_record_tree(self):
+        for vocal_exists in [False, True]:
+            for mix_exists in [False, True]:
+                with self.subTest(vocal_exists=vocal_exists, mix_exists=mix_exists):
+                    self.check_cli('gapped', vocal_exists, mix_exists, shift=-4.)
+
+    def test_gap_only_and_compensated_missing_repeat_controls_replay(self):
+        for kind in ['gapped', 'compensated_separate', 'compensated_combined']:
+            with self.subTest(kind=kind):
+                self.check_cli(kind, False, False, shift=0.)
+
     def test_cache_only_refusal_preserves_existing_and_absent_transcripts(self):
         for kind in ['repeat', 'short2']:
             for vocal_exists in [False, True]:
@@ -81,10 +93,18 @@ class SyncedRetranscriptionCliTests(unittest.TestCase):
                 self.check_cli(kind, False, False, shift=0.)
 
     def check_cli(self, kind, vocal_exists, mix_exists, shift):
-        _, words, song, text, lrc = phrase_identity_fixture(kind, 'pitch', shift=shift)
-        words = [dict(w, a=w['a'] + .6, b=w['b'] + .6) for w in words]
+        if kind == 'gapped':
+            _, words, song, text, lrc = gapped_phrase_fixture(shift=shift, only_gap=not shift)
+        else:
+            if kind.startswith('compensated_'):
+                _, words, song, text, lrc = consecutive_repeat_fixture(kind.endswith('combined'), missing=51.)
+                lrc = '[offset:10000]\n' + lrc
+            else:
+                _, words, song, text, lrc = phrase_identity_fixture(kind, 'pitch', shift=shift)
+            words = [dict(w, a=w['a'] + .6, b=w['b'] + .6) for w in words]
         with tempfile.TemporaryDirectory() as tmp:
-            pkg = timed_package(Path(tmp), bursts=[(i * 10 + 1., i * 10 + 3.) for i in range(12)],
+            end = 4. if kind.startswith('compensated_') else 3.
+            pkg = timed_package(Path(tmp), bursts=[(i * 10 + 1., i * 10 + end) for i in range(12)],
                                 asr_words=['flim'] * 12, duration=120.)
             target = json.loads((pkg / 'target.json').read_text())
             target['lyrics'] = song['lyrics']

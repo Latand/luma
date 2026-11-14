@@ -1,6 +1,6 @@
 # Synced lyric correction: validation
 
-Dry-run evidence completed 2026-11-14 10:46 UTC. Project checks completed 2026-11-14 11:10 UTC. The table retains the original main baseline before optional anchors. The follow-up also compares the pinned `9c2ac731` source with the candidate using identical anchors. Candidate: the source delivered with this report.
+Dry-run evidence completed 2026-11-14 12:09 UTC. Project checks completed 2026-11-14 12:53 UTC. The table retains the original main baseline before optional anchors. The follow-up also compares the pinned `9c2ac731` source with the candidate using identical anchors. Candidate: the source delivered with this report.
 
 Both versions use the supplied verified text. Local synced files are supplied for songs E, G, J, K, L, N and Q. Each package command uses `studio/lyrics_text.py --text verified.txt --dry-run --json`; anchored commands add `--synced lines.lrc`. Runs use the project virtual environment, isolated scratch, and local inputs without fetching.
 
@@ -74,11 +74,33 @@ Focused command: `"$LUMA_PY" tests/lyrics_synced_test.py MajorityContradictionTe
 
 ## Review follow-up regressions
 
+ASR phrase windows now require chronological word starts and at most 3 s between
+one word's end and the next start, with the preceding word duration capped at the
+aligner's 1.5 s maximum. This continuity check runs before occurrence counting,
+short-line uniqueness, clock voting and explained-span construction. A lexical
+duplicate across a long pause cannot disable a unique short-line contradiction;
+a gapped-only fragment supplies no veto against an independently supported line.
+The global clock still requires at least three independent three-word matches.
+
+Occurrence ownership is recomputed against the inferred clock before constructing
+explained spans. Missing repeats therefore retain the other repeat's explanation
+after source-clock compensation, including ordinary 0.6 s ASR latency. Explained
+spans stop at a long pause even when their first three words match coherently.
+
 Each parsed timestamp occurrence is identified by its physical line and time. ASR ownership therefore treats consecutive repeats at 51 and 61 s identically whether they use separate LRC rows or two timestamp tags on one row. Quiet-clock validation excludes only the current occurrence and retains other timestamps from the same physical row. The public `explained_by_line` diagnostic keeps the original physical line number.
 
 `MultipleTimestampRepeatTests` covers either missing ASR repeat through pitch, stem-energy and quiet-clock placement; it also covers the minimum independent clock evidence with a multi-tag repeat. Fresh-process CLI controls cover both formats through explicit inputs, cached replay and successful forced writes. Early/late unexplained contradictions beside an explained repeat still refuse through direct correction, cached CLI and `--force`, preserving the entire synthetic package and repeatable reports.
 
 `SyncedRetranscriptionCliTests` exercises the real cache-only retranscription consumer before any mix/vocal transcript write. It covers repeated and unique two-word lines, all four combinations of existing and absent transcripts, repeated process restarts, exit 1 and line/time reasons on refusal, and successful controls that save both transcripts. The input ASR cache is prepopulated, so the test makes no paid calls.
+
+`TemporalOccurrenceTests` adds the pause-spanning duplicate and gapped-only controls,
+the exact 3 s pause boundary, overlong ASR token durations, and a pause after an
+explained prefix. Compensated missing repeats pass in both LRC formats through all
+three voice branches with 6, 10 and 25 s source-clock offsets. Fresh-process explicit
+and cached CLI runs cover ordinary and forced writes, repeated dry runs, and
+unexplained early/late contradictions with unchanged package bytes. Cache-only
+retranscription also covers the gapped refusal with all four existing/absent
+transcript combinations, plus valid gapped-only and compensated-repeat controls.
 
 ## Project checks
 
@@ -114,7 +136,7 @@ Every suite ran as its own process by explicit file path, serially through the h
 | `tests/lan_proxy_test.py` | PASS (exit 0; also with `-I`) |
 | `tests/audio_stems_test.py` | PASS (exit 0) |
 
-The Python files pass 281 tests, including 88 synthetic synced-lyrics tests covering stem-supported voice, quiet-clock placement, clock/edit refusal, unrelated ASR, onset spacing and rounding, next-line attacks, cache replay, and CLI restarts.
+The Python files pass 290 tests, including 95 synthetic synced-lyrics tests covering stem-supported voice, quiet-clock placement, clock/edit refusal, unrelated ASR, onset spacing and rounding, next-line attacks, cache replay, and CLI restarts.
 
 All renewed individual suites pass, including Session and History. Earlier timeout and timing-failure evidence and the equivalent base/candidate comparisons remain preserved separately.
 

@@ -17,6 +17,7 @@ import align_lyrics as al
 START_TOLERANCE = 1.5
 CLOCK_TOLERANCE = 1.5
 MAX_CLOCK_OFFSET = 30.0
+MAX_PHRASE_PAUSE_S = 3.0
 ENERGY_MARGIN_DB = 10.0
 ENERGY_DYNAMIC_DB = 35.0
 ENERGY_MIN_RUN_S = .12
@@ -84,14 +85,23 @@ def clock_offset(rows: list[dict], words: list[dict]) -> dict:
     phrases = [tuple(al.norm(w) for w in r['tokens']) for r in rows]
     prefixes = [p[:3] for p in phrases]
 
+    def continuous(left, right):
+        # Token durations can cover an entire ASR pause. Cap them as the aligner
+        # does; allow slow sung phrases while separating distant fragments.
+        return (left['a'] <= right['a']
+                and right['a'] - min(left['b'], left['a'] + al.MAX_DUR) <= MAX_PHRASE_PAUSE_S)
+
     def occurrences(phrase):
         return [i for i in range(len(words) - len(phrase) + 1)
-                if tuple(norms[i:i + len(phrase)]) == phrase]
+                if tuple(norms[i:i + len(phrase)]) == phrase
+                and all(continuous(left, right)
+                        for left, right in zip(words[i:i + len(phrase) - 1], words[i + 1:i + len(phrase)]))]
 
     def contains(phrase, text):
         return any(text[i:i + len(phrase)] == phrase for i in range(len(text) - len(phrase) + 1))
 
     by_occurrence = {}
+    clock_candidates = []
     line_evidence = []
     for row, phrase, prefix in zip(rows, phrases, prefixes):
         if not prefix:
@@ -119,6 +129,7 @@ def clock_offset(rows: list[dict], words: list[dict]) -> dict:
         # Short lines supply veto evidence, but cannot validate the global clock.
         if len(prefix) < 3:
             continue
+        clock_candidates.extend((i, row, words[i]['a'] - row['a']) for i in clock_occurrences)
         candidates = [(i, words[i]['a'] - row['a']) for i in clock_occurrences
                       if abs(words[i]['a'] - row['a']) <= MAX_CLOCK_OFFSET]
         if candidates:
@@ -154,11 +165,20 @@ def clock_offset(rows: list[dict], words: list[dict]) -> dict:
     validated = (share >= .5 and len(coherent) >= .8 * len(evidence)
                  and spread <= 1.0 and group_spread <= .75 and span >= .5)
     explained_spans = []
-    for index, (other, delta) in by_occurrence.items():
+    # Raw source times can put an occurrence closer to a missing earlier repeat.
+    # Reassign all observations against the inferred clock before explaining any
+    # other line's evidence, including separate tags on the same physical row.
+    owners = {}
+    for index, row, delta in clock_candidates:
+        previous = owners.get(index)
+        if previous is None or abs(delta - median) < abs(previous[1] - median):
+            owners[index] = (row, delta)
+    for index, (other, delta) in owners.items():
         if abs(delta - median) <= CLOCK_TOLERANCE or abs(delta - offset) <= START_TOLERANCE:
             end = index
             for token in other['tokens']:
-                if end >= len(norms) or norms[end] != al.norm(token):
+                if (end >= len(norms) or norms[end] != al.norm(token)
+                        or (end > index and not continuous(words[end - 1], words[end]))):
                     break
                 end += 1
             explained_spans.append((index, end, other['line'], other['a']))

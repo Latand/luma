@@ -118,6 +118,149 @@ def consecutive_repeat_fixture(combined=False, missing=None, shift=0.):
     return ctx, words, song, '\n'.join(phrases), '\n'.join(lines)
 
 
+def gapped_phrase_fixture(support='pitch', shift=-4., only_gap=False):
+    """Lexically adjacent tokens across a pause cannot identify a sung phrase."""
+    ctx, words, song, text, lrc = phrase_identity_fixture('short2', support, shift)
+    phrase = text.splitlines()[5].split()
+    if only_gap:
+        words = [w for w in words if not 51. <= w['a'] < 53.]
+        words[14]['w'], words[15]['w'] = phrase
+    else:
+        words[2]['w'], words[3]['w'] = phrase
+    words = [dict(w, a=w['a'] + .6, b=w['b'] + .6) for w in words]
+    return ctx, words, song, text, lrc
+
+
+class TemporalOccurrenceTests(unittest.TestCase):
+    def correct(self, data):
+        ctx, words, song, text, lrc = data
+        return lt.build_correction(Path('synthetic'), song, words, ctx, text, 'mix', lrc)
+
+    def test_pause_duplicate_preserves_unique_short_line_veto_in_every_branch(self):
+        for support in ['pitch', 'energy', 'quiet']:
+            with self.subTest(support=support):
+                data = gapped_phrase_fixture(support)
+                clock = sy.clock_offset(sy.parse_lrc(data[-1]), data[1])
+                match = next(m for m in clock['line_evidence'] if m['line'] == 6)
+                self.assertTrue(match['unambiguous'])
+                self.assertEqual([m['asr_time_s'] for m in match['occurrences']], [51.6])
+                with self.assertRaisesRegex(lt.LyricsSourceError, 'line 6 at 47.00s: .*contradicts.*51.60s'):
+                    self.correct(data)
+
+    def test_gapped_only_fragment_leaves_correct_independent_placement_available(self):
+        for support in ['pitch', 'energy', 'quiet']:
+            with self.subTest(support=support):
+                result = self.correct(gapped_phrase_fixture(support, shift=0., only_gap=True))
+                self.assertTrue(result['passed'], result['reason'])
+                self.assertEqual(result['anchor_checks'][5]['start'], 51.)
+                self.assertIsNone(result['anchor_checks'][5]['clock_evidence'])
+
+    def test_phrase_pause_boundary_and_overlong_token_end(self):
+        for gap, duration, accepted in [(3., .3, True), (3.001, .3, False), (9., 20., False)]:
+            with self.subTest(gap=gap, duration=duration):
+                _, words, _, _, lrc = phrase_identity_fixture('short2')
+                words[15]['b'] = words[15]['a'] + duration
+                words[16]['a'] = words[15]['a'] + .3 + gap
+                words[16]['b'] = words[16]['a'] + .3
+                match = next((m for m in sy.clock_offset(sy.parse_lrc(lrc), words)['line_evidence']
+                              if m['line'] == 6), None)
+                self.assertEqual(match is not None, accepted)
+        _, words, _, _, lrc = majority_fixture()
+        for i in range(2, 12):
+            words[i * 3 + 1]['a'] += 4.
+        with self.assertRaisesRegex(sy.SyncedLyricsError, 'insufficient independent phrase evidence'):
+            sy.clock_offset(sy.parse_lrc(lrc), words)
+
+    def test_explained_span_stops_at_a_pause_after_its_clock_prefix(self):
+        ctx, words, song, text, lrc = supported_majority_fixture('pitch')
+        rows = sy.parse_lrc(lrc)
+        rows[0]['tokens'] += rows[5]['tokens']
+        text = '\n'.join(' '.join(r['tokens']) for r in rows)
+        lrc = '\n'.join(f"[{int(r['a'] // 60):02}:{r['a'] % 60:05.2f}] {' '.join(r['tokens'])}" for r in rows)
+        words = [w for w in words if not 11. <= w['a'] < 43.]
+        with self.assertRaisesRegex(lt.LyricsSourceError, 'line 6 at 47.00s: .*contradicts.*51.00s'):
+            self.correct((ctx, words, song, text, lrc))
+
+    def check_cli(self, data, refusal=False):
+        ctx, words, song, text, lrc = data
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pkg = synthetic_package(root, bursts=[(i * 10 + 1., i * 10 + 4.) for i in range(12)] + [(47., 49.)],
+                                    asr_words=['flim'] * 13, duration=120.)
+            target = json.loads((pkg / 'target.json').read_text())
+            target['lyrics'] = song['lyrics']
+            (pkg / 'target.json').write_text(json.dumps(target))
+            # Preserve the producer's grouped records, including a lexical pair
+            # split across two records. The consumer flattens those records.
+            (pkg / 'lyrics/mix.json').write_text(json.dumps({
+                'source': 'mix', 'lines': [{'words': words[i:i + 3]} for i in range(0, len(words), 3)]}))
+            verified = root / 'verified.txt'; verified.write_text(text)
+            timeline = root / 'lines.lrc'; timeline.write_text(lrc)
+            for mode in ['direct', 'cached']:
+                if mode == 'cached':
+                    (pkg / 'lyrics/source.txt').write_text(text)
+                    (pkg / 'lyrics/source.meta.json').write_text(json.dumps({
+                        'title': target['title'], 'artist': target['artist'], 'synced_lrc': lrc}))
+                command = [sys.executable, str(ROOT / 'studio/lyrics_text.py'), '--json', '--no-html', str(pkg)]
+                if mode == 'direct':
+                    command += ['--text', str(verified), '--synced', str(timeline)]
+                def snapshot():
+                    return {str(p.relative_to(pkg)): p.read_bytes() for p in pkg.rglob('*') if p.is_file()}
+                before = snapshot()
+                reports = []
+                for flags in [['--dry-run'], ['--dry-run'], [], ['--force']]:
+                    proc = subprocess.run(command + flags, capture_output=True, timeout=90)
+                    self.assertEqual(proc.returncode, 0, proc.stderr)  # JSON per-package verdict.
+                    report = json.loads(proc.stdout)
+                    if refusal:
+                        self.assertRegex(report['error'], r'line \d+ at \d+\.\d+s: .*contradicts.*51.60s')
+                    else:
+                        self.assertNotIn('error', report)
+                        self.assertNotIn('skipped', report)
+                        if not flags or flags == ['--force']:
+                            saved = json.loads((pkg / 'target.json').read_text())
+                            self.assertEqual([w['w'] for w in al.flat(saved['lyrics'])], text.split())
+                    if refusal or flags == ['--dry-run']:
+                        self.assertEqual(snapshot(), before)
+                    reports.append(proc.stdout)
+                self.assertEqual(reports[0], reports[1])
+
+    def test_gapped_short_line_cli_refuses_contradiction_and_accepts_supported_control(self):
+        self.check_cli(gapped_phrase_fixture(), refusal=True)
+        self.check_cli(gapped_phrase_fixture(shift=0., only_gap=True))
+
+    def test_compensated_repeat_ownership_in_both_formats_and_every_branch(self):
+        for combined in [False, True]:
+            for missing in [51., 61.]:
+                for offset, latency in [(o, d) for o in [6000, 10000, 25000] for d in [0., .6]]:
+                    for support in ['pitch', 'energy', 'quiet']:
+                        with self.subTest(combined=combined, missing=missing, offset=offset,
+                                          latency=latency, support=support):
+                            ctx, words, song, text, lrc = consecutive_repeat_fixture(combined, missing)
+                            lrc = f'[offset:{offset}]\n' + lrc
+                            words = [dict(w, a=w['a'] + latency, b=w['b'] + latency) for w in words]
+                            if support != 'pitch':
+                                lo, hi = int(missing * 100), int((missing + 2) * 100)
+                                ctx['voiced'][lo:hi] = False
+                                ctx['regions'] = al.regions(ctx['voiced'])
+                                ctx['onsets'] = ctx['onsets'][(ctx['onsets'] < missing) | (ctx['onsets'] >= missing + 2)]
+                                if support == 'quiet':
+                                    ctx['energy_db'][lo:hi] = -100.
+                            result = self.correct((ctx, words, song, text, lrc))
+                            self.assertTrue(result['passed'], result['reason'])
+                            self.assertAlmostEqual(result['synced_clock']['offset_s'], -offset / 1000 + latency)
+                            row = next(r for r in result['anchor_checks'] if abs(r['a'] - missing - latency) < .001)
+                            self.assertIn('explained_by_line', row['clock_evidence']['occurrences'][0])
+
+    def test_compensated_repeat_cli_replay_force_and_unexplained_contradictions(self):
+        for combined in [False, True]:
+            for shift in [0., -4., 4.]:
+                with self.subTest(combined=combined, shift=shift):
+                    ctx, words, song, text, lrc = consecutive_repeat_fixture(combined, None if shift else 51., shift)
+                    words = [dict(w, a=w['a'] + .6, b=w['b'] + .6) for w in words]
+                    self.check_cli((ctx, words, song, text, '[offset:10000]\n' + lrc), refusal=bool(shift))
+
+
 class MultipleTimestampRepeatTests(unittest.TestCase):
     def test_missing_either_repeat_passes_in_both_encodings_and_voice_branches(self):
         for combined in [False, True]:
@@ -308,7 +451,7 @@ class MajorityContradictionTests(unittest.TestCase):
     def test_repeated_phrase_occurrences_are_explicitly_ambiguous(self):
         _, words, _, _, lrc = majority_fixture(shift=-4.)
         rows = sy.parse_lrc(lrc)
-        repeated_asr = words + [dict(w, a=w['a'] + 60.) for w in words[15:18]]
+        repeated_asr = words + [dict(w, a=w['a'] + 70., b=w['b'] + 70.) for w in words[15:18]]
         self.assertFalse(sy.clock_offset(rows, repeated_asr)['line_evidence'][5]['unambiguous'])
         rows[-1]['tokens'] = rows[5]['tokens']
         matches = sy.clock_offset(rows, words)['line_evidence']
@@ -592,7 +735,7 @@ class ClockTests(unittest.TestCase):
 
     def test_matching_clock_and_constant_offset(self):
         self.assertEqual(sy.clock_offset(self.rows, self.words)['offset_s'], 0.)
-        shifted = [{**w, 'a': w['a'] + 4} for w in self.words]
+        shifted = [{**w, 'a': w['a'] + 4, 'b': w['b'] + 4} for w in self.words]
         result = sy.clock_offset(self.rows, shifted)
         self.assertEqual(result['offset_s'], 4.)
         self.assertEqual(result['status'], 'offset compensated')
@@ -617,7 +760,8 @@ class ClockTests(unittest.TestCase):
 
 
     def test_distributed_disagreement_refuses_different_edit(self):
-        shifted = [{**w, 'a': w['a'] + (6 if i >= 6 else 0)} for i, w in enumerate(self.words)]
+        shifted = [dict(w, a=w['a'] + (6 if i >= 6 else 0), b=w['b'] + (6 if i >= 6 else 0))
+                   for i, w in enumerate(self.words)]
         with self.assertRaisesRegex(sy.SyncedLyricsError, 'different edit'):
             sy.clock_offset(self.rows, shifted)
 
@@ -629,7 +773,7 @@ class ClockTests(unittest.TestCase):
             sy.clock_offset(rows, words)
 
     def test_ordinary_recognizer_delay_is_not_a_clock_offset(self):
-        words = [{**w, 'a': w['a'] + .4} for w in self.words]
+        words = [{**w, 'a': w['a'] + .4, 'b': w['b'] + .4} for w in self.words]
         self.assertEqual(sy.clock_offset(self.rows, words)['offset_s'], 0.)
 
 
@@ -933,7 +1077,8 @@ class UnpitchedTests(unittest.TestCase):
 
     def test_c_changed_edit_refuses_even_with_loud_unpitched_stem(self):
         self.ctx['energy_db'][110:280] = -20.
-        changed = [dict(w, a=w['a'] + (6 if i >= 6 else 0)) for i, w in enumerate(self.words)]
+        changed = [dict(w, a=w['a'] + (6 if i >= 6 else 0), b=w['b'] + (6 if i >= 6 else 0))
+                   for i, w in enumerate(self.words)]
         with self.assertRaisesRegex(lt.LyricsSourceError, 'synced line .*different edit'):
             self.correct(words=changed)
 
