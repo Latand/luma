@@ -239,9 +239,10 @@ for (const [width, height, take, wide] of [[1440, 900, false, false], [900, 1000
   const r = await o.p.evaluate(async () => { const T = window.Luma.test, e = Math.min(window.LUMA_SONG.duration - .5, 32), out = {bad: [], words: [], moves: [], n: 0, share: null, least: 1}; T.fakeSing({a: 2, b: e});
     const hit = (a, b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1; let spot = null;
     for (let k = 0; ; k++) { const t = T.fakeTick(k / 60);
-      if (k % 3 === 0) { const s = T.tract(), ov = s.overlay, pl = T.plot(), share = (ov.y1 - ov.y0) / (pl.bottom - pl.top); out.n++; if (out.share === null) out.share = share; out.least = Math.min(out.least, share / out.share);
+      // (the word boxes come from a frame drawn now, which may move the overlay: its box is read after it)
+      if (k % 3 === 0) { const words = T.wordBoxes(), s = T.tract(), ov = s.overlay, pl = T.plot(), share = (ov.y1 - ov.y0) / (pl.bottom - pl.top); out.n++; if (out.share === null) out.share = share; out.least = Math.min(out.least, share / out.share);
         for (const n of T.noteRects()) if (n.b > t - 2 && n.a < t && hit(n, ov)) out.bad.push(+t.toFixed(2) + ':' + n.id);
-        for (const w of T.wordBoxes()) if (hit(w, ov)) out.words.push(+t.toFixed(2) + ':' + w.w);
+        for (const w of words) if (hit(w, ov)) out.words.push(+t.toFixed(2) + ':' + w.w);
         if (s.spot !== spot) { if (spot !== null) out.moves.push({t: +t.toFixed(2), spot: s.spot}); spot = s.spot; } }
       if (k % 6 === 0) await new Promise(r => setTimeout(r)); if (t >= e - .05 || T.state().mode !== 'singing') break; }
     T.fakeFinish(); await new Promise(r => requestAnimationFrame(r)); const s = T.tract(), pl = T.plot(); out.after = (s.overlay.y1 - s.overlay.y0) / (pl.bottom - pl.top); T.closeTrace(); return out; });
