@@ -11,6 +11,8 @@ studio/upgrade_audio.py puts new stems into existing trainers with reassets(), w
 from __future__ import annotations
 import argparse, base64, html, json, os, sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from phonemes import phones_line  # noqa: E402  (studio/phonemes.py)
 
 ROOT = Path(__file__).resolve().parent.parent
 APP = ROOT / 'app'
@@ -22,14 +24,17 @@ def parts():
     head = (APP / 'head.html').read_text(encoding='utf-8'); workers = (APP / 'workers.html').read_text(encoding='utf-8')
     # The activity logger runs first, so the app can hand it events; it stays silent outside Luma Studio. The latency
     # estimator, the burn, the camera recorder (no DOM of their own) and the headset's panel (xr.js) come before the app
-    # that calls them; the render mode of a camera video comes after it and stays idle on every other page.
-    script = ''.join('<script>' + (APP / f).read_text(encoding='utf-8') + '</script>' for f in ('activity.js', 'latency.js', 'burn.js', 'camera.js', 'xr.js', 'app.js', 'render.js')) + '</body></html>'
+    # that calls them; the render mode of a camera video comes after it and stays idle on every other page. The head of the
+    # «Голова» panel (its baked data, then its renderer, docs/design/VOCAL_TRACT_3D.md) comes before the app too.
+    script = ''.join('<script>' + (APP / f).read_text(encoding='utf-8') + '</script>' for f in ('activity.js', 'latency.js', 'burn.js', 'camera.js', 'xr.js', 'tract3d.data.js', 'tract3d.js', 'app.js', 'render.js')) + '</body></html>'
     return head, workers, script
 
 def wrap(song: dict, data_line: str) -> str:
+    """The one path every trainer is written through (a build, --rebuild, reassets, Studio's import): the app around the
+    song's data line, which is kept as given, and the sounds of its lyric words (studio/phonemes.py) on the line after it."""
     head, workers, script = parts()
     head = head.replace('{{TITLE}}', html.escape(str(song.get('title', 'Luma')))).replace('{{ARTIST}}', html.escape(str(song.get('artist', '') or '')))
-    return head + workers + data_line + '\n' + script
+    return head + workers + data_line + '\n' + phones_line(song) + '\n' + script
 
 def assets(package: Path) -> str:
     b64 = lambda name: base64.b64encode((package / name).read_bytes()).decode()

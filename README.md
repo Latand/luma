@@ -11,6 +11,21 @@ of your voice, no server after the file is built.
 - **Melody on a piano roll.** A trainer opens on the notes view — named bars a beginner can read — with the contour view a
   click away. Named C lines on a lit stage. Words sit right above the melody at the moment they are sung, and the current
   and next line ride in a band of their own; on a phone that band is a full row, so nothing ever covers the readout.
+- **«Голова»: how to sing what is due now.** Beside the roll stands a head cut along its midline, from the 3D head of the
+  Chimera vocal synth: the tongue, the jaw, the lips and the soft palate take the shape of the sound the target sings now
+  (the lyric word's sounds, timed on the target's notes), and streaks of air run from the windpipe through the mouth or,
+  for м, н, нг, through the nose. Choose «Чоловік» or «Жінка» in the panel's header (the head draws nothing until you
+  do; the choice is remembered); both heads have hair. It shows the target only, never your voice. Under the head, the
+  word and its sounds, the one due now in brackets; «приблизно» when the sounds are a guess (a word the build could not
+  read, or one whose timing is uncertain). From 1100 px it is a column of 300–420 px right of the roll; from 720 px a
+  narrower one; where the column is short (after a take, a low window) it shows the mouth to the larynx at its whole
+  height, the neck behind it as far as the panel is wide, with its words beside it. On a phone it stands on the sung
+  part of the roll, bottom left or, while what was just sung lies low, top left (a little smaller while you sing), and
+  draws in toward that corner where notes sung in the last 2 s lie at both ends, so they and their marks stay in sight,
+  playing or paused; it shows the mouth to the larynx, words stepping around it; its corner mark or a tap while nothing plays enlarges it (its ✕, a
+  second tap or Esc returns it). Drag it to turn the head up to 60° (a double click turns it back).
+  «Голова» in the stage rail hides it. Without WebGL2, or where WebGL runs on the processor alone (no graphics
+  processor), the cut face is drawn flat. Everything is baked into the trainer: no network, nothing extra to install ([docs/design/VOCAL_TRACT_3D.md](docs/design/VOCAL_TRACT_3D.md)).
 - **Live match score.** Hits ÷ frames with a target, counted once per 20 ms. Silence under a note is a miss; frames with no
   target are excluded; draft notes count and are labelled as draft. In a song with lyrics, notes that come nowhere near
   a word (stem bleed in a break, wordless singing) are drawn dimmed and never scored: «Без слів — не рахується». Hit notes turn mint with ✓, misses hatched red with ×,
@@ -203,6 +218,20 @@ and dust the take implies, the burn at each loss, the count-in of a rewind on it
 a restart, Range and the player, the layout at 390, 900 and 1440 px, and no process left behind. `tests/video_test.py`
 checks the alignment through Opus, the eviction order, the render deadline, the ffmpeg graph and that the thumbnail
 falls inside a sung segment, without a browser.
+`tract3d.mjs` checks «Голова»: the column at 1440 px and 900 px (the whole head; before a choice the prompt with the two
+buttons under it), a short column (1440 × 900 and 900 × 1000 after a take, 1366 × 650 idle) drawing the lips to the
+pharynx 90 px wide at least beside its words, its picture filling the panel up to them, and the overlay at 390 px clear
+of the words, the playhead and the next notes, and, through a sung pass of the demo, of every note sung in the last 2 s,
+moving seldom, and paused after the take, the playhead moved through it, of those notes too, standing still, its enlarge mark there and while listening on no lip, nostril or breath at any size it draws in to, its one-line caption in the middle of its band (390 and 600 px, both heads); the overlay before a choice (the buttons and the prompt in its middle, out of a toast's way), its enlarge mark (from the keyboard too) and
+enlarged (its ✕, the stage covered from edge to edge, its caption aside under a toast), the chosen head marked as the roll's chosen view, the body's
+choice across a reload, lesson 1's «ма» (after the rest an /m/ long enough to be seen, through the nose, then the held
+/a/ on the note, its air leaving the mouth as densely at its end as at its start), the demo's «ta» (closure with no air in front of the face, then
+voiced), a made-up word marked «приблизно» with every sound whole at three widths (on a phone «приблизно» alone on the
+first line, the sounds on the second; in the short column the sounds on one line beside the picture), `--rebuild` keeping the song data
+and writing the word sounds, listening from `file://` without a network request, the frame budget at 390 px and 1440 px
+under 1× and 4× CPU throttle (the flat cut face, which a renderer without a graphics processor gets; the 3D head forced
+onto it for its own work, and through its own multisampled framebuffer the same picture at each redraw), «Голова» off leaving today's roll, the flat cut face without WebGL2, no head drawn in VR or in a hidden tab, and
+still air with reduced motion. `tests/phonemes_test.py` checks the build's word sounds (CMUdict and the Ukrainian rules).
 `xr.mjs` enters VR on Meta's WebXR emulator (the `iwer` dev dependency) as a Quest 3: the panel 1.5 m ahead with the
 chart at its size, «Слухати», «Вокал» and a seek on the progress bar by a controller's trigger, «Сюди» by a pinch,
 «Вийти», a refused session (the page stays out of VR, and its toast is true to the microphone) and a hidden one
@@ -217,11 +246,15 @@ Chromium build.
 app/       head.html (styles + markup, {{TITLE}} / {{ARTIST}} placeholders), workers.html (AudioWorklet capture + YIN worker + the worker that builds and paints the dust of past takes), app.js,
            activity.js (activity log, shared with Studio), latency.js (microphone offset estimate from attempts),
            burn.js (the burn of a lost life, one canvas draw function), xr.js (the VR panel in a headset's browser), camera.js (the camera recorder of a sitting and its
-           upload), render.js (the game layer of a camera video: overlays, WebCodecs encoding)
-studio/    prepare_song.py (pipeline), build_html.py (package → HTML, --rebuild), studio_server.py + studio.html, covers.py, difficulty.py, luma-studio.sh,
+           upload), render.js (the game layer of a camera video: overlays, WebCodecs encoding), tract3d.js («Голова»: the
+           cut-away head on WebGL2, its rig, the cut face's painter, the timeline of sounds, the air) and tract3d.data.js
+           (generated by tools/gen_tract3d.ts from a pinned Chimera commit: never edit it)
+studio/    prepare_song.py (pipeline), build_html.py (package → HTML, --rebuild; writes each song's word sounds from
+           phonemes.py, with CMUdict and its licence in studio/data/), studio_server.py + studio.html, covers.py, difficulty.py, luma-studio.sh,
            video.py (camera videos: store, alignment, render, compose, budget),
            activity_report.py (digest of the activity log), lan_proxy.py (TLS on the LAN for a headset)
 examples/  make_demo.py (synthetic demo song)
+tools/     gen_tract3d.ts (bakes app/tract3d.data.js: `bun tools/gen_tract3d.ts <Chimera checkout>` after `bun run wasm` there)
 tests/e2e/ Playwright suites
 docs/      TARGET_MAP_SCHEMA.md, PIPELINE.md, SCORING.md, HISTORY_SCHEMA.md, ACTIVITY_LOG.md, PROGRESS_DESIGN.md, LESSONS.md, design/, screenshots
 ```

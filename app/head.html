@@ -140,6 +140,84 @@ button[aria-pressed=true]{color:var(--mint);border-color:#a1eed840;background:#a
 .countdown{position:absolute;inset:0;display:grid;place-content:center;pointer-events:none;text-align:center;background:radial-gradient(ellipse at center,#0f1723e0,#0b0f1700 64%);z-index:4}
 /* an overlay over the roll for the two seconds of the count-in: the flow rule above would otherwise put it under the rail */
 .stage>.countdown{position:absolute}
+/* ── «Голова»: the head cut along its midline (docs/design/VOCAL_TRACT_3D.md §5). app.js places it: a column right of the
+   roll from 720 px, an overlay on the sung part of the roll below. Its canvases sit inside its own box, so the render mode
+   of a camera video, which hides every child of the stage that is not a canvas, hides it too. ── */
+.stage>.tract{position:absolute;z-index:3;display:flex;flex-direction:column;background:#0c1018;border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden}
+.stage>.tract[hidden]{display:none}
+.tract-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 8px 0 12px;flex:none}
+.tract-title{font-size:12px;font-weight:600;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.tract-body button{padding:0 10px}
+.tract-view{position:relative;flex:1;min-height:0;touch-action:none;cursor:grab}
+.tract-view:active{cursor:grabbing}
+.stage .tract canvas{position:absolute;inset:0;width:100%;height:100%}
+.stage .tract canvas[hidden]{display:none}
+.tract-pick{position:absolute;inset:0;margin:0;display:grid;place-content:center;padding:14px;text-align:center;font-size:13px;line-height:1.45;color:var(--ink-2)}
+.tract-pick[hidden]{display:none}
+.tract-sound{margin:0;padding:0 12px 8px;flex:none;min-height:calc(3em + 8px);font:12px/1.5 var(--mono);color:var(--ink-2);white-space:pre-line;overflow-wrap:anywhere}
+.tract[data-picked="0"] .tract-sound{display:none}
+.tract-close{font-size:20px;line-height:1}
+.tract-close[hidden]{display:none}
+.tract[data-mode=overlay]{background:linear-gradient(#0c1018c4,#0c1018ee);border-radius:var(--r-md)}
+.tract[data-mode=overlay] .tract-title{display:none}
+.tract[data-mode=overlay][data-picked="1"]:not([data-big="1"]) .tract-head{display:none}
+.tract[data-mode=overlay] .tract-head{padding:5px 5px 0}
+.tract[data-mode=overlay]:not([data-big="1"]) .tract-body{flex-direction:column;width:100%}
+.tract[data-mode=overlay] .tract-sound{padding:0 6px 4px;font-size:11px}
+/* the small overlay's caption keeps a band two lines high under the picture (the picture does not change size between
+   words), and a single line stands in its middle: as far from the picture as from the overlay's edge (the band's gap
+   at the bottom is a margin, so a third line is clipped whole) */
+.tract[data-mode=overlay][data-picked="1"]:not([data-big="1"]) .tract-sound{white-space:pre-line;line-height:1.35;height:calc(2.7em + 2px);min-height:0;padding:2px 6px 0;margin-bottom:2px;display:flex;flex-direction:column;justify-content:safe center;overflow:hidden;overflow-wrap:anywhere}
+.tract[data-mode=overlay][data-big="1"]{background:#0c1018;border-width:0 0 1px;border-radius:0}
+.tract[data-mode=overlay][data-big="1"] .tract-head{padding:13px 13px 0}
+.tract[data-mode=overlay][data-big="1"] .tract-sound{padding:0 14px 8px}
+.tract[data-mode=overlay] .tract-pick{padding:4px;font-size:12px;line-height:1.3}
+.tract[data-mode=overlay]:not([data-big="1"]) .tract-pick-more{display:none}
+.tract[data-mode=overlay][data-picked="0"]{background:#0c1018}
+/* before a choice the small overlay holds the two buttons and the prompt as one block, centred top to bottom */
+.tract[data-mode=overlay][data-picked="0"]:not([data-big="1"]){justify-content:center}
+.tract[data-mode=overlay][data-picked="0"]:not([data-big="1"]) .tract-view{flex:none}
+.tract[data-mode=overlay][data-picked="0"]:not([data-big="1"]) .tract-pick{position:static}
+.tract-tag{position:absolute;right:4px;bottom:4px;margin:0;padding:0 5px;border-radius:var(--r-xs);background:#0c1018d9;font-size:11px;line-height:18px;color:var(--ink-1);pointer-events:none;z-index:1}
+.tract-tag[hidden]{display:none}
+/* the small overlay's enlarge mark, in its top right corner (in front of the forehead, where the picture is empty, above
+   the nose's tip): a tap there, or anywhere on the overlay while idle, enlarges it, and the enlarged head's header holds
+   «Чоловік · Жінка» */
+.tract-grow{position:absolute;top:2px;right:2px;width:24px;height:24px;display:grid;place-items:center;border:1px solid #ffffff1c;border-radius:var(--r-xs);background:#0c1018e6;color:var(--ink-1);z-index:1}
+.tract-grow svg{width:13px;height:13px}
+.tract-grow[hidden]{display:none}
+/* while singing the small overlay holds the picture and the sounds alone: the body was chosen before the take, and the
+   enlarged view opens only while idle */
+.tract[data-sing="1"] :is(.tract-tag,.tract-grow){display:none}
+/* drawn in toward a corner, clear of the notes just sung, the overlay is too small for the tag beside the picture, and the
+   enlarge mark leaves the forehead (where it would lie on the nose) for the room in front of the neck, under the lips and
+   the breath (tract3d.js placeMark()); where the picture is too short for it there, it hangs into the caption's band and
+   the band's line stands under it */
+.tract[data-small="1"] .tract-tag{display:none}
+.tract[data-small="1"] .tract-grow{top:var(--tract-grow-top,4px)}
+.tract[data-mode=overlay][data-small="1"][data-picked="1"]:not([data-big="1"]) .tract-sound{padding-top:max(2px,calc(2 * var(--tract-hang,0px) - 1.35em))}
+/* a short column (after a take, a low window), where the whole head would be a thumbnail: the mouth to the larynx takes
+   the panel's whole height on the right, the title, the choice and the caption stand in a column on its left */
+.tract[data-mode=column][data-shape=wide]{display:grid;grid-template-columns:minmax(0,1fr) var(--tract-pic,60%);grid-template-rows:auto minmax(0,1fr)}
+.tract[data-shape=wide] .tract-head{grid-area:1/1;flex-direction:column;align-items:flex-start;gap:8px;padding:9px 0 0 12px;min-width:0}
+.tract[data-shape=wide] .tract-body{flex-direction:column}
+.tract[data-shape=wide] .tract-view{grid-area:1/2/3/3}
+.tract[data-shape=wide] .tract-sound{grid-area:2/1;align-self:end;padding:0 4px 8px 12px;min-height:0}
+/* before a choice the column asks once: the prompt, and under it the two buttons as the panel's one action */
+.tract[data-mode=column][data-picked="0"]{justify-content:center}
+.tract[data-mode=column][data-picked="0"] .tract-view{flex:none;order:1;cursor:default}
+.tract[data-mode=column][data-picked="0"] .tract-pick{position:static;padding:0 14px}
+.tract[data-mode=column][data-picked="0"] .tract-head{order:2;justify-content:center;padding:14px 12px 0}
+.tract[data-mode=column][data-picked="0"] .tract-title{position:absolute;top:9px;left:12px}
+.tract[data-mode=column][data-picked="0"] .tract-body button{min-height:38px;padding:0 18px;font-size:13px;color:var(--ink-1)}
+/* a toast on a phone sits over the bottom of the roll, where the small overlay stands (unless it stands at the top): its
+   words step aside meanwhile */
+body:has(#toast.show) .tract[data-mode=overlay]:not([data-big="1"]):not([data-spot=high]) :is(.tract-pick,.tract-tag,.tract-sound){visibility:hidden}
+/* ...and before a choice the small overlay steps aside until the toast goes: the toast covers its lowest 50 to 65 px,
+   and the two buttons do not fit above that */
+body:has(#toast.show) .stage>.tract[data-mode=overlay][data-picked="0"]:not([data-big="1"]):not([data-spot=high]){display:none}
+/* enlarged, its caption lies at the plot's bottom, where the toast stands: it steps aside too */
+body:has(#toast.show) .tract[data-big="1"] .tract-sound{visibility:hidden}
 .countdown b{font:300 72px/1.15 var(--mono);color:var(--mint);letter-spacing:-.03em}
 .countdown span{font-size:13px;color:#c8d8dc}
 
@@ -387,6 +465,10 @@ html[data-render] #chartWrap{position:fixed;inset:0;width:1920px;height:1080px;m
 }
 
 /* ── the narrowest phones: the rail keeps one row by giving up the scale picker, not by clipping ── */
+/* the rail keeps the rows it had before «Голова» joined «Слова»: below 1100 px its items sit closer, and on a phone the
+   scale's select is a little narrower */
+@media(min-width:721px) and (max-width:1099px){.stage-rail{column-gap:10px}.legend{column-gap:7px}.stage-tools{column-gap:6px}.stage-tools .ghost{padding:0 8px}}
+@media(max-width:720px){.stage-rail .stage-tools{gap:3px}.stage-tools .ghost{padding:0 5px}.stage-tools .segmented button{padding:0 7px}.scale-control select{max-width:94px;padding:0 4px}}
 @media(max-width:380px){.scale-control{display:none}.stage-tools .ghost{padding:0 8px}}
 
 /* ── phone held sideways: little height, so the readout loses its second rank ── */
@@ -421,7 +503,7 @@ html[data-render] #chartWrap{position:fixed;inset:0;width:1920px;height:1080px;m
 body.in-xr #xrView{display:block;position:fixed;inset:0;width:100vw;height:100vh;z-index:60;background:#000}
 </style></head><body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
-<symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></symbol><symbol id="i-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></symbol><symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14" stroke-width="3"/></symbol><symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol><symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol><symbol id="i-loop" viewBox="0 0 24 24"><path d="m16 3 4 4-4 4M4 10V7h16M8 21l-4-4 4-4m12 1v3H4"/></symbol><symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h7m4 0h5M4 17h3m4 0h9"/><circle cx="13" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol><symbol id="i-left" viewBox="0 0 24 24"><path d="m14 6-6 6 6 6"/></symbol><symbol id="i-right" viewBox="0 0 24 24"><path d="m10 6 6 6-6 6"/></symbol><symbol id="i-import" viewBox="0 0 24 24"><path d="M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5"/></symbol><symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v13m-5-5 5 5 5-5M4 16v5h16v-5"/></symbol><symbol id="i-headphones" viewBox="0 0 24 24"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="13" width="4" height="8" rx="2"/><rect x="17" y="13" width="4" height="8" rx="2"/></symbol><symbol id="i-edit" viewBox="0 0 24 24"><path d="m4 16-1 5 5-1L21 7l-4-4L4 16Zm10-10 4 4"/></symbol><symbol id="i-vr" viewBox="0 0 24 24"><path d="M4 7.5h16a1.5 1.5 0 0 1 1.5 1.5v6.5a2 2 0 0 1-2 2h-4.3l-1.9-2.6h-2.6l-1.9 2.6H4.5a2 2 0 0 1-2-2V9A1.5 1.5 0 0 1 4 7.5Z"/><circle cx="8" cy="12" r="1.6"/><circle cx="16" cy="12" r="1.6"/></symbol><symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v.1"/></symbol><symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol><symbol id="i-skipl" viewBox="0 0 24 24"><path d="M17 6 9 12l8 6zM6 6v12"/></symbol><symbol id="i-skipr" viewBox="0 0 24 24"><path d="M7 6l8 6-8 6zM18 6v12"/></symbol><symbol id="i-camera" viewBox="0 0 24 24"><rect x="3" y="7" width="13" height="10" rx="2"/><path d="m16 11 5-3v8l-5-3"/></symbol><symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20.5s-7.6-4.7-9.4-9.4C1.4 7.9 3.5 4.3 7.1 4.3c2.1 0 3.6 1.2 4.9 3 1.3-1.8 2.8-3 4.9-3 3.6 0 5.7 3.6 4.5 6.8-1.8 4.7-9.4 9.4-9.4 9.4z"/></symbol><symbol id="i-mix" viewBox="0 0 24 24"><path d="M6 4v16M12 4v16M18 4v16"/><circle cx="6" cy="14" r="2" fill="currentColor"/><circle cx="12" cy="8" r="2" fill="currentColor"/><circle cx="18" cy="16" r="2" fill="currentColor"/></symbol>
+<symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></symbol><symbol id="i-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></symbol><symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14" stroke-width="3"/></symbol><symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol><symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol><symbol id="i-expand" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7"/></symbol><symbol id="i-loop" viewBox="0 0 24 24"><path d="m16 3 4 4-4 4M4 10V7h16M8 21l-4-4 4-4m12 1v3H4"/></symbol><symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h7m4 0h5M4 17h3m4 0h9"/><circle cx="13" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol><symbol id="i-left" viewBox="0 0 24 24"><path d="m14 6-6 6 6 6"/></symbol><symbol id="i-right" viewBox="0 0 24 24"><path d="m10 6 6 6-6 6"/></symbol><symbol id="i-import" viewBox="0 0 24 24"><path d="M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5"/></symbol><symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v13m-5-5 5 5 5-5M4 16v5h16v-5"/></symbol><symbol id="i-headphones" viewBox="0 0 24 24"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="13" width="4" height="8" rx="2"/><rect x="17" y="13" width="4" height="8" rx="2"/></symbol><symbol id="i-edit" viewBox="0 0 24 24"><path d="m4 16-1 5 5-1L21 7l-4-4L4 16Zm10-10 4 4"/></symbol><symbol id="i-vr" viewBox="0 0 24 24"><path d="M4 7.5h16a1.5 1.5 0 0 1 1.5 1.5v6.5a2 2 0 0 1-2 2h-4.3l-1.9-2.6h-2.6l-1.9 2.6H4.5a2 2 0 0 1-2-2V9A1.5 1.5 0 0 1 4 7.5Z"/><circle cx="8" cy="12" r="1.6"/><circle cx="16" cy="12" r="1.6"/></symbol><symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v.1"/></symbol><symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol><symbol id="i-skipl" viewBox="0 0 24 24"><path d="M17 6 9 12l8 6zM6 6v12"/></symbol><symbol id="i-skipr" viewBox="0 0 24 24"><path d="M7 6l8 6-8 6zM18 6v12"/></symbol><symbol id="i-camera" viewBox="0 0 24 24"><rect x="3" y="7" width="13" height="10" rx="2"/><path d="m16 11 5-3v8l-5-3"/></symbol><symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20.5s-7.6-4.7-9.4-9.4C1.4 7.9 3.5 4.3 7.1 4.3c2.1 0 3.6 1.2 4.9 3 1.3-1.8 2.8-3 4.9-3 3.6 0 5.7 3.6 4.5 6.8-1.8 4.7-9.4 9.4-9.4 9.4z"/></symbol><symbol id="i-mix" viewBox="0 0 24 24"><path d="M6 4v16M12 4v16M18 4v16"/><circle cx="6" cy="14" r="2" fill="currentColor"/><circle cx="12" cy="8" r="2" fill="currentColor"/><circle cx="18" cy="16" r="2" fill="currentColor"/></symbol>
 </defs></svg>
 <div class="app">
 <header class="bar"><div class="brand"><svg viewBox="0 0 34 34" fill="none" aria-hidden="true"><path d="M3 22c5 0 4-14 8-14s3 19 7 19 3-13 7-13 3 5 5 5" stroke="currentColor" stroke-width="1.8"/></svg>luma</div>
@@ -435,6 +517,7 @@ body.in-xr #xrView{display:block;position:fixed;inset:0;width:100vw;height:100vh
 <button class="icon-btn" id="settingsBtn" title="Налаштування" aria-label="Налаштування"><svg><use href="#i-settings"/></svg></button></header>
 <div class="banner" id="errorBanner" hidden role="alert"><span id="errorText"></span><button id="errorSettings">Налаштувати мікрофон</button><a id="studioLink" href="http://127.0.0.1:8792/" target="_blank" rel="noopener" hidden>Відкрити Studio</a><button id="dismissError" aria-label="Закрити помилку">×</button></div>
 <main class="stage" id="chartWrap"><canvas id="chart" aria-label="Мелодія-ціль, слова пісні і твій голос. Ліворуч — минуле, праворуч — наступні ноти." role="img"></canvas>
+<div class="tract" id="tract" hidden><div class="tract-head"><span class="tract-title">Як співати</span><div class="segmented tract-body" role="group" aria-label="Голова: чоловік чи жінка"><button type="button" id="tractMale" data-body="male" aria-pressed="false">Чоловік</button><button type="button" id="tractFemale" data-body="female" aria-pressed="false">Жінка</button></div><button type="button" class="icon-btn tract-close" id="tractClose" aria-label="Зменшити голову" title="Зменшити (Esc)" hidden>×</button></div><div class="tract-view" id="tractView" role="img" aria-label="Голова в розрізі збоку: як мають стояти язик, щелепа, губи й м’яке піднебіння і куди йде повітря для поточного звуку"><canvas class="tract-gl" aria-hidden="true"></canvas><canvas class="tract-2d" aria-hidden="true"></canvas><p class="tract-pick" id="tractPick"><span>Обери голову<span class="tract-pick-more"> — покажу, як співати кожен звук</span></span></p><button type="button" class="tract-grow" id="tractGrow" hidden title="Збільшити голову: там же можна вибрати чоловіка чи жінку" aria-label="Збільшити голову: там же можна вибрати чоловіка чи жінку"><svg><use href="#i-expand"/></svg></button><p class="tract-tag" id="tractTag" hidden></p></div><p class="tract-sound" id="tractSound"></p></div>
 <div class="stage-head" id="stageHead">
 <div class="readout"><div class="big-note" id="liveNote">—</div>
 <div class="voice-meta"><div class="kicker">Твій голос</div><div id="liveDesc">Час заспівати</div><div class="freq" id="liveFreq">Мікрофон вимкнено</div></div>
@@ -443,7 +526,7 @@ body.in-xr #xrView{display:block;position:fixed;inset:0;width:100vw;height:100vh
 <div class="score"><div class="lbl" id="scoreLabel">Збіг із мелодією</div><div class="pct" id="matchPct">—</div><div class="lives" id="lives" role="img" aria-label="Життя" hidden></div><div class="detail" id="matchDetail">Заспівай фрагмент — рахую по намальованих нотах</div><div class="meter" aria-hidden="true"><span id="level"></span></div></div>
 <p class="invite" id="invite" hidden><b>Натисни «Слухати»</b>, щоб почути мелодію, потім «Співати» — твій голос ляже поверх неї, а влучені ноти засвітяться. Після запису спробу можна переглянути й повторити складне місце.</p></div>
 <div class="lyric-band" id="lyricBand"><div class="lyric-line now" id="lyricNow" aria-live="off"></div><div class="lyric-line next" id="lyricNext" aria-hidden="true"></div></div>
-<div class="stage-rail" id="stageRail"><div class="legend"><span><i class="target"></i>Мелодія</span><span><i class="draft"></i>Непевна мелодія</span><span><i></i>Ти</span><span><i class="hit"></i><span class="glyph">✓</span>влучив</span><span><i class="miss"></i><span class="glyph x">×</span>промах</span><span><i class="dust"></i>твої спроби</span></div><div class="stage-tools"><label class="scale-control"><span>Масштаб</span> <select id="scaleSelect" aria-label="Масштаб висоти нот"><option value="1">Фрагмент</option><option value="2">Детальніше</option><option value="0.5">Ширше</option></select></label><button class="ghost" id="lyricsBtn" aria-pressed="true" title="Показувати слова пісні">Слова</button><div class="segmented" aria-label="Вигляд цілі"><button data-view="contour" class="active" aria-pressed="true" title="Плавний рух висоти голосу">Контур</button><button data-view="notes" aria-pressed="false" title="Окремі ноти та позначки влучань">Ноти</button></div><button class="ghost" id="editBtn" title="Змінити ноту, межі або виключити її">✎ Ціль</button></div></div>
+<div class="stage-rail" id="stageRail"><div class="legend"><span><i class="target"></i>Мелодія</span><span><i class="draft"></i>Непевна мелодія</span><span><i></i>Ти</span><span><i class="hit"></i><span class="glyph">✓</span>влучив</span><span><i class="miss"></i><span class="glyph x">×</span>промах</span><span><i class="dust"></i>твої спроби</span></div><div class="stage-tools"><label class="scale-control"><span>Масштаб</span> <select id="scaleSelect" aria-label="Масштаб висоти нот"><option value="1">Фрагмент</option><option value="2">Детальніше</option><option value="0.5">Ширше</option></select></label><button class="ghost" id="lyricsBtn" aria-pressed="true" title="Показувати слова пісні">Слова</button><button class="ghost" id="tractBtn" aria-pressed="true" title="Показувати голову в розрізі: як співати поточний звук">Голова</button><div class="segmented" aria-label="Вигляд цілі"><button data-view="contour" class="active" aria-pressed="true" title="Плавний рух висоти голосу">Контур</button><button data-view="notes" aria-pressed="false" title="Окремі ноти та позначки влучань">Ноти</button></div><button class="ghost" id="editBtn" title="Змінити ноту, межі або виключити її">✎ Ціль</button></div></div>
 <div class="countdown" id="countdown" hidden><p class="lives-notice" id="livesNotice" hidden><strong id="livesFrom">Ще раз</strong><small>Забагато промахів поспіль · життя відновлено</small></p><b id="countNumber">2</b><span>Приготуйся. Вдихни спокійно.</span></div></main>
 <div class="banner" id="latencyHint" role="status" hidden><span id="latencyHintText"></span><button id="latencyHintCheck">Перевірити</button><button id="latencyHintLater">Не зараз</button></div>
 <div class="transport"><button class="primary" id="singBtn"><svg><use href="#i-mic"/></svg><span id="singLabel">Співати</span></button><button class="secondary" id="newTakeBtn" hidden>Нова спроба</button><button class="secondary" id="listenBtn" aria-label="Слухати пісню" title="Слухати / пауза (пробіл)"><svg><use id="listenIcon" href="#i-play"/></svg><span id="listenLabel">Слухати</span></button><button class="icon-btn" id="stopBtn" disabled aria-label="Зупинити" title="Зупинити (Esc)"><svg><use href="#i-stop"/></svg></button><span class="divider" aria-hidden="true"></span><span class="time"><span id="timeNow">00:00</span> <small>/ <span id="timeEnd">04:49</span></small></span>
