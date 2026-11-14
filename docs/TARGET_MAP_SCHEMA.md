@@ -7,7 +7,9 @@ A trainer is one HTML file. All song data lives on a single line:
 ```
 
 `studio/build_html.py` writes that line from a **package directory** (`target.json` + four MP3 files) and wraps it with the
-app parts. `--rebuild` re-wraps an existing trainer with newer app code and keeps its data line byte-for-byte.
+app parts. `--rebuild` re-wraps an existing trainer with newer app code and keeps its data line byte-for-byte. Every wrap
+(a build, `--rebuild`, `reassets` and Studio's import) writes one more line right after it, derived from the lyrics, which
+the head of the «Голова» panel reads (see [`LUMA_PHONES`](#luma_phones)).
 
 ## `LUMA_SONG` (schema `luma.song.v1`)
 
@@ -50,6 +52,17 @@ melody at their own moment; the current line is shown at the top of the stage.
 ## `LUMA_ASSETS`
 `{"1": {backing, foreground}, "0.8": {backing, foreground}}` — base64 MP3 (22.05 kHz, 128 kb/s). The 0.8× pair is
 time-stretched with FFmpeg `atempo` so pitch is preserved; both pairs are padded/trimmed to exactly `duration / speed`.
+
+## `LUMA_PHONES`
+```html
+<script>window.LUMA_PHONES={"v":1,"words":{"time":"t a+ɪ m","ма":"m a"}};</script>
+```
+The sounds of the song's distinct lyric words, written by `studio/phonemes.py` at every wrap and never edited: keys are the
+words normalised (NFC, no stress marks, one apostrophe `'`, lower case, no punctuation at the ends; `app/tract3d.js`
+normalises the same way), values IPA symbols separated by spaces, `+` joining a diphthong's glide to its first vowel and
+`ʲ` marking a soft consonant. English words come from CMUdict (first pronunciation; `studio/data/`, with its licence),
+Ukrainian words from spelling rules. A word read by neither is left out; the trainer then reads it with letter rules and
+marks it «приблизно». `<` is written as `\u003c`. The line repeats words the data line already holds and adds nothing else.
 
 ## How the app uses the map
 - `targetAt(t)`: in notes view, the note containing `t`; in contour view, the `points` entry within 0.75 hop of `t`. The user's
