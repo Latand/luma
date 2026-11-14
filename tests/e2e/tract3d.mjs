@@ -4,11 +4,12 @@
 //   1  the column beside the roll at 1440 px (the roll's right edge and every word left of it; the chosen head marked as
 //      the roll's chosen view; before a choice the prompt with the two buttons under it, one block), at 900 px with the
 //      whole head; a short column (after a take, a low window) shows the mouth to the larynx at least 90 px wide beside
-//      its words; the overlay on the sung part at 390 px (no word on it, the playhead and the next 2 s of notes clear of
+//      its words, its picture filling the panel up to them; the overlay on the sung part at 390 px (no word on it, the playhead and the next 2 s of notes clear of
 //      it, the body's tag in its corner and the enlarge mark in the other; enlarged, a ✕, the stage covered from edge to
 //      edge and the caption aside under a toast; before a choice the two buttons and the prompt each whole, one block in
 //      the overlay's middle, stepping aside while a toast covers its bottom); while the demo is sung through, no note
-//      sung in the last 2 s and no word under the overlay, which moves seldom
+//      sung in the last 2 s and no word under the overlay, which moves seldom, and none either paused after the take,
+//      the playhead moved through it, the overlay standing still at each stop
 //   2  «Чоловік» / «Жінка» survive a reload; the body's scale; the two heads' outlines differ
 //   3  lesson 1 on «ма»: after the rest the /m/ long enough to be seen (nasal air, lips closed, soft palate lowered), the
 //      vowel on the note, then the held /a/ (voiced), with as much air leaving the mouth at its end as at its start
@@ -226,14 +227,25 @@ for (const [width, height, take, wide] of [[1440, 900, false, false], [900, 1000
     const words = [lay.title, lay.male, lay.female, ...lay.caption];
     assert(s2.shape === 'wide' && s2.crop && s2.mouthPx >= 90 && words.every(w => inside(w, lay.panel) && w.x1 <= lay.view.x0 + .5) && lay.caption.length > 0 && (!take || lay.takes === 1),
       `${width}×${height}${take ? ' after a take' : ' idle'}: the column shows the mouth to the larynx, the lips to the pharynx ${s2.mouthPx} px wide (≥ 90), its title, choice and caption whole beside it ` + JSON.stringify({view: lay.view, panel: lay.panel}));
+    // the picture takes the panel's free width, from the words' column to the panel's edge, with the face at its right
+    // and the neck behind the spine on its left, up to the words or to the neck's own skin: no empty strip of panel
+    // between the words and a cut through the spine
+    const pic = await o.p.screenshot({clip: {x: lay.view.x0, y: lay.view.y0, width: lay.view.x1 - lay.view.x0, height: lay.view.y1 - lay.view.y0}});
+    const from = await o.p.evaluate(async b64 => { const img = new Image(); img.src = 'data:image/png;base64,' + b64; await img.decode(); const c = new OffscreenCanvas(img.width, img.height), g = c.getContext('2d'); g.drawImage(img, 0, 0); const d = g.getImageData(0, 0, img.width, img.height).data;
+      // the first column from the left with tissue in a third of its rows, as a share of the picture's width
+      for (let x = 0; x < img.width; x++) { let n = 0; for (let y = 0; y < img.height; y++) { const i = 4 * (y * img.width + x); if (d[i] - d[i + 2] > 40) n++; } if (n > img.height / 3) return x / img.width; } return 1; }, pic.toString('base64'));
+    const gap = lay.view.x0 - Math.max(...words.map(w => w.x1));
+    assert(gap >= 0 && gap <= 24 && lay.panel.x1 - lay.view.x1 <= 2 && from < .25,
+      `${width}×${height}${take ? ' after a take' : ' idle'}: the picture fills the panel beside its words (${gap.toFixed(1)} px after them, ${(lay.view.x1 - lay.view.x0).toFixed(0)} px wide), the neck drawn from ${(100 * from).toFixed(0)} % of its width`);
   } else assert(s2.shape === 'tall' && !s2.crop && st.renderer, `${width}×${height} idle: the column shows the whole head (${s2.shape}, the mouth ${s2.mouthPx} px wide)`);
   await done(o, `${width}×${height} column shape`);
 }
 
-// ── 1 · on a phone, while the demo is sung through, the overlay leaves what was just sung in sight ───────────────────
+// ── 1 · on a phone, while the demo is sung through and paused after it, the overlay leaves what was just sung in sight
 // Every 3rd frame of a pass at 60 frames a song second: no note sung in the last 2 s (its bar) lies under the overlay and
 // no word does; the overlay stands at the bottom or the top of the sung part, 30 % of the plot high while singing (drawn
-// in to no less than 55 % of that where a run of notes crosses both ends), and does not jump back and forth.
+// in to no less than 55 % of that where a run of notes crosses both ends), and does not jump back and forth. Then, paused
+// after the take (40 % of the plot high, drawn in the same way), the playhead moved through the take in 0.25 s steps.
 {
   const o = await page(url, {viewport: {width: 390, height: 844}, dpr: 3, settings: seeded('male')}); await ready(o.p);
   const r = await o.p.evaluate(async () => { const T = window.Luma.test, e = Math.min(window.LUMA_SONG.duration - .5, 32), out = {bad: [], words: [], moves: [], n: 0, share: null, least: 1}; T.fakeSing({a: 2, b: e});
@@ -245,12 +257,25 @@ for (const [width, height, take, wide] of [[1440, 900, false, false], [900, 1000
         for (const w of words) if (hit(w, ov)) out.words.push(+t.toFixed(2) + ':' + w.w);
         if (s.spot !== spot) { if (spot !== null) out.moves.push({t: +t.toFixed(2), spot: s.spot}); spot = s.spot; } }
       if (k % 6 === 0) await new Promise(r => setTimeout(r)); if (t >= e - .05 || T.state().mode !== 'singing') break; }
-    T.fakeFinish(); await new Promise(r => requestAnimationFrame(r)); const s = T.tract(), pl = T.plot(); out.after = (s.overlay.y1 - s.overlay.y0) / (pl.bottom - pl.top); T.closeTrace(); return out; });
+    T.fakeFinish(); await new Promise(r => requestAnimationFrame(r)); const s = T.tract(), pl = T.plot(); out.after = (s.overlay.y1 - s.overlay.y0) / (pl.bottom - pl.top); return out; });
   // back to the end it left within 1.5 s: a jump back and forth
   const trips = r.moves.slice(2).filter((m, i) => m.spot === r.moves[i].spot && m.t - r.moves[i].t < 1.5);
   assert(r.n > 500 && !r.bad.length && !r.words.length, `390 px, the demo sung through (${r.n} frames): no note sung in the last 2 s and no word under the overlay ` + JSON.stringify({notes: r.bad.slice(0, 8), words: r.words.slice(0, 8)}));
-  assert(r.moves.some(m => m.spot === 'high') && r.moves.length <= 10 && !trips.length && Math.abs(r.share - .3) < .01 && r.least >= .54 && Math.abs(r.after - .4) < .01,
-    `390 px, singing: the overlay is 30 % of the plot high (${r.share.toFixed(3)}, at least ${(100 * r.least).toFixed(0)} % of that; ${r.after.toFixed(3)} after the take) and moves ${r.moves.length} times, never back within 1.5 s: ` + r.moves.map(m => m.t + ' ' + m.spot).join(', '));
+  assert(r.moves.some(m => m.spot === 'high') && r.moves.length <= 10 && !trips.length && Math.abs(r.share - .3) < .01 && r.least >= .54 && r.after <= .41 && r.after >= .4 * .54,
+    `390 px, singing: the overlay is 30 % of the plot high (${r.share.toFixed(3)}, at least ${(100 * r.least).toFixed(0)} % of that; ${r.after.toFixed(3)} after the take, of 0.4) and moves ${r.moves.length} times, never back within 1.5 s: ` + r.moves.map(m => m.t + ' ' + m.spot).join(', '));
+  // paused after the take, the playhead moved through it in 0.25 s steps: at every stop no note of the last 2 s (with its
+  // mark), no word and none of the next 2 s of notes lies under the overlay, which stands still while the moment does
+  const q = await o.p.evaluate(async () => { const T = window.Luma.test, hit = (a, b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1, raf = () => new Promise(r => requestAnimationFrame(r)), out = {n: 0, bad: [], ahead: [], words: [], drawn: 0, least: 1, moved: [], takes: T.takes().length};
+    for (let t = 2.5; t <= 14.5 + 1e-9; t += .25) { T.seek(+t.toFixed(2)); await raf(); await raf();
+      const words = T.wordBoxes(), s = T.tract(), ov = s.overlay, now = T.state().time; out.n++;
+      for (const n of T.noteRects()) { if (n.b > now - 2 && n.a < now && hit(n, ov)) out.bad.push(+now.toFixed(2) + ':' + n.id); if (n.a >= now && n.a < now + 2 && hit(n, ov)) out.ahead.push(+now.toFixed(2) + ':' + n.id); }
+      for (const w of words) if (hit(w, ov)) out.words.push(+now.toFixed(2) + ':' + w.w);
+      if (s.small) out.drawn++;
+      // still: the same box over the next frames
+      const boxes = new Set(); for (let i = 0; i < 4; i++) { await raf(); const b = T.tract().overlay; boxes.add([b.x0, b.y0, b.x1, b.y1].join()); } if (boxes.size > 1) out.moved.push(+now.toFixed(2)); }
+    T.closeTrace(); return out; });
+  assert(q.takes === 1 && q.n === 49 && !q.bad.length && !q.ahead.length && !q.words.length && !q.moved.length,
+    `390 px, paused after the take, 2.5–14.5 s in 0.25 s steps (${q.n} stops, ${q.drawn} of them drawn in toward a corner): no note of the last 2 s, none of the next 2 s and no word under the overlay, which stands still at each ` + JSON.stringify({notes: q.bad.slice(0, 8), ahead: q.ahead.slice(0, 8), words: q.words.slice(0, 8), moved: q.moved}));
   await done(o, '390 px singing');
 }
 

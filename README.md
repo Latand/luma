@@ -19,9 +19,10 @@ of your voice, no server after the file is built.
   word and its sounds, the one due now in brackets; «приблизно» when the sounds are a guess (a word the build could not
   read, or one whose timing is uncertain). From 1100 px it is a column of 300–420 px right of the roll; from 720 px a
   narrower one; where the column is short (after a take, a low window) it shows the mouth to the larynx at its whole
-  height with its words beside it. On a phone it stands on the sung part of the roll, bottom left or, while what was
-  just sung lies low, top left (a little smaller while you sing, so the notes of the last 2 s stay in sight), and shows
-  the mouth to the larynx, words stepping around it; its corner mark or a tap while nothing plays enlarges it (its ✕, a
+  height, the neck behind it as far as the panel is wide, with its words beside it. On a phone it stands on the sung
+  part of the roll, bottom left or, while what was just sung lies low, top left (a little smaller while you sing), and
+  draws in toward that corner where notes sung in the last 2 s lie at both ends, so they and their marks stay in sight,
+  playing or paused; it shows the mouth to the larynx, words stepping around it; its corner mark or a tap while nothing plays enlarges it (its ✕, a
   second tap or Esc returns it). Drag it to turn the head up to 60° (a double click turns it back).
   «Голова» in the stage rail hides it. Without WebGL2, or where WebGL runs on the processor alone (no graphics
   processor), the cut face is drawn flat. Everything is baked into the trainer: no network, nothing extra to install ([docs/design/VOCAL_TRACT_3D.md](docs/design/VOCAL_TRACT_3D.md)).
@@ -219,8 +220,9 @@ checks the alignment through Opus, the eviction order, the render deadline, the 
 falls inside a sung segment, without a browser.
 `tract3d.mjs` checks «Голова»: the column at 1440 px and 900 px (the whole head; before a choice the prompt with the two
 buttons under it), a short column (1440 × 900 and 900 × 1000 after a take, 1366 × 650 idle) drawing the lips to the
-pharynx 90 px wide at least beside its words, and the overlay at 390 px clear of the words, the playhead and the next
-notes, and, through a sung pass of the demo, of every note sung in the last 2 s, moving seldom; the overlay before a choice (the buttons and the prompt in its middle, out of a toast's way), its enlarge mark (from the keyboard too) and
+pharynx 90 px wide at least beside its words, its picture filling the panel up to them, and the overlay at 390 px clear
+of the words, the playhead and the next notes, and, through a sung pass of the demo, of every note sung in the last 2 s,
+moving seldom, and paused after the take, the playhead moved through it, of those notes too, standing still; the overlay before a choice (the buttons and the prompt in its middle, out of a toast's way), its enlarge mark (from the keyboard too) and
 enlarged (its ✕, the stage covered from edge to edge, its caption aside under a toast), the chosen head marked as the roll's chosen view, the body's
 choice across a reload, lesson 1's «ма» (after the rest an /m/ long enough to be seen, through the nose, then the held
 /a/ on the note, its air leaving the mouth as densely at its end as at its start), the demo's «ta» (closure with no air in front of the face, then

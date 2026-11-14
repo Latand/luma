@@ -185,6 +185,8 @@ button[aria-pressed=true]{color:var(--mint);border-color:#a1eed840;background:#a
 /* while singing the small overlay holds the picture and the sounds alone: the body was chosen before the take, and the
    enlarged view opens only while idle */
 .tract[data-sing="1"] :is(.tract-tag,.tract-grow){display:none}
+/* drawn in toward a corner, clear of the notes just sung, the overlay is too small for the tag beside the picture */
+.tract[data-small="1"] .tract-tag{display:none}
 /* a short column (after a take, a low window), where the whole head would be a thumbnail: the mouth to the larynx takes
    the panel's whole height on the right, the title, the choice and the caption stand in a column on its left */
 .tract[data-mode=column][data-shape=wide]{display:grid;grid-template-columns:minmax(0,1fr) var(--tract-pic,60%);grid-template-rows:auto minmax(0,1fr)}

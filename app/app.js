@@ -1468,27 +1468,30 @@ function placeTract(box){const el=$('tract');s.tractW=0;s.tractBox=null;s.tractS
   // enlarged, it covers the stage from edge to edge down to the plot's bottom, the piano rail included
   if(s.tractBig)r={x:0,y:0,w:box.width,h:b.bottom,mode:'overlay',big:true};
   // small, it stands bottom left on the sung part of the roll, or top left while what was just sung lies in the bottom
-  // rows (tractSpot(), every frame); while singing it is a quarter smaller (30 % of the plot high), so the notes of the last
-  // 2 s, their marks and the voice on them stay in sight at one of its two places
+  // rows, drawn in toward that corner where both ends hold such notes (tractSpot(), every frame); while singing it is a
+  // quarter smaller (30 % of the plot high), so the notes of the last 2 s, their marks and the voice on them stay in sight
   else{const sing=s.mode==='singing',h=Math.round((b.bottom-b.top)*(sing?.3:.4)),w=Math.round((.34*(b.right-b.left)-16)*(sing?.75:1));
-   s.tractSpots={left:b.left+4,top:b.top+4,bottom:b.bottom-4,w,h};if(!sing)s.tractScale=1;const spot=s.tractSpot==='high'?'high':'low',q=tractBoxAt(spot,s.tractScale||1);
+   s.tractSpots={left:b.left+4,top:b.top+4,bottom:b.bottom-4,w,h};const spot=s.tractSpot==='high'?'high':'low',q=tractBoxAt(spot,s.tractScale||1);
    r={x:q.x0,y:q.y0,w:q.x1-q.x0,h:q.y1-q.y0,mode:'overlay',crop:true,spot};s.tractBox=q;}}
- el.style.left=r.x+'px';el.style.top=r.y+'px';el.style.width=r.w+'px';el.style.height=r.h+'px';el.dataset.mode=r.mode;el.dataset.big=r.big?'1':'0';el.dataset.picked=picked?'1':'0';el.dataset.spot=r.spot||'';el.dataset.shape='tall';el.dataset.sing=s.mode==='singing'?'1':'0';
+ el.style.left=r.x+'px';el.style.top=r.y+'px';el.style.width=r.w+'px';el.style.height=r.h+'px';el.dataset.mode=r.mode;el.dataset.big=r.big?'1':'0';el.dataset.picked=picked?'1':'0';el.dataset.spot=r.spot||'';el.dataset.small=r.spot&&(s.tractScale||1)<1?'1':'0';el.dataset.shape='tall';el.dataset.sing=s.mode==='singing'?'1':'0';
  $('tractPick').hidden=picked;$('tractClose').hidden=!r.big;$('tractTag').hidden=$('tractGrow').hidden=!picked||r.mode!=='overlay'||!!r.big;$('tractTag').textContent=picked?window.LumaTract.LABEL[prefs.tractBody]:'';
  let v=$('tractView').getBoundingClientRect();
  if(r.mode==='column'&&picked){const head=el.querySelector('.tract-head').getBoundingClientRect().height,cap=parseFloat(getComputedStyle($('tractSound')).minHeight)||0;
   if(window.LumaTract.wholeScale(r.w-2,r.h-2-head-cap)<TRACT_WHOLE){el.dataset.shape='wide';
-   // the words' column keeps the stacked choice whole (its width and 16 px), the picture takes the rest up to its own shape
+   // the words' column keeps the stacked choice whole (its width and 16 px), the picture takes the rest: wider than the
+   // crop, it shows more of the neck behind the spine, the face kept at the right (tract3d.js camera())
    const words=Math.max(88,Math.ceil(el.querySelector('.tract-body').getBoundingClientRect().width)+16);
-   el.style.setProperty('--tract-pic',Math.round(Math.min((r.h-2)*window.LumaTract.CROP_ASPECT,r.w-2-words))+'px');r.crop=r.tight=true;v=$('tractView').getBoundingClientRect();}}
+   el.style.setProperty('--tract-pic',Math.round(r.w-2-words)+'px');r.crop=r.tight=true;v=$('tractView').getBoundingClientRect();}}
  tract.layout({mode:r.mode,w:v.width,h:v.height,crop:!!r.crop,tight:!!r.tight});}
 // The phone's small overlay keeps clear of the notes sung in the last 2 s that lie under it (each note's bar and, in the
-// contour view, the mark under it) and, after them, of those that reach it within TRACT_LOOK s. While its place is clear
-// it stays. When such a note lies under it now, it takes the best place at either end of the sung part, clear now before
-// clear of what is on its way; while singing, if no whole box is clear, it draws in toward an end's corner (TRACT_SIZES of
-// its box), the largest that is clear. When a note is only on its way, it moves to the other end if that is clear, at
-// most once in TRACT_HOLD s, and a smaller box grows back once its whole box is clear and TRACT_HOLD s have passed.
-// After a seek it starts at the bottom unless the top is clearer. The words step around it in drawWords().
+// contour view, the mark under it). Where no whole box at either end of the sung part is clear of them, it draws in toward
+// an end's corner (TRACT_SIZES of its box), the largest that is clear. Paused, it stands at each moment drawn where the
+// largest box is clear, at the end where it stood on a tie (nothing moves under it while paused, so it holds still). While
+// the song plays it keeps clear too of the notes that reach it within TRACT_LOOK s, and moves seldom: while its place is
+// clear it stays; when such a note lies under it now, it takes the best place at either end, clear now before clear of
+// what is on its way; when a note is only on its way, it moves to the other end if that is clear, at most once in
+// TRACT_HOLD s, and a smaller box grows back once its whole box is clear and TRACT_HOLD s have passed. After a seek while
+// playing it starts at the bottom unless the top is clearer. The words step around it in drawWords().
 const TRACT_LOOK=.8,TRACT_SIZES=[1,.85,.7,.55],TRACT_HOLD=1.5;
 function tractBoxAt(spot,k){const sp=s.tractSpots,w=Math.round(sp.w*k),h=Math.round(sp.h*k),y0=spot==='high'?sp.top:sp.bottom-h;return {x0:sp.left,y0,x1:sp.left+w,y1:y0+h};}
 function tractSpot(t,b,v,y,barH){const sp=s.tractSpots;if(!sp||!s.tractBox||s.tractBig)return;
@@ -1496,17 +1499,18 @@ function tractSpot(t,b,v,y,barH){const sp=s.tractSpots;if(!sp||!s.tractBox||s.tr
  // [notes under it now, notes on their way to it]
  const hits=(spot,k)=>{const q0=tractBoxAt(spot,k),ta=Math.max(t-2,at(q0.x0)),tz=at(q0.x1+2);let now=0,soon=0;
   for(const q of song.notes){if(q.a>=tz+TRACT_LOOK)break;if(q.b<=ta)continue;const yy=y(q.m+o);if(yy+under<=q0.y0-4||yy-barH/2>=q0.y1+4)continue;if(q.a<tz)now++;else soon++;}return [now,soon];};
- const sing=s.mode==='singing',fresh=s.tractSpotT===undefined||Math.abs(t-s.tractSpotT)>.5,cur=s.tractSpot==='high'?'high':'low',other=cur==='low'?'high':'low',k=sing?s.tractScale||1:1,calm=t-(s.tractMovedT??-1e9)>=TRACT_HOLD;s.tractSpotT=t;
+ const play=s.mode!=='idle',fresh=s.tractSpotT===undefined||Math.abs(t-s.tractSpotT)>.5,cur=s.tractSpot==='high'?'high':'low',other=cur==='low'?'high':'low',k=s.tractScale||1,calm=t-(s.tractMovedT??-1e9)>=TRACT_HOLD;s.tractSpotT=t;
  let next=cur,nk=k;
- if(fresh){nk=1;const lo=hits('low',1),hi=hits('high',1);if((lo[0]||lo[1])&&hi[0]*1000+hi[1]<lo[0]*1000+lo[1])next='high';else next='low';}
+ if(!play){nk=1;place:for(const z of TRACT_SIZES)for(const e of [cur,other])if(!hits(e,z)[0]){next=e;nk=z;break place;}}
+ else if(fresh){nk=1;const lo=hits('low',1),hi=hits('high',1);if((lo[0]||lo[1])&&hi[0]*1000+hi[1]<lo[0]*1000+lo[1])next='high';else next='low';}
  else{const [now,soon]=hits(cur,k);
   if(now){const rank=(e,z,[n,w])=>[n>0?1:0,w>0?1:0,-z,e===cur?0:1],less=(p,q)=>{for(let i=0;i<p.length;i++)if(p[i]!==q[i])return p[i]<q[i];return false;};
-   let best=rank(cur,k,[now,soon]);for(const e of [cur,other])for(const z of sing?TRACT_SIZES:[k]){const r=rank(e,z,hits(e,z));if(less(r,best)){best=r;next=e;nk=z;}}}
+   let best=rank(cur,k,[now,soon]);for(const e of [cur,other])for(const z of TRACT_SIZES){const r=rank(e,z,hits(e,z));if(less(r,best)){best=r;next=e;nk=z;}}}
   else if(soon){if(calm&&!hits(other,k).some(Boolean))next=other;}
   else if(k<1&&calm)for(const z of TRACT_SIZES){if(z<=k)break;if(!hits(cur,z).some(Boolean)){nk=z;break;}}}
  if(next===s.tractSpot&&nk===(s.tractScale||1)&&$('tract').dataset.spot===next)return;
  if(next!==cur||nk!==k)s.tractMovedT=t;
- s.tractSpot=next;s.tractScale=nk;const el=$('tract'),q=tractBoxAt(next,nk);el.style.top=q.y0+'px';el.style.width=q.x1-q.x0+'px';el.style.height=q.y1-q.y0+'px';el.dataset.spot=next;s.tractBox=q;}
+ s.tractSpot=next;s.tractScale=nk;const el=$('tract'),q=tractBoxAt(next,nk);el.style.top=q.y0+'px';el.style.width=q.x1-q.x0+'px';el.style.height=q.y1-q.y0+'px';el.dataset.spot=next;el.dataset.small=nk<1?'1':'0';s.tractBox=q;}
 // Phones, and phones held sideways: the page scrolls, so the stage takes exactly the height that leaves «Співати» on the first
 // screen — measured, not guessed, because the title, the hint banner and the browser chrome all move the space above it.
 // Never called from the resize observer: it writes a length, and the observer only reads.
@@ -2095,7 +2099,7 @@ window.Luma={diagnostics:()=>({mode:s.mode,busy:s.busy,pending:s.awaitFinish,tim
   // every note's bar as the roll draws it at the moment shown (chart coordinates), with its times
   noteRects:()=>{const t=now(),b=bounds(),v=view(t),o=effective().octave,rowH=(b.bottom-b.top)/(s.rangeHi-s.rangeLo),barH=clamp(rowH*.74,7,26),x=a=>b.left+(a-v.a)/v.span*(b.right-b.left),y=m=>b.bottom-(m-s.rangeLo)/(s.rangeHi-s.rangeLo)*(b.bottom-b.top);
    return song.notes.filter(n=>n.b>=v.a&&n.a<=v.b).map(n=>({id:n.id,a:n.a,b:n.b,x0:Math.max(b.left,x(n.a)),x1:Math.min(b.right,Math.max(x(n.a)+2,x(n.b))),y0:y(n.m+o)-barH/2,y1:y(n.m+o)+barH/2}));},
-  tract:()=>{const el=$('tract'),r=el.getBoundingClientRect(),c=$('chartWrap').getBoundingClientRect();return {...(tract?tract.state():{}),pref:prefs.tract,pref_body:prefs.tractBody,hidden:el.hidden,mode:el.dataset.mode||null,shape:el.dataset.shape||null,spot:el.dataset.spot||null,big:!!s.tractBig,box:{x0:r.left-c.left,y0:r.top-c.top,x1:r.right-c.left,y1:r.bottom-c.top},overlay:s.tractBox?{...s.tractBox}:null};},
+  tract:()=>{const el=$('tract'),r=el.getBoundingClientRect(),c=$('chartWrap').getBoundingClientRect();return {...(tract?tract.state():{}),pref:prefs.tract,pref_body:prefs.tractBody,hidden:el.hidden,mode:el.dataset.mode||null,shape:el.dataset.shape||null,spot:el.dataset.spot||null,small:el.dataset.small==='1',big:!!s.tractBig,box:{x0:r.left-c.left,y0:r.top-c.top,x1:r.right-c.left,y1:r.bottom-c.top},overlay:s.tractBox?{...s.tractBox}:null};},
   // one frame of the head alone at song time t (as the trainer's tick draws it), and its own time
   tractFrame:(t,moving=true)=>{if(!s.tractOn)return null;const t0=performance.now();const drew=tract.frame(t,moving);return {ms:performance.now()-t0,drew};},
   tractYaw:v=>tract?.yaw(v),tractTimeline:()=>tract?.timeline(),

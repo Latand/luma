@@ -615,8 +615,6 @@ const WHOLE = [-13.4, 9.4, -4.6, 24.6];
 function frameFit(box, depth, yawDeg = 15) { const yaw = yawDeg * Math.PI / 180; return {hh: (box[3] - box[2]) / 2, across: (box[1] - box[0]) / 2 * Math.abs(Math.cos(yaw)) + depth * Math.abs(Math.sin(yaw))}; }
 const scaleIn = (f, w, h) => Math.min(h / (2 * f.hh * 1.05), w / (2 * f.across * 1.05));
 const wholeScale = (w, h) => scaleIn(frameFit(WHOLE, 8), w, h);
-// the short column's picture, width over height (its tight crop, where the neck runs on below the crop's foot)
-const CROP_ASPECT = (f => f.across / f.hh)(frameFit(cropBox({k: 1, bottom: -9}, true), 3));
 // The input of one painting, flat (it crosses to the worker as a few typed arrays): the blended posture's points, the
 // posed skin's midline, the hair's band; unpack() turns it into the polygons the painter draws.
 function paintInput(body, p, front, back, scale) {
@@ -694,7 +692,9 @@ void main() {
     float rim = pow(1.0 - max(dot(n, v), 0.0), 2.0);
     col = vCol * (amb * 1.2 + d * 0.9 + rim * 0.45) + band * vec3(0.22, 0.18, 0.15) * d;
   } else col += pow(max(dot(n, h), 0.0), 36.0) * 0.07 * d;
-  if (inside) col = vCol * vec3(0.55, 0.32, 0.32) * (0.35 + 0.4 * hemi);
+  // the skin's inner side reads as the head's inside; the parts behind the cut (teeth, gums, palate, cheeks) are seen
+  // from the mouth, often from behind their outer faces, and are lit on both sides
+  if (inside && uKind == 0) col = vCol * vec3(0.55, 0.32, 0.32) * (0.35 + 0.4 * hemi);
   o = vec4(pow(clamp(col, 0.0, 1.0), vec3(1.0 / 2.2)), 1.0);
 }`;
 const QVS = `#version 300 es
@@ -932,10 +932,12 @@ function attach(host) {
     const cx = (box[0] + box[1]) / 2 * k, cy = (box[2] + box[3]) / 2 * k, hw = (box[1] - box[0]) / 2 * k, hh = (box[3] - box[2]) / 2 * k;
     const fov = 26 * Math.PI / 180, half = Math.tan(fov / 2), aspect = w / h;
     // turned, the head shows its depth: its width on screen is the box's width and the head's depth (±8 cm) mixed
-    const across = hw * Math.abs(Math.cos(yaw)) + (crop ? 3 : 8) * k * Math.abs(Math.sin(yaw));
-    const dist = Math.max(hh / half, across / (half * aspect)) * (crop && st.box.tight ? 1 : 1.05);
+    const across = hw * Math.abs(Math.cos(yaw)) + (crop ? 3 : 8) * k * Math.abs(Math.sin(yaw)), m = crop && st.box.tight ? 1 : 1.05;
+    const dist = Math.max(hh / half, across / (half * aspect)) * m;
+    // a crop in a view wider than itself keeps the face at the view's right edge and shows more of the neck behind it
+    const extra = crop ? Math.max(0, dist * half * aspect - across * m) : 0;
     const dir = [Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)];
-    const eye = [cx + dir[0] * dist, cy + dir[1] * dist, dir[2] * dist], target = [cx, cy, 0];
+    const target = [cx - extra * Math.cos(yaw), cy, extra * Math.sin(yaw)], eye = [target[0] + dir[0] * dist, cy + dir[1] * dist, target[2] + dir[2] * dist];
     const v = lookAt(eye, target, [0, 1, 0]), pr = perspective(fov, aspect, Math.max(1, dist - 40 * k), dist + 40 * k);
     // the key light rides with the camera, from above its shoulder toward the face; a cool fill from below the other side
     const right = [Math.cos(yaw), 0, -Math.sin(yaw)], up = [0, 1, 0], nrm = a => { const l = Math.hypot(...a); return a.map(x => x / l); };
@@ -1045,7 +1047,7 @@ function attach(host) {
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, Bd.hairIdx); gl.drawElements(gl.TRIANGLES, Bd.hairCount, gl.UNSIGNED_INT, 0);
     // the parts behind the cut, the lower ones turned with the jaw
     bind(0, Bd.still, 3, 24, 0); bind(1, Bd.still, 3, 24, 12); bind(2, Bd.still, 3, 24, 0); bind(3, Bd.still, 3, 24, 12); bind(4, Bd.stillCol, 3, 12, 0); bind(5, Bd.stillJaw, 1, 4, 0);
-    gl.uniform1i(M.u.uKind, 0); gl.uniform3f(M.u.uJaw, b.pivot.x, b.pivot.y, p.sc[SC.jawAngle] - b.jawRest);
+    gl.uniform1i(M.u.uKind, 2); gl.uniform3f(M.u.uJaw, b.pivot.x, b.pivot.y, p.sc[SC.jawAngle] - b.jawRest);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, Bd.stillIdx); gl.drawElements(gl.TRIANGLES, Bd.stillCount, gl.UNSIGNED_SHORT, 0);
     gl.disableVertexAttribArray(5);
     for (const i of [1, 2, 3, 4]) gl.disableVertexAttribArray(i);
@@ -1076,7 +1078,9 @@ function attach(host) {
     if (c2d.width !== w || c2d.height !== h) { c2d.width = w; c2d.height = h; }
     c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, w, h);
     const cb = st.box?.crop ? cropBox(b, st.box.tight) : null, sb = sectionBounds(b.k), crop = cb ? {x0: cb[0], x1: cb[1], y0: cb[2], y1: cb[3]} : {x0: -14.6 * b.k, x1: 10 * b.k, y0: -5.2 * b.k, y1: 25.4 * b.k};
-    const S = Math.min(w / (crop.x1 - crop.x0), h / (crop.y1 - crop.y0)) * (cb && st.box.tight ? 1 : .96), ox = (w - (crop.x1 - crop.x0) * S) / 2 - crop.x0 * S, oy = (h - (crop.y1 - crop.y0) * S) / 2 + crop.y1 * S;
+    const S = Math.min(w / (crop.x1 - crop.x0), h / (crop.y1 - crop.y0)) * (cb && st.box.tight ? 1 : .96), oy = (h - (crop.y1 - crop.y0) * S) / 2 + crop.y1 * S;
+    // (a crop in a view wider than itself keeps the face at the view's right edge, as the camera above does)
+    const ox = cb ? w - Math.min((w - (crop.x1 - crop.x0) * S) / 2, (h - (crop.y1 - crop.y0) * S) / 2) - crop.x1 * S : (w - (crop.x1 - crop.x0) * S) / 2 - crop.x0 * S;
     st.proj = (x, y) => [ox + x * S, oy - y * S];
     if (st.bitmap) c.drawImage(st.bitmap, ox + sb.x0 * S, oy - sb.y1 * S, (sb.x1 - sb.x0) * S, (sb.y1 - sb.y0) * S);
     c.strokeStyle = '#e8ecf4'; c.lineCap = 'round'; c.lineWidth = Math.max(1, 1.4 * host.dpr());
@@ -1161,5 +1165,5 @@ function attach(host) {
   function outlineSummary(b) { let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity; for (let i = 0; i < b.rest.length; i += 3) { x0 = Math.min(x0, b.rest[i]); x1 = Math.max(x1, b.rest[i]); y0 = Math.min(y0, b.rest[i + 1]); y1 = Math.max(y1, b.rest[i + 1]); } return {x0: +x0.toFixed(2), x1: +x1.toFixed(2), y0: +y0.toFixed(2), y1: +y1.toFixed(2)}; }
 }
 
-window.LumaTract = {attach, key, letterRules, syllables, timeline, LABEL, wholeScale, CROP_ASPECT};
+window.LumaTract = {attach, key, letterRules, syllables, timeline, LABEL, wholeScale};
 })();
