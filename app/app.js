@@ -1478,11 +1478,12 @@ function placeTract(box){const el=$('tract');s.tractW=0;s.tractBox=null;s.tractS
  let v=$('tractView').getBoundingClientRect();
  if(r.mode==='column'&&picked){const head=el.querySelector('.tract-head').getBoundingClientRect().height,cap=parseFloat(getComputedStyle($('tractSound')).minHeight)||0;
   if(window.LumaTract.wholeScale(r.w-2,r.h-2-head-cap)<TRACT_WHOLE){el.dataset.shape='wide';
-   // the words' column keeps the stacked choice whole (its width and 16 px), the picture takes the rest: wider than the
-   // crop, it shows more of the neck behind the spine, the face kept at the right (tract3d.js camera())
-   const words=Math.max(88,Math.ceil(el.querySelector('.tract-body').getBoundingClientRect().width)+16);
+   // the words' column keeps the stacked choice whole (its width and 16 px) and a two-syllable word's sounds on one line
+   // (eleven characters of the caption's 12 px type and its padding), the picture takes the rest: wider than the crop,
+   // it shows more of the neck behind the spine, the face kept at the right (tract3d.js camera())
+   const words=Math.max(92,Math.ceil(el.querySelector('.tract-body').getBoundingClientRect().width)+16);
    el.style.setProperty('--tract-pic',Math.round(r.w-2-words)+'px');r.crop=r.tight=true;v=$('tractView').getBoundingClientRect();}}
- tract.layout({mode:r.mode,w:v.width,h:v.height,crop:!!r.crop,tight:!!r.tight});}
+ tract.layout({mode:r.mode,w:v.width,h:v.height,crop:!!r.crop,tight:!!r.tight,mark:r.mode==='overlay'&&!r.big&&picked&&s.mode!=='singing'});}
 // The phone's small overlay keeps clear of the notes sung in the last 2 s that lie under it (each note's bar and, in the
 // contour view, the mark under it). Where no whole box at either end of the sung part is clear of them, it draws in toward
 // an end's corner (TRACT_SIZES of its box), the largest that is clear. Paused, it stands at each moment drawn where the

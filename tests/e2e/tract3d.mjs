@@ -9,14 +9,17 @@
 //      edge and the caption aside under a toast; before a choice the two buttons and the prompt each whole, one block in
 //      the overlay's middle, stepping aside while a toast covers its bottom); while the demo is sung through, no note
 //      sung in the last 2 s and no word under the overlay, which moves seldom, and none either paused after the take,
-//      the playhead moved through it, the overlay standing still at each stop
+//      the playhead moved through it, the overlay standing still at each stop; there, and while listening, the enlarge
+//      mark (24 px) on no lip, nostril or breath at any size the overlay draws in to, and a caption of one line in its
+//      band's middle, clear of the picture and of the mark (390 and 600 px, both heads)
 //   2  «Чоловік» / «Жінка» survive a reload; the body's scale; the two heads' outlines differ
 //   3  lesson 1 on «ма»: after the rest the /m/ long enough to be seen (nasal air, lips closed, soft palate lowered), the
 //      vowel on the note, then the held /a/ (voiced), with as much air leaving the mouth at its end as at its start
 //   4  demo «ta»: the closure (no air in front of the face), then voiced after the release; inside a phrase the onset
 //      keeps its short length
 //   5  a word missing from LUMA_PHONES: approx, and «приблизно» and every sound of it whole on screen at three widths (on
-//      a phone «приблизно» alone on the first line, the sounds on the second)
+//      a phone «приблизно» alone on the first line, the sounds on the second) and in the short column (the sounds on one
+//      line beside the picture); no line ends on a syllable's dot
 //   6  the demo from file://: listening moves the head; no network request
 //   7  --rebuild keeps the song's data line byte for byte and writes LUMA_PHONES; a changed word changes the table
 //   8  the frame budget (§6) at 390 and 1440 px under 1× and 4× CPU throttle; the 3D head through its own multisampled
@@ -264,19 +267,69 @@ for (const [width, height, take, wide] of [[1440, 900, false, false], [900, 1000
   assert(r.moves.some(m => m.spot === 'high') && r.moves.length <= 10 && !trips.length && Math.abs(r.share - .3) < .01 && r.least >= .54 && r.after <= .41 && r.after >= .4 * .54,
     `390 px, singing: the overlay is 30 % of the plot high (${r.share.toFixed(3)}, at least ${(100 * r.least).toFixed(0)} % of that; ${r.after.toFixed(3)} after the take, of 0.4) and moves ${r.moves.length} times, never back within 1.5 s: ` + r.moves.map(m => m.t + ' ' + m.spot).join(', '));
   // paused after the take, the playhead moved through it in 0.25 s steps: at every stop no note of the last 2 s (with its
-  // mark), no word and none of the next 2 s of notes lies under the overlay, which stands still while the moment does
-  const q = await o.p.evaluate(async () => { const T = window.Luma.test, hit = (a, b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1, raf = () => new Promise(r => requestAnimationFrame(r)), out = {n: 0, bad: [], ahead: [], words: [], drawn: 0, least: 1, moved: [], takes: T.takes().length};
-    for (let t = 2.5; t <= 14.5 + 1e-9; t += .25) { T.seek(+t.toFixed(2)); await raf(); await raf();
-      const words = T.wordBoxes(), s = T.tract(), ov = s.overlay, now = T.state().time; out.n++;
-      for (const n of T.noteRects()) { if (n.b > now - 2 && n.a < now && hit(n, ov)) out.bad.push(+now.toFixed(2) + ':' + n.id); if (n.a >= now && n.a < now + 2 && hit(n, ov)) out.ahead.push(+now.toFixed(2) + ':' + n.id); }
-      for (const w of words) if (hit(w, ov)) out.words.push(+now.toFixed(2) + ':' + w.w);
+  // mark), no word and none of the next 2 s of notes lies under the overlay, which stands still while the moment does;
+  // the enlarge mark, a 24 px target at every size, lies on none of the lips, the nostril and the breath leaving them
+  // (each as drawn at that stop); a caption of one line stands in its band's middle, at least 4 px under the picture,
+  // and no line of it under the mark
+  const q = await o.p.evaluate(async () => { const T = window.Luma.test, hit = (a, b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1, raf = () => new Promise(r => requestAnimationFrame(r)), out = {n: 0, bad: [], ahead: [], words: [], drawn: 0, least: 1, moved: [], takes: T.takes().length, marks: 0, sizes: [], tiny: [], onFace: [], oneLine: 0, caption: [], underMark: []};
+    const box = r => ({x0: r.left, y0: r.top, x1: r.right, y1: r.bottom}), $ = id => document.getElementById(id);
+    for (let t = 2.5; t <= 30.5 + 1e-9; t += .25) { T.seek(+t.toFixed(2)); await raf(); await raf();
+      const words = T.wordBoxes(), s = T.tract(), ov = s.overlay, now = T.state().time, at = +now.toFixed(2); out.n++;
+      for (const n of T.noteRects()) { if (n.b > now - 2 && n.a < now && hit(n, ov)) out.bad.push(at + ':' + n.id); if (n.a >= now && n.a < now + 2 && hit(n, ov)) out.ahead.push(at + ':' + n.id); }
+      for (const w of words) if (hit(w, ov)) out.words.push(at + ':' + w.w);
       if (s.small) out.drawn++;
+      const view = $('tractView').getBoundingClientRect(), grow = $('tractGrow'), g = grow.checkVisibility() ? box(grow.getBoundingClientRect()) : null, wide = Math.round(ov.x1 - ov.x0);
+      if (g) { out.marks++; if (!out.sizes.includes(wide)) out.sizes.push(wide);
+        if (g.x1 - g.x0 < 24 || g.y1 - g.y0 < 24) out.tiny.push(at + '@' + wide);
+        const m = {x0: g.x0 - view.left, y0: g.y0 - view.top, x1: g.x1 - view.left, y1: g.y1 - view.top}, f = s.face, q4 = a => ({x0: a[0], y0: a[1], x1: a[2], y1: a[3]});
+        if (!f) out.onFace.push(at + ':no face drawn');
+        else for (const [k, a] of [['lips', f.lips], ['nostril', f.nostril], ...f.air.map(a => ['air', a])]) if (hit(m, q4(a))) out.onFace.push(at + ':' + k + '@' + wide); }
+      const cap = $('tractSound'), node = cap.firstChild;
+      if (node) { const rg = document.createRange(); rg.selectNodeContents(node); const rs = [...rg.getClientRects()].filter(r => r.width > 0).map(box);
+        if (rs.length && new Set(rs.map(r => Math.round(r.y0))).size === 1) { out.oneLine++; const above = Math.min(...rs.map(r => r.y0)) - view.bottom, below = $('tract').getBoundingClientRect().bottom - 1 - Math.max(...rs.map(r => r.y1));
+          if (above < 4 || Math.abs(above - below) > 4) out.caption.push(at + '@' + wide + ':' + above.toFixed(1) + '/' + below.toFixed(1)); }
+        if (g && rs.some(r => hit(r, g))) out.underMark.push(at + '@' + wide); }
       // still: the same box over the next frames
-      const boxes = new Set(); for (let i = 0; i < 4; i++) { await raf(); const b = T.tract().overlay; boxes.add([b.x0, b.y0, b.x1, b.y1].join()); } if (boxes.size > 1) out.moved.push(+now.toFixed(2)); }
+      const boxes = new Set(); for (let i = 0; i < 4; i++) { await raf(); const b = T.tract().overlay; boxes.add([b.x0, b.y0, b.x1, b.y1].join()); } if (boxes.size > 1) out.moved.push(at); }
     T.closeTrace(); return out; });
-  assert(q.takes === 1 && q.n === 49 && !q.bad.length && !q.ahead.length && !q.words.length && !q.moved.length,
-    `390 px, paused after the take, 2.5–14.5 s in 0.25 s steps (${q.n} stops, ${q.drawn} of them drawn in toward a corner): no note of the last 2 s, none of the next 2 s and no word under the overlay, which stands still at each ` + JSON.stringify({notes: q.bad.slice(0, 8), ahead: q.ahead.slice(0, 8), words: q.words.slice(0, 8), moved: q.moved}));
+  assert(q.takes === 1 && q.n === 113 && !q.bad.length && !q.ahead.length && !q.words.length && !q.moved.length,
+    `390 px, paused after the take, 2.5–30.5 s in 0.25 s steps (${q.n} stops, ${q.drawn} of them drawn in toward a corner): no note of the last 2 s, none of the next 2 s and no word under the overlay, which stands still at each ` + JSON.stringify({notes: q.bad.slice(0, 8), ahead: q.ahead.slice(0, 8), words: q.words.slice(0, 8), moved: q.moved}));
+  const sizes = q.sizes.sort((a, b) => b - a);
+  assert(q.marks === q.n && sizes.length >= 3 && sizes[sizes.length - 1] <= .6 * sizes[0] && !q.tiny.length && !q.onFace.length,
+    `390 px, paused after the take: the enlarge mark at all ${q.marks} stops, the overlay ${sizes.join(', ')} px wide, a 24 px target lying on no lip, nostril or breath leaving them ` + JSON.stringify({tiny: q.tiny, onFace: q.onFace.slice(0, 8)}));
+  assert(q.oneLine > 50 && !q.caption.length && !q.underMark.length,
+    `390 px, paused after the take: a caption of one line (${q.oneLine} stops) stands at least 4 px under the picture with as much room under it, within 4 px, and no line under the mark ` + JSON.stringify({caption: q.caption.slice(0, 8), underMark: q.underMark.slice(0, 8)}));
   await done(o, '390 px singing');
+}
+
+// ── 1 · on a phone, while listening, the enlarge mark (dimmed: it works while idle) lies on no lip, nostril or breath ─────
+{
+  const o = await page(fileUrl(demoHtml), {viewport: {width: 390, height: 844}, dpr: 3, settings: seeded('female')}); await ready(o.p);
+  await at(o.p, 13); await o.p.click('#listenBtn');
+  const r = await o.p.evaluate(async () => { const T = window.Luma.test, $ = id => document.getElementById(id), hit = (a, b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1, out = {n: 0, sizes: [], onFace: [], tiny: 0, enabled: 0}, end = performance.now() + 15000;
+    while (performance.now() < end) { await new Promise(r => requestAnimationFrame(r)); const st = T.state(); if (st.mode !== 'listen') continue; if (st.time > 19) break;
+      const grow = $('tractGrow'); if (!grow.checkVisibility()) continue; const s = T.tract(), f = s.face; if (!f) continue;
+      const g = grow.getBoundingClientRect(), v = $('tractView').getBoundingClientRect(), m = {x0: g.left - v.left, y0: g.top - v.top, x1: g.right - v.left, y1: g.bottom - v.top}, w = Math.round(s.overlay.x1 - s.overlay.x0), q4 = a => ({x0: a[0], y0: a[1], x1: a[2], y1: a[3]});
+      out.n++; if (!out.sizes.includes(w)) out.sizes.push(w); if (g.width < 24 || g.height < 24) out.tiny++; if (!grow.disabled) out.enabled++;
+      for (const [k, a] of [['lips', f.lips], ['nostril', f.nostril], ...f.air.map(a => ['air', a])]) if (hit(m, q4(a))) out.onFace.push(+st.time.toFixed(2) + ':' + k + '@' + w); }
+    return out; });
+  await o.p.click('#stopBtn');
+  assert(r.n > 60 && !r.tiny && !r.enabled && !r.onFace.length,
+    `390 px, listening 13–19 s: the enlarge mark, dimmed, a 24 px target over ${r.n} frames (the overlay ${r.sizes.join(', ')} px wide), lies on no lip, nostril or breath ` + JSON.stringify(r.onFace.slice(0, 8)));
+  await done(o, '390 px listening');
+}
+
+// ── 1 · on a phone a caption of one line stands in its band's middle, clear of the picture, for both heads ──────────
+for (const [width, height] of [[390, 844], [600, 960]]) for (const body of ['male', 'female']) {
+  const o = await page(url, {viewport: {width, height}, dpr: 3, settings: seeded(body)}); await ready(o.p);
+  const t = await o.p.evaluate(() => { const T = window.Luma.test.tractTimeline(), g = T.segs.find(g => g.sym === 'ɑ' && T.words[g.word]?.w === 'na'); return (g.a + g.b) / 2; });
+  await at(o.p, t); await frames(o.p, 2);
+  const c = await o.p.evaluate(() => { const $ = id => document.getElementById(id), cap = $('tractSound'), rg = document.createRange(); rg.selectNodeContents(cap.firstChild);
+    const rs = [...rg.getClientRects()].filter(r => r.width > 0), v = $('tractView').getBoundingClientRect(), b = $('tract').getBoundingClientRect();
+    return {text: cap.textContent, lines: new Set(rs.map(r => Math.round(r.top))).size, above: Math.min(...rs.map(r => r.top)) - v.bottom, below: b.bottom - 1 - Math.max(...rs.map(r => r.bottom)), mode: window.Luma.test.tract().mode}; });
+  assert(c.mode === 'overlay' && c.lines === 1 && c.above >= 4 && Math.abs(c.above - c.below) <= 4,
+    `${width} px, ${body}: the one-line caption «${c.text}» stands ${c.above.toFixed(1)} px under the picture and ${c.below.toFixed(1)} px over the overlay's edge`);
+  await done(o, `${width} px ${body} caption`);
 }
 
 // ── 2 · the body: chosen, kept across a reload, sized and shaped as Chimera's ────────────────────────────────────────
@@ -335,8 +388,10 @@ for (const [width, height, take, wide] of [[1440, 900, false, false], [900, 1000
   // «приблизно» and every sound of the word measured by their own text ranges: wholly inside the caption's box (not cut by an
   // ellipsis, a clamped line or the box's edge) and inside the panel, at 1440 px, in the narrower column at 900 px and in
   // the phone's overlay
-  for (const [width, height, dpr] of [[1440, 900, 2], [900, 1000, 2], [390, 844, 3]]) {
+  // (and in the short column: in a low window, and after a take at the pinned widths)
+  for (const [width, height, dpr, take] of [[1440, 900, 2], [900, 1000, 2], [390, 844, 3], [1366, 650, 2], [1200, 800, 2], [1440, 900, 2, true], [900, 1000, 2, true]]) {
     const x = await page(fileUrl(oddHtml), {viewport: {width, height}, dpr, settings: seeded('female')}); await ready(x.p);
+    if (take) await x.p.evaluate(async () => { const T = window.Luma.test; T.fakeSing({a: 2, b: 30}); for (let k = 0; k < 240; k++) { const t = T.fakeTick(k / 60); T.tractFrame(t, true); if (k % 8 === 0) await new Promise(r => setTimeout(r)); } T.fakeFinish(); });
     const w = await x.p.evaluate(w => { const s = window.LUMA_SONG.lyrics[0].words[1]; return {a: s.a, b: s.b, inTable: w in (window.LUMA_PHONES.words || {})}; }, MADE_UP);
     const sx = await at(x.p, (w.a + w.b) / 2);
     const vis = await x.p.evaluate(() => { const e = document.getElementById('tractSound'), q = document.getElementById('tract').getBoundingClientRect(), box = e.getBoundingClientRect(), node = e.firstChild, text = node ? node.textContent : '';
@@ -353,6 +408,16 @@ for (const [width, height, take, wide] of [[1440, 900, false, false], [900, 1000
     // a syllable's sounds stand together, the syllables apart
     assert(/zɔɹ · vik$/.test(vis.text.replace(/[[\]]/g, '').replace(/\u00a0/g, ' ')) && /\[/.test(vis.text) && vis.allWhole && !vis.overflow,
       `${width} px: every sound of «${MADE_UP}» shows, nothing cut (${vis.lines} lines): ` + JSON.stringify(vis.text));
+    // the sounds on one line where the panel is a column (in the short one beside the picture, under the buttons); in any
+    // width a line that breaks between syllables ends on a syllable, never on its dot
+    const lines = await x.p.evaluate(() => { const e = document.getElementById('tractSound'), node = e.firstChild, text = node.textContent, i = text.indexOf('\n'), out = [];
+      for (let k = 0; k < text.length; k++) { if (text[k] === '\n') continue; const r = document.createRange(); r.setStart(node, k); r.setEnd(node, k + 1); const q = r.getClientRects()[0]; if (!q || !q.width) continue;
+        let L = out.find(l => Math.abs(l.top - q.top) < 3); if (!L) out.push(L = {top: q.top, s: '', x0: q.left, x1: q.right, y1: q.bottom, sounds: k > i}); L.s += text[k]; L.x0 = Math.min(L.x0, q.left); L.x1 = Math.max(L.x1, q.right); L.y1 = Math.max(L.y1, q.bottom); }
+      const box = id => { const b = document.getElementById(id).getBoundingClientRect(); return {x0: b.left, y0: b.top, x1: b.right, y1: b.bottom}; };
+      return {lines: out, shape: window.Luma.test.tract().shape, panel: box('tract'), male: box('tractMale'), female: box('tractFemale')}; });
+    const sounds = lines.lines.filter(l => l.sounds), clear = l => [lines.male, lines.female].every(b => !overlap({x0: l.x0, y0: l.top, x1: l.x1, y1: l.y1}, b));
+    assert(lines.lines.every(l => !/·\s*$/.test(l.s)) && (width < 720 || (sounds.length === 1 && lines.lines.every(clear))) && (!take && height !== 650 && height !== 800 || lines.shape === 'wide'),
+      `${width}×${height}${take ? ' after a take' : ''}${lines.shape === 'wide' ? ', the short column' : ''}: the sounds of «${MADE_UP}» on ${sounds.length} line(s), none ending on a dot, clear of the buttons ` + JSON.stringify(lines.lines.map(l => l.s)));
     // on a phone «приблизно» stands alone on the first line and the sounds whole on the second
     if (width < 720) {
       const two = await x.p.evaluate(() => { const e = document.getElementById('tractSound'), node = e.firstChild, text = node.textContent, i = text.indexOf('\n');
@@ -361,7 +426,7 @@ for (const [width, height, take, wide] of [[1440, 900, false, false], [900, 1000
       assert(two.first === 'приблизно' && two.firstTops.length === 1 && two.restTops.length === 1 && two.restTops[0] > two.firstTops[0],
         `${width} px: «приблизно» alone on the first line, the sounds whole on the second ` + JSON.stringify(two));
     }
-    await done(x, width + ' px made-up word');
+    await done(x, `${width}×${height}${take ? ' after a take' : ''} made-up word`);
   }
 }
 

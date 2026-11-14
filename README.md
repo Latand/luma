@@ -222,12 +222,12 @@ falls inside a sung segment, without a browser.
 buttons under it), a short column (1440 × 900 and 900 × 1000 after a take, 1366 × 650 idle) drawing the lips to the
 pharynx 90 px wide at least beside its words, its picture filling the panel up to them, and the overlay at 390 px clear
 of the words, the playhead and the next notes, and, through a sung pass of the demo, of every note sung in the last 2 s,
-moving seldom, and paused after the take, the playhead moved through it, of those notes too, standing still; the overlay before a choice (the buttons and the prompt in its middle, out of a toast's way), its enlarge mark (from the keyboard too) and
+moving seldom, and paused after the take, the playhead moved through it, of those notes too, standing still, its enlarge mark there and while listening on no lip, nostril or breath at any size it draws in to, its one-line caption in the middle of its band (390 and 600 px, both heads); the overlay before a choice (the buttons and the prompt in its middle, out of a toast's way), its enlarge mark (from the keyboard too) and
 enlarged (its ✕, the stage covered from edge to edge, its caption aside under a toast), the chosen head marked as the roll's chosen view, the body's
 choice across a reload, lesson 1's «ма» (after the rest an /m/ long enough to be seen, through the nose, then the held
 /a/ on the note, its air leaving the mouth as densely at its end as at its start), the demo's «ta» (closure with no air in front of the face, then
 voiced), a made-up word marked «приблизно» with every sound whole at three widths (on a phone «приблизно» alone on the
-first line, the sounds on the second), `--rebuild` keeping the song data
+first line, the sounds on the second; in the short column the sounds on one line beside the picture), `--rebuild` keeping the song data
 and writing the word sounds, listening from `file://` without a network request, the frame budget at 390 px and 1440 px
 under 1× and 4× CPU throttle (the flat cut face, which a renderer without a graphics processor gets; the 3D head forced
 onto it for its own work, and through its own multisampled framebuffer the same picture at each redraw), «Голова» off leaving today's roll, the flat cut face without WebGL2, no head drawn in VR or in a hidden tab, and

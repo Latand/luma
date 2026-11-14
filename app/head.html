@@ -164,7 +164,10 @@ button[aria-pressed=true]{color:var(--mint);border-color:#a1eed840;background:#a
 .tract[data-mode=overlay] .tract-head{padding:5px 5px 0}
 .tract[data-mode=overlay]:not([data-big="1"]) .tract-body{flex-direction:column;width:100%}
 .tract[data-mode=overlay] .tract-sound{padding:0 6px 4px;font-size:11px}
-.tract[data-mode=overlay][data-picked="1"]:not([data-big="1"]) .tract-sound{white-space:pre-line;line-height:1.35;height:calc(2.7em + 4px);min-height:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere}
+/* the small overlay's caption keeps a band two lines high under the picture (the picture does not change size between
+   words), and a single line stands in its middle: as far from the picture as from the overlay's edge (the band's gap
+   at the bottom is a margin, so a third line is clipped whole) */
+.tract[data-mode=overlay][data-picked="1"]:not([data-big="1"]) .tract-sound{white-space:pre-line;line-height:1.35;height:calc(2.7em + 2px);min-height:0;padding:2px 6px 0;margin-bottom:2px;display:flex;flex-direction:column;justify-content:safe center;overflow:hidden;overflow-wrap:anywhere}
 .tract[data-mode=overlay][data-big="1"]{background:#0c1018;border-width:0 0 1px;border-radius:0}
 .tract[data-mode=overlay][data-big="1"] .tract-head{padding:13px 13px 0}
 .tract[data-mode=overlay][data-big="1"] .tract-sound{padding:0 14px 8px}
@@ -177,16 +180,22 @@ button[aria-pressed=true]{color:var(--mint);border-color:#a1eed840;background:#a
 .tract[data-mode=overlay][data-picked="0"]:not([data-big="1"]) .tract-pick{position:static}
 .tract-tag{position:absolute;right:4px;bottom:4px;margin:0;padding:0 5px;border-radius:var(--r-xs);background:#0c1018d9;font-size:11px;line-height:18px;color:var(--ink-1);pointer-events:none;z-index:1}
 .tract-tag[hidden]{display:none}
-/* the small overlay's enlarge mark, in its top right corner (in front of the forehead, where the picture is empty): a tap
-   there, or anywhere on the overlay while idle, enlarges it, and the enlarged head's header holds «Чоловік · Жінка» */
-.tract-grow{position:absolute;top:4px;right:4px;width:24px;height:24px;display:grid;place-items:center;border:1px solid #ffffff1c;border-radius:var(--r-xs);background:#0c1018e6;color:var(--ink-1);z-index:1}
+/* the small overlay's enlarge mark, in its top right corner (in front of the forehead, where the picture is empty, above
+   the nose's tip): a tap there, or anywhere on the overlay while idle, enlarges it, and the enlarged head's header holds
+   «Чоловік · Жінка» */
+.tract-grow{position:absolute;top:2px;right:2px;width:24px;height:24px;display:grid;place-items:center;border:1px solid #ffffff1c;border-radius:var(--r-xs);background:#0c1018e6;color:var(--ink-1);z-index:1}
 .tract-grow svg{width:13px;height:13px}
 .tract-grow[hidden]{display:none}
 /* while singing the small overlay holds the picture and the sounds alone: the body was chosen before the take, and the
    enlarged view opens only while idle */
 .tract[data-sing="1"] :is(.tract-tag,.tract-grow){display:none}
-/* drawn in toward a corner, clear of the notes just sung, the overlay is too small for the tag beside the picture */
+/* drawn in toward a corner, clear of the notes just sung, the overlay is too small for the tag beside the picture, and the
+   enlarge mark leaves the forehead (where it would lie on the nose) for the room in front of the neck, under the lips and
+   the breath (tract3d.js placeMark()); where the picture is too short for it there, it hangs into the caption's band and
+   the band's line stands under it */
 .tract[data-small="1"] .tract-tag{display:none}
+.tract[data-small="1"] .tract-grow{top:var(--tract-grow-top,4px)}
+.tract[data-mode=overlay][data-small="1"][data-picked="1"]:not([data-big="1"]) .tract-sound{padding-top:max(2px,calc(2 * var(--tract-hang,0px) - 1.35em))}
 /* a short column (after a take, a low window), where the whole head would be a thumbnail: the mouth to the larynx takes
    the panel's whole height on the right, the title, the choice and the caption stand in a column on its left */
 .tract[data-mode=column][data-shape=wide]{display:grid;grid-template-columns:minmax(0,1fr) var(--tract-pic,60%);grid-template-rows:auto minmax(0,1fr)}

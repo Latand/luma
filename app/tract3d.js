@@ -604,10 +604,14 @@ const PAINTER = painterSource();
 const sectionBounds = k => ({x0: -15 * k, x1: 10.5 * k, y0: -5.4 * k, y1: 25.6 * k});
 // The phone's small overlay shows the mouth to the larynx (body cm, [x0, x1, y0, y1]): from the spine to past the
 // nostril, from the neck's cut (or 2 cm under the glottis, where the neck runs on) to above the nasal cavity, so the
-// nose's way and the soft palate stay inside and the space in front of the neck holds the body's tag. A short column
-// (tight) takes it closer, with no margin: the front of the spine to the breath in front of the lips, the windpipe under
-// the folds to the nasal cavity's roof, so the mouth stands larger beside the column's words.
+// nose's way and the soft palate stay inside and the space in front of the neck holds the body's tag (drawn in, the
+// enlarge mark). A short column (tight) takes it closer, with no margin: the front of the spine to the breath in front of
+// the lips, the windpipe under the folds to the nasal cavity's roof, so the mouth stands larger beside the column's words.
 const cropBox = (b, tight) => tight ? [-2.1 * b.k, 9.6 * b.k, Math.max(b.bottom, -1.3 * b.k), 14.1 * b.k] : [-2.8 * b.k, 10.8 * b.k, Math.max(b.bottom, -2 * b.k), 14.4 * b.k];
+// The phone's small overlay, drawn in, puts its enlarge mark in front of the neck, its top on the level under the lowest the
+// lips and the breath in front of them reach in any sound (body cm × k: the male's lower lip 4.3, the female's breath 4.0;
+// tests/e2e/tract3d.mjs holds the mark off them at every size), and lower where the picture leaves room under the chin.
+const UNDER_LIPS = 3.4;
 // The whole head's frame (the male's, for both bodies; body cm) and how many CSS pixels a centimetre of the cut takes in a
 // view of w × h at the resting turn (15°): the camera below fits the frame's height, or its width turned with the head's
 // depth (8 cm for the whole head, 3 for a crop), with 5 % to spare.
@@ -936,8 +940,11 @@ function attach(host) {
     const dist = Math.max(hh / half, across / (half * aspect)) * m;
     // a crop in a view wider than itself keeps the face at the view's right edge and shows more of the neck behind it
     const extra = crop ? Math.max(0, dist * half * aspect - across * m) : 0;
+    // the phone's small overlay stands its crop on the view's bottom (the neck runs on below it): the room a view taller
+    // than the crop leaves goes above the head, in front of the forehead, where the enlarge mark stands (placeMark())
+    const rise = crop && !st.box.tight ? Math.max(0, dist * half - hh) : 0;
     const dir = [Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)];
-    const target = [cx - extra * Math.cos(yaw), cy, extra * Math.sin(yaw)], eye = [target[0] + dir[0] * dist, cy + dir[1] * dist, target[2] + dir[2] * dist];
+    const target = [cx - extra * Math.cos(yaw), cy + rise, extra * Math.sin(yaw)], eye = [target[0] + dir[0] * dist, target[1] + dir[1] * dist, target[2] + dir[2] * dist];
     const v = lookAt(eye, target, [0, 1, 0]), pr = perspective(fov, aspect, Math.max(1, dist - 40 * k), dist + 40 * k);
     // the key light rides with the camera, from above its shoulder toward the face; a cool fill from below the other side
     const right = [Math.cos(yaw), 0, -Math.sin(yaw)], up = [0, 1, 0], nrm = a => { const l = Math.hypot(...a); return a.map(x => x / l); };
@@ -1002,7 +1009,7 @@ function attach(host) {
     // (while a painting is under way the next waits: the frame after it ends asks again with the posture of that frame)
     if (moved && painter.busy) { moved = false; st.paintWaiting = true; }
     // the skin: each keyframe posed once (its buffer on the GPU, eight at most; its midline kept here) and blended
-    const ka = keyframe(b, G, q.a), kb = q.w > 0 && q.b !== q.a ? keyframe(b, G, q.b) : ka;
+    const ka = keyframe(b, G, q.a), kb = q.w > 0 && q.b !== q.a ? keyframe(b, G, q.b) : ka; st.cur.outline = ka.outline;
     if (moved) {
       const oa = ka.outline, ob = kb.outline, w2 = kb === ka ? 0 : q.w, mixP = (u, v) => { const o = new Float32Array(u.length); for (let i = 0; i < u.length; i++) o[i] = u[i] + (v[i] - u[i]) * w2; return o; };
       painter.request(paintInput(b, p, w2 ? mixP(oa.front, ob.front) : oa.front.slice(), w2 ? mixP(oa.back, ob.back) : oa.back.slice(), texH / (sb.y1 - sb.y0)));
@@ -1015,6 +1022,7 @@ function attach(host) {
       const T = st.tl, from = q.idx ?? segAt(T.segs, t);
       for (let j = from + 1; j <= from + 2 && j < T.segs.length; j++) if (j >= 0) ahead(b, G, T.segs[j].sym);
     } else draw2D(b, p, lines, w, h);
+    placeMark(b);
     const cap = caption(q); if (cap !== st.caption) { st.caption = cap; sound.textContent = cap; }
     const ms = performance.now() - t0; st.workMs.push(ms); if (st.workMs.length > 120) st.workMs.shift();
   }
@@ -1078,14 +1086,27 @@ function attach(host) {
     if (c2d.width !== w || c2d.height !== h) { c2d.width = w; c2d.height = h; }
     c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, w, h);
     const cb = st.box?.crop ? cropBox(b, st.box.tight) : null, sb = sectionBounds(b.k), crop = cb ? {x0: cb[0], x1: cb[1], y0: cb[2], y1: cb[3]} : {x0: -14.6 * b.k, x1: 10 * b.k, y0: -5.2 * b.k, y1: 25.4 * b.k};
-    const S = Math.min(w / (crop.x1 - crop.x0), h / (crop.y1 - crop.y0)) * (cb && st.box.tight ? 1 : .96), oy = (h - (crop.y1 - crop.y0) * S) / 2 + crop.y1 * S;
-    // (a crop in a view wider than itself keeps the face at the view's right edge, as the camera above does)
-    const ox = cb ? w - Math.min((w - (crop.x1 - crop.x0) * S) / 2, (h - (crop.y1 - crop.y0) * S) / 2) - crop.x1 * S : (w - (crop.x1 - crop.x0) * S) / 2 - crop.x0 * S;
+    // (the small overlay's crop at the scale the camera above gives it, turned to rest, and on the view's bottom; a crop in
+    // a view wider than itself keeps the face at the view's right edge, as the camera does)
+    const small = cb && !st.box.tight, S = small ? scaleIn(frameFit(cb, 3), w, h) : Math.min(w / (crop.x1 - crop.x0), h / (crop.y1 - crop.y0)) * (cb ? 1 : .96), edge = Math.min((w - (crop.x1 - crop.x0) * S) / 2, (h - (crop.y1 - crop.y0) * S) / 2);
+    const oy = small ? h + crop.y0 * S : (h - (crop.y1 - crop.y0) * S) / 2 + crop.y1 * S;
+    const ox = cb ? w - edge - crop.x1 * S : (w - (crop.x1 - crop.x0) * S) / 2 - crop.x0 * S;
     st.proj = (x, y) => [ox + x * S, oy - y * S];
     if (st.bitmap) c.drawImage(st.bitmap, ox + sb.x0 * S, oy - sb.y1 * S, (sb.x1 - sb.x0) * S, (sb.y1 - sb.y0) * S);
     c.strokeStyle = '#e8ecf4'; c.lineCap = 'round'; c.lineWidth = Math.max(1, 1.4 * host.dpr());
     for (let i = 0; i < lines; i += 6) { c.globalAlpha = airBuf[i + 2]; c.beginPath(); c.moveTo(ox + airBuf[i] * S, oy - airBuf[i + 1] * S); c.lineTo(ox + airBuf[i + 3] * S, oy - airBuf[i + 4] * S); c.stroke(); }
     c.globalAlpha = 1;
+  }
+  // The small overlay's enlarge mark, drawn in (app/head.html): its top (CSS px from the view's top) at the level under the
+  // lips (UNDER_LIPS), or 27 px above the view's bottom where the picture leaves more room under the chin, and how far it
+  // then hangs below the picture into the caption's band, which sets the band's text under it. The crop stands on the
+  // view's bottom at the scale the camera fits it (camera(), draw2D() alike), so the level's place needs no frame drawn.
+  function placeMark(b) {
+    const x = st.box; if (!x || x.mode !== 'overlay' || !x.crop) return;
+    const c = cropBox(b, false), S = scaleIn(frameFit(c, 3), x.w, x.h), under = x.h - (UNDER_LIPS * b.k - c[2]) * S;
+    const top = Math.max(x.h - 27, under), hang = x.mark ? Math.max(0, top + 24 - x.h) : 0, key = top.toFixed(1) + '|' + hang.toFixed(1);
+    st.hang = hang; if (key === st.markKey) return; st.markKey = key;
+    el.style.setProperty('--tract-grow-top', top.toFixed(1) + 'px'); el.style.setProperty('--tract-hang', hang.toFixed(1) + 'px');
   }
   function caption(q) {
     const i = q.info; if (!i) return '';
@@ -1096,9 +1117,15 @@ function attach(host) {
     // narrow box never separates a consonant from its vowel.
     const mark = s => { const plain = s.replace('+', ''); return plain === (cur || '') || s.split('+').includes(cur) ? '[' + plain + ']' : plain; };
     const syl = [[]]; for (const s of i.phones.split(' ').filter(Boolean)) { if (s === '·') syl.push([]); else syl[syl.length - 1].push(mark(s)); }
-    const sounds = syl.filter(a => a.length).map(a => a.join('')).join('\u00a0· ');
-    // the small overlay: «приблизно» alone on its first line, the sounds on the second
-    if (st.box?.mode === 'overlay' && st.box.crop) return (i.approx ? 'приблизно\n' : '') + sounds;
+    // (a line breaks before a syllable's dot, never after it, so no line ends on one)
+    const parts = syl.filter(a => a.length).map(a => a.join('')), sounds = parts.join(' ·\u00a0');
+    if (st.box?.mode === 'overlay' && st.box.crop) {
+      // the small overlay drawn in so far that its enlarge mark hangs into the caption's band holds one line: the syllable
+      // due now
+      if (st.hang > 4) return parts.find(a => a.includes('[')) ?? parts[0] ?? '';
+      // otherwise «приблизно» alone on its first line, the sounds on the second
+      return (i.approx ? 'приблизно\n' : '') + sounds;
+    }
     // the word on the first line and its sounds on the second, so a narrow column cuts none of them
     return '«' + i.w + '»' + (i.approx ? ' приблизно' : '') + '\n' + sounds;
   }
@@ -1139,7 +1166,7 @@ function attach(host) {
         word: cur?.q.info?.w ?? null, approx: !!cur?.q.info?.approx, sound: sound.textContent, painted: st.paintN, paintMs: +st.paintMs.toFixed(2), worker: painter.worker,
         software: !!(st.software || st.G?.software), workMs: st.workMs.slice(), buildMs: st.buildMs ?? null, yaw: st.yaw, outline: b ? outlineSummary(b) : null, particles: st.parts ? st.parts.map(q => +q.u.toFixed(5)) : [],
         crop: !!st.box?.crop, samples: st.G ? (st.G.ms ? st.G.samples : 0) : null, airOut: st.airOut ?? 0, streaks: Array.from({length: (st.lines || 0) / 6}, (_, i) => [+airBuf[6 * i + 3].toFixed(2), +airBuf[6 * i + 4].toFixed(2)]),
-        skinKeys: st.G?.body ? [...st.G.body.keys.keys()] : [], segments: st.tl ? st.tl.segs.length : 0, tight: !!st.box?.tight, mouthPx: p ? mouthPx(p) : null};
+        skinKeys: st.G?.body ? [...st.G.body.keys.keys()] : [], segments: st.tl ? st.tl.segs.length : 0, tight: !!st.box?.tight, mouthPx: p ? mouthPx(p) : null, face: p ? faceMarks() : null};
     },
     timeline() { const b = body(); return b ? tl(b) : null; },
     close() { painter.close(); },
@@ -1161,6 +1188,36 @@ function attach(host) {
     const front = {x: p.cl[2 * NC - 2], y: p.cl[2 * NC - 1]};
     const dpr = st.G?.software ? 1 : host.dpr();
     return +(Math.abs(st.proj(front.x, front.y)[0] - st.proj(back.x, back.y)[0]) / dpr).toFixed(1);
+  }
+  // Where the face's working parts stand (test hook): the lips (the back midline from the mouth's corner to under the nose,
+  // the front one from the fold under the lower lip to the mouth), the nostril (the back midline from under the nose to
+  // its tip) and each streak of the breath in front of them; boxes [x0, y0, x1, y1] in CSS pixels from the view's top
+  // left (px), and in body cm (cm). The suite keeps the enlarge mark off them.
+  function faceMarks() {
+    const o = st.cur?.outline, b = st.shown ? body() : null; if (!st.proj || !o || !b) return null;
+    const dpr = st.G?.software ? 1 : host.dpr(), at = (x, y) => st.proj(x, y).map(v => v / dpr);
+    const box = list => { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const [x, y] of list) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); } return [x0, y0, x1, y1].map(v => +v.toFixed(2)); };
+    const P = (a, i) => [a[2 * i], a[2 * i + 1]], n = a => a.length / 2;
+    // back: the upper lip's front, then under the nose (the hindmost point before the tip), then the tip (the foremost)
+    // (found on the resting face: the midlines keep their vertices, so the same indices hold in every posture)
+    const idx = st.faceIdx?.[b.tag] ?? ((st.faceIdx ??= {})[b.tag] = (() => {
+      const r = keyframe(b, null, 'rest').outline, B = r.back, F = r.front;
+      let lipF = 0; while (lipF + 1 < n(B) && B[2 * lipF + 2] >= B[2 * lipF]) lipF++;
+      let sub = lipF; while (sub + 1 < n(B) && B[2 * sub + 2] <= B[2 * sub]) sub++;
+      let tip = sub; while (tip + 1 < n(B) && B[2 * tip + 2] >= B[2 * tip]) tip++;
+      // front (neck, chin, lower lip): from the mouth back over the lower lip to the fold above the chin
+      let fold = n(F) - 1; while (fold > 0 && F[2 * fold - 2] >= F[2 * fold]) fold--; while (fold > 0 && F[2 * fold - 2] <= F[2 * fold]) fold--;
+      return {sub, tip, fold};
+    })());
+    const B = o.back, F = o.front, {sub, tip, fold} = idx;
+    const cmLips = [], cmNose = [];
+    for (let i = 0; i <= sub; i++) cmLips.push(P(B, i));
+    for (let i = fold; i < n(F); i++) cmLips.push(P(F, i));
+    for (let i = sub; i <= tip; i++) cmNose.push(P(B, i));
+    const front = Math.max(...cmLips.map(q => q[0])), cmAir = [];
+    for (let i = 0; i < (st.lines || 0); i += 6) if (airBuf[i + 2] > .1 && Math.max(airBuf[i], airBuf[i + 3]) > front - .3) cmAir.push(box([[airBuf[i], airBuf[i + 1]], [airBuf[i + 3], airBuf[i + 4]]]));
+    const px = list => box(list.map(q => at(q[0], q[1])));
+    return {lips: px(cmLips), nostril: px(cmNose), air: cmAir.map(a => px([[a[0], a[1]], [a[2], a[3]]])), cm: {lips: box(cmLips), nostril: box(cmNose), air: cmAir}};
   }
   function outlineSummary(b) { let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity; for (let i = 0; i < b.rest.length; i += 3) { x0 = Math.min(x0, b.rest[i]); x1 = Math.max(x1, b.rest[i]); y0 = Math.min(y0, b.rest[i + 1]); y1 = Math.max(y1, b.rest[i + 1]); } return {x0: +x0.toFixed(2), x1: +x1.toFixed(2), y0: +y0.toFixed(2), y1: +y1.toFixed(2)}; }
 }
