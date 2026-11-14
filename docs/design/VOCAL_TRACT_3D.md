@@ -1,9 +1,11 @@
 # Design: a 3D cut-away head that shows how to sing what is due
 
-> **Status (2026-11-14):** slice 1 is built (§8): the panel with the male or female head, hair, articulation from the
-> lyric's sounds on the target's timing, the air, the three layouts, the frame budget and the 2D fallback, baked from
-> Chimera commit **`e81bc07`** (the fork's main was still at `2e567e2` when the build started). Slices 2 (engaged zones and
-> hints) and 3 (the air in detail) are still to come. The build changed settled details, each marked where it stands:
+> **Status (2026-11-14):** slices 1 and 2 are built (§8). Slice 1: the panel with the male or female head, hair,
+> articulation from the lyric's sounds on the target's timing, the air, the three layouts, the frame budget and the 2D
+> fallback, baked from Chimera commit **`e81bc07`** (the fork's main was still at `2e567e2` when the build started).
+> Slice 2: the four zones with their levels, tints and labels, one hint, the clamp tips, the ⓘ dialog and the honesty
+> line; how it was built is under §4.3 «Slice 2 as built». Slice 3 (the air in detail) is still to come. The builds
+> changed settled details, each marked where it stands:
 > the hair's colour (§4.2), an onset's length after a rest (§4.5), and in §5 the head in the narrower column, a short
 > column's shape and the phone overlay's place and size while singing and paused. Below, the design as settled on 2026-11-13; § [Operator
 > decisions](#operator-decisions-settled-2026-11-13) pins the operator's answers.
@@ -416,6 +418,49 @@ lists: «Модель Chimera» (the shapes of the tongue, jaw, lips and soft pa
 folds' state), «Навчальна схема» (the lit zones and hints, the folds' stretch with pitch, the air's speed, the hair),
 «Не вимірюється» (your voice's shape, your muscles).
 
+**Slice 2 as built (2026-11-14).** What the build settled or changed against the text above:
+
+- *Levels.* The jaw's is its opening over 2.6 cm, the top of Chimera's jaw range (`crates/chimera/src/control/articulators.rs`,
+  `ARTIC_SPECS`). The tongue's place is the smallest of the airway's area samples 4–20 (the pharynx 4–11 for the root,
+  12–14 for the back, 15–20 for the front); the tip is read from the tongue values instead (the tip at 8 cm or higher
+  and not drawn back behind the ridge, `ttY ≥ 8`, `ttX ≥ 6`, its narrowing over samples 17–21). These give §4.3's lists
+  for both bodies, checked for every sound. The soft palate's level runs from 1 (raised) to 0.2 (lowered) with the
+  model's value, so a cross-fade dims it. The larynx's is 0.3 + 0.55·p + 0.15·(the sound's larynx lift over 1.15 cm), p
+  clamped to the range; with no note due, no p and no hint that needs one. A zone counts as engaged from 0.25 (jaw), 0.3
+  (tongue), 0.5 (soft palate) and 0.65 (larynx). The range (C3–E4, A3–C♯5) is read from `Keys.tsx`'s `BASES` and its
+  17 keys.
+- *Hints.* Each consonant class has its line; on a vowel the larynx above 0.8 or below 0.15 of the range, then the
+  jaw's clamp (a closed vowel above 0.6), the root's (a back vowel below 0.35), the lips' (a rounded vowel), then the
+  tongue's place (with «Щелепа відкрита» on an open vowel). A short form stands where the panel is small. The rising
+  larynx on a high note is the high note's own hint.
+- *What lights.* A zone lights only while its name stands on screen, in the hint or in a label, so no zone is told by
+  colour alone; a zone the hint names shows at a middling strength at least (a clamp tip names a zone because it should
+  not engage). The tint is the trainer's amber: a wash at about half of 0.15 + 0.45 × level, a soft rim inside the
+  edge at that strength and the 2 px outline; the tongue brighter around the part raised; the larynx over its
+  cartilages instead of a box around them. The regions live in the painter's template coordinates, so the data was not
+  baked again.
+- *Labels* stand in a tall column and in the enlarged head only: «Щелепа відкрита», «Язик: корінь назад», «М’яке
+  піднебіння підняте», «Гортань: складки звучать», stacked in the room in front of the neck under the chin (below the
+  level the lips and the breath never reach, right of the chin as the open jaw draws it), each on a line to its zone, in
+  the order whose lines cross least, as many as fit; the soft palate raised counts half when one must give way. The
+  zone the hint names gets no label, so a fact stands once.
+- *Placement in each state.* A tall column (1440 × 900 and 900 × 1000 idle): the hint beside the caption under the
+  picture from 360 px wide, on its own two lines under it in a narrower column; the picture keeps its size from sound to
+  sound. A short column (after a take, 1366 × 650, 1200 × 800): the hint's short form on one or two lines along the
+  panel's bottom, under the words and the picture, ⓘ at its end (the words' column holds no more: at 1366 × 650 a
+  three-line hint there ran onto the buttons, and widening the column left an empty strip beside the spine while no
+  hint stood). The phone's small overlay: the hint's short form beside it on the
+  sung part of the roll, toward the plot's middle (under it at the top, over it at the bottom), from its left edge to
+  6 px short of the playhead, three lines at most; the words step around both, and paused the overlay prefers, at the
+  same size, a place where the notes of the last 2 s are clear of the hint as well. The enlarged head: as a tall column.
+- *Honesty.* The line along the panel's bottom reads «Форма — модель Chimera, зони й підказки — навчальна схема» with ⓘ
+  at its end; a column reaches down over the strip the roll's time axis leaves free under it (a time label that would
+  reach it is left out), so the picture keeps its size. The full statement and the three lists stand in a dialog behind
+  ⓘ, the trainer's own modal dialog; it also names the default range and the vocal octave switch. A short column keeps
+  the line behind ⓘ (its bottom row holds the hint), and the small overlay leaves it to the enlarged head.
+- *Deferred:* the 1 Hz pulse of a rising zone: each step would paint the cut face again and upload it, a cost the frame
+  budget does not need for a decoration.
+
 ### 4.4 (d) Airflow
 
 The path runs from the trachea at the bottom of the neck's cut, through the glottis, the pharynx and the mouth, out at
@@ -597,10 +642,12 @@ frame budget and the 2D fallback.
 | `README.md`, `docs/TARGET_MAP_SCHEMA.md` | the feature, the layout, the tests; the `LUMA_PHONES` line |
 | `docs/design/VOCAL_TRACT_3D.md` | the status line |
 
-**Slice 2 — what engages:** the four zones with their levels, tints, labels and the hint line; the clamp tips; the ⓘ
-popover with the three lists; the honesty line. Files: `app/tract3d.js` (zone regions and levels, the painter's tints),
-`app/head.html` (hint line, popover, styles), `tools/gen_tract3d.ts` and the regenerated data (zone regions and the
-per-body range, if slice 1 did not bake them), `tests/e2e/tract3d.mjs`, `README.md`.
+**Slice 2 — what engages** (built 2026-11-14, §4.3 «Slice 2 as built»): the four zones with their levels, tints,
+labels and the hint line; the clamp tips; the ⓘ popover with the three lists; the honesty line. Files: `app/tract3d.js`
+(zone regions and levels, the painter's tints, labels and leader lines), `app/head.html` (hint line, popover, styles),
+`app/app.js` (the hint's and the note's places, the phone's hint beside the overlay), `tests/e2e/tract3d.mjs`,
+`README.md`. The generator and the data stayed as slice 1 baked them: the regions live in the painter's template
+coordinates and the per-body range in `app/tract3d.js`.
 
 **Slice 3 — the air in detail:** the stop's build-up and burst, sparks at fricatives, the nasal share beside nasals,
 the breath in before phrases, the «вдих» and «з легень» labels, reduced motion. Files: `app/tract3d.js`,
