@@ -232,23 +232,24 @@ for (const [width, height, take, wide] of [[1440, 900, false, false], [900, 1000
 
 // ── 1 · on a phone, while the demo is sung through, the overlay leaves what was just sung in sight ───────────────────
 // Every 3rd frame of a pass at 60 frames a song second: no note sung in the last 2 s (its bar) lies under the overlay and
-// no word does; the overlay stands at the bottom or the top of the sung part, 30 % of the plot high while singing, and
-// moves seldom.
+// no word does; the overlay stands at the bottom or the top of the sung part, 30 % of the plot high while singing (drawn
+// in to no less than 55 % of that where a run of notes crosses both ends), and does not jump back and forth.
 {
   const o = await page(url, {viewport: {width: 390, height: 844}, dpr: 3, settings: seeded('male')}); await ready(o.p);
-  const r = await o.p.evaluate(async () => { const T = window.Luma.test, e = Math.min(window.LUMA_SONG.duration - .5, 32), out = {bad: [], words: [], moves: [], n: 0, share: null}; T.fakeSing({a: 2, b: e});
+  const r = await o.p.evaluate(async () => { const T = window.Luma.test, e = Math.min(window.LUMA_SONG.duration - .5, 32), out = {bad: [], words: [], moves: [], n: 0, share: null, least: 1}; T.fakeSing({a: 2, b: e});
     const hit = (a, b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1; let spot = null;
     for (let k = 0; ; k++) { const t = T.fakeTick(k / 60);
-      if (k % 3 === 0) { const s = T.tract(), ov = s.overlay, pl = T.plot(); out.n++; if (out.share === null) out.share = (ov.y1 - ov.y0) / (pl.bottom - pl.top);
+      if (k % 3 === 0) { const s = T.tract(), ov = s.overlay, pl = T.plot(), share = (ov.y1 - ov.y0) / (pl.bottom - pl.top); out.n++; if (out.share === null) out.share = share; out.least = Math.min(out.least, share / out.share);
         for (const n of T.noteRects()) if (n.b > t - 2 && n.a < t && hit(n, ov)) out.bad.push(+t.toFixed(2) + ':' + n.id);
         for (const w of T.wordBoxes()) if (hit(w, ov)) out.words.push(+t.toFixed(2) + ':' + w.w);
         if (s.spot !== spot) { if (spot !== null) out.moves.push({t: +t.toFixed(2), spot: s.spot}); spot = s.spot; } }
       if (k % 6 === 0) await new Promise(r => setTimeout(r)); if (t >= e - .05 || T.state().mode !== 'singing') break; }
     T.fakeFinish(); await new Promise(r => requestAnimationFrame(r)); const s = T.tract(), pl = T.plot(); out.after = (s.overlay.y1 - s.overlay.y0) / (pl.bottom - pl.top); T.closeTrace(); return out; });
-  const gaps = r.moves.slice(1).map((m, i) => m.t - r.moves[i].t);
+  // back to the end it left within 1.5 s: a jump back and forth
+  const trips = r.moves.slice(2).filter((m, i) => m.spot === r.moves[i].spot && m.t - r.moves[i].t < 1.5);
   assert(r.n > 500 && !r.bad.length && !r.words.length, `390 px, the demo sung through (${r.n} frames): no note sung in the last 2 s and no word under the overlay ` + JSON.stringify({notes: r.bad.slice(0, 8), words: r.words.slice(0, 8)}));
-  assert(r.moves.some(m => m.spot === 'high') && r.moves.length <= 8 && (!gaps.length || Math.min(...gaps) >= 2) && Math.abs(r.share - .3) < .01 && Math.abs(r.after - .4) < .01,
-    `390 px, singing: the overlay is 30 % of the plot high (${r.share.toFixed(3)}; ${r.after.toFixed(3)} after the take) and moves ${r.moves.length} times, at least ${gaps.length ? Math.min(...gaps).toFixed(2) : '–'} s apart: ` + r.moves.map(m => m.t + ' ' + m.spot).join(', '));
+  assert(r.moves.some(m => m.spot === 'high') && r.moves.length <= 10 && !trips.length && Math.abs(r.share - .3) < .01 && r.least >= .54 && Math.abs(r.after - .4) < .01,
+    `390 px, singing: the overlay is 30 % of the plot high (${r.share.toFixed(3)}, at least ${(100 * r.least).toFixed(0)} % of that; ${r.after.toFixed(3)} after the take) and moves ${r.moves.length} times, never back within 1.5 s: ` + r.moves.map(m => m.t + ' ' + m.spot).join(', '));
   await done(o, '390 px singing');
 }
 

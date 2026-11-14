@@ -1470,8 +1470,9 @@ function placeTract(box){const el=$('tract');s.tractW=0;s.tractBox=null;s.tractS
   // small, it stands bottom left on the sung part of the roll, or top left while what was just sung lies in the bottom
   // rows (tractSpot(), every frame); while singing it is a quarter smaller (30 % of the plot high), so the notes of the last
   // 2 s, their marks and the voice on them stay in sight at one of its two places
-  else{const sing=s.mode==='singing',h=Math.round((b.bottom-b.top)*(sing?.3:.4)),w=Math.round((.34*(b.right-b.left)-16)*(sing?.75:1));s.tractSpots={low:b.bottom-4-h,high:b.top+4};const spot=s.tractSpot==='high'?'high':'low';
-   r={x:b.left+4,y:s.tractSpots[spot],w,h,mode:'overlay',crop:true,spot};s.tractBox={x0:r.x,y0:r.y,x1:r.x+w,y1:r.y+h};}}
+  else{const sing=s.mode==='singing',h=Math.round((b.bottom-b.top)*(sing?.3:.4)),w=Math.round((.34*(b.right-b.left)-16)*(sing?.75:1));
+   s.tractSpots={left:b.left+4,top:b.top+4,bottom:b.bottom-4,w,h};if(!sing)s.tractScale=1;const spot=s.tractSpot==='high'?'high':'low',q=tractBoxAt(spot,s.tractScale||1);
+   r={x:q.x0,y:q.y0,w:q.x1-q.x0,h:q.y1-q.y0,mode:'overlay',crop:true,spot};s.tractBox=q;}}
  el.style.left=r.x+'px';el.style.top=r.y+'px';el.style.width=r.w+'px';el.style.height=r.h+'px';el.dataset.mode=r.mode;el.dataset.big=r.big?'1':'0';el.dataset.picked=picked?'1':'0';el.dataset.spot=r.spot||'';el.dataset.shape='tall';el.dataset.sing=s.mode==='singing'?'1':'0';
  $('tractPick').hidden=picked;$('tractClose').hidden=!r.big;$('tractTag').hidden=$('tractGrow').hidden=!picked||r.mode!=='overlay'||!!r.big;$('tractTag').textContent=picked?window.LumaTract.LABEL[prefs.tractBody]:'';
  let v=$('tractView').getBoundingClientRect();
@@ -1482,18 +1483,30 @@ function placeTract(box){const el=$('tract');s.tractW=0;s.tractBox=null;s.tractS
    el.style.setProperty('--tract-pic',Math.round(Math.min((r.h-2)*window.LumaTract.CROP_ASPECT,r.w-2-words))+'px');r.crop=r.tight=true;v=$('tractView').getBoundingClientRect();}}
  tract.layout({mode:r.mode,w:v.width,h:v.height,crop:!!r.crop,tight:!!r.tight});}
 // The phone's small overlay keeps clear of the notes sung in the last 2 s that lie under it (each note's bar and, in the
-// contour view, the mark under it) and, after them, of those that reach it within TRACT_LOOK s: it stays where it is while
-// its place is clear, moves to the other end of the sung part when that one is clearer, and after a seek starts at the
-// bottom unless the top is clearer. The words step around it in drawWords().
-const TRACT_LOOK=.8;
-function tractSpot(t,b,v,y,barH){const sp=s.tractSpots,tb=s.tractBox;if(!sp||!tb||s.tractBig)return;
- const h=tb.y1-tb.y0,o=effective().octave,at=xx=>v.a+(xx-b.left)/(b.right-b.left)*v.span,ta=Math.max(t-2,at(tb.x0)),tz=at(tb.x1+2),under=prefs.view==='contour'?27:barH/2;
- // notes under it now count before notes on their way to it
- const hits=spot=>{const y0=sp[spot]-4,y1=sp[spot]+h+4;let now=0,soon=0;for(const q of song.notes){if(q.a>=tz+TRACT_LOOK)break;if(q.b<=ta)continue;const yy=y(q.m+o);if(yy+under<=y0||yy-barH/2>=y1)continue;if(q.a<tz)now++;else soon++;}return now*1000+soon;};
- const fresh=s.tractSpotT===undefined||Math.abs(t-s.tractSpotT)>.5,cur=s.tractSpot==='high'?'high':'low',other=cur==='low'?'high':'low';s.tractSpotT=t;
- let next=cur;if(fresh){const lo=hits('low');next=lo&&hits('high')<lo?'high':'low';}else{const c=hits(cur);if(c&&hits(other)<c)next=other;}
- if(next===s.tractSpot&&$('tract').dataset.spot===next)return;
- s.tractSpot=next;const el=$('tract');el.style.top=sp[next]+'px';el.dataset.spot=next;s.tractBox={...tb,y0:sp[next],y1:sp[next]+h};}
+// contour view, the mark under it) and, after them, of those that reach it within TRACT_LOOK s. While its place is clear
+// it stays. When such a note lies under it now, it takes the best place at either end of the sung part, clear now before
+// clear of what is on its way; while singing, if no whole box is clear, it draws in toward an end's corner (TRACT_SIZES of
+// its box), the largest that is clear. When a note is only on its way, it moves to the other end if that is clear, at
+// most once in TRACT_HOLD s, and a smaller box grows back once its whole box is clear and TRACT_HOLD s have passed.
+// After a seek it starts at the bottom unless the top is clearer. The words step around it in drawWords().
+const TRACT_LOOK=.8,TRACT_SIZES=[1,.85,.7,.55],TRACT_HOLD=1.5;
+function tractBoxAt(spot,k){const sp=s.tractSpots,w=Math.round(sp.w*k),h=Math.round(sp.h*k),y0=spot==='high'?sp.top:sp.bottom-h;return {x0:sp.left,y0,x1:sp.left+w,y1:y0+h};}
+function tractSpot(t,b,v,y,barH){const sp=s.tractSpots;if(!sp||!s.tractBox||s.tractBig)return;
+ const o=effective().octave,at=xx=>v.a+(xx-b.left)/(b.right-b.left)*v.span,under=prefs.view==='contour'?27:barH/2;
+ // [notes under it now, notes on their way to it]
+ const hits=(spot,k)=>{const q0=tractBoxAt(spot,k),ta=Math.max(t-2,at(q0.x0)),tz=at(q0.x1+2);let now=0,soon=0;
+  for(const q of song.notes){if(q.a>=tz+TRACT_LOOK)break;if(q.b<=ta)continue;const yy=y(q.m+o);if(yy+under<=q0.y0-4||yy-barH/2>=q0.y1+4)continue;if(q.a<tz)now++;else soon++;}return [now,soon];};
+ const sing=s.mode==='singing',fresh=s.tractSpotT===undefined||Math.abs(t-s.tractSpotT)>.5,cur=s.tractSpot==='high'?'high':'low',other=cur==='low'?'high':'low',k=sing?s.tractScale||1:1,calm=t-(s.tractMovedT??-1e9)>=TRACT_HOLD;s.tractSpotT=t;
+ let next=cur,nk=k;
+ if(fresh){nk=1;const lo=hits('low',1),hi=hits('high',1);if((lo[0]||lo[1])&&hi[0]*1000+hi[1]<lo[0]*1000+lo[1])next='high';else next='low';}
+ else{const [now,soon]=hits(cur,k);
+  if(now){const rank=(e,z,[n,w])=>[n>0?1:0,w>0?1:0,-z,e===cur?0:1],less=(p,q)=>{for(let i=0;i<p.length;i++)if(p[i]!==q[i])return p[i]<q[i];return false;};
+   let best=rank(cur,k,[now,soon]);for(const e of [cur,other])for(const z of sing?TRACT_SIZES:[k]){const r=rank(e,z,hits(e,z));if(less(r,best)){best=r;next=e;nk=z;}}}
+  else if(soon){if(calm&&!hits(other,k).some(Boolean))next=other;}
+  else if(k<1&&calm)for(const z of TRACT_SIZES){if(z<=k)break;if(!hits(cur,z).some(Boolean)){nk=z;break;}}}
+ if(next===s.tractSpot&&nk===(s.tractScale||1)&&$('tract').dataset.spot===next)return;
+ if(next!==cur||nk!==k)s.tractMovedT=t;
+ s.tractSpot=next;s.tractScale=nk;const el=$('tract'),q=tractBoxAt(next,nk);el.style.top=q.y0+'px';el.style.width=q.x1-q.x0+'px';el.style.height=q.y1-q.y0+'px';el.dataset.spot=next;s.tractBox=q;}
 // Phones, and phones held sideways: the page scrolls, so the stage takes exactly the height that leaves «Співати» on the first
 // screen — measured, not guessed, because the title, the hint banner and the browser chrome all move the space above it.
 // Never called from the resize observer: it writes a length, and the observer only reads.
