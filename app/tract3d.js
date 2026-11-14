@@ -129,13 +129,17 @@ function syllables(str) {
 // docs/design/VOCAL_TRACT_3D.md §4.5 «Timing», after Chimera's sung rules (crates/chimera/src/phonetics/sing.rs): the
 // vowel lands on the note, onset consonants end at its start, codas end at the next onset (or with the note before a
 // rest); a word with fewer notes than syllables splits its span evenly; a diphthong holds its first vowel 80 % of the time.
-const RAMP = {vowel: .06, cons: .03, rest: .15}, REST_GAP = .25, MIN_VOWEL = .4;
+// After a rest (or at the start), an onset shorter than HOLD takes its closure up earlier, out of the silence before the
+// note, so it lasts long enough to be seen while the song plays: at Chimera's 55 ms an /m/ is three frames. The vowel
+// still lands on the note.
+const RAMP = {vowel: .06, cons: .03, rest: .15}, REST_GAP = .25, MIN_VOWEL = .4, HOLD = .18;
 function timeline(song, phones, dur) {
   const notes = (song.notes || []).filter(n => !n.ignored).slice().sort((a, b) => a.a - b.a);
   const words = [];
   for (const line of song.lyrics || []) for (const w of line.words || []) if (Number.isFinite(w.a) && Number.isFinite(w.b) && w.b > w.a) words.push(w);
   words.sort((a, b) => a.a - b.a);
   const segs = [], info = [];
+  let reach = -Infinity;   // where the sounds laid so far end
   const durOf = s => Math.max(.035, dur(plain(s)));
   words.forEach((w, wi) => {
     const k = key(w.w);
@@ -163,6 +167,8 @@ function timeline(song, phones, dur) {
       let total = s.onset.reduce((q, c) => q + durOf(c), 0), scale = 1;
       if (sa - total < floor && total > 0) scale = Math.max(.25, (sa - floor) / total);
       let t = sa - total * scale;
+      const free = t - (segs.length ? reach : -Infinity);
+      if (total > 0 && scale === 1 && total < HOLD && free >= REST_GAP) { const add = Math.max(0, Math.min(HOLD - total, t)); scale = (total + add) / total; t -= add; }
       // a coda left on the previous syllable shares the time before this onset: it ends where the onset starts
       const lastCoda = segs.length && segs.at(-1).coda ? segs.at(-1) : null;
       if (lastCoda && lastCoda.b > t) {
@@ -182,6 +188,7 @@ function timeline(song, phones, dur) {
       } else segs.push({sym: s.nucleus[0], a: sa, b: vEnd, kind: 'vowel', ...base, silent});
       let ct = vEnd; const cf = coda > 0 ? Math.min(1, (sb - vEnd) / coda) || 1 : 1;
       for (const c of s.coda) { const d = durOf(c) * cf; segs.push({sym: c, a: ct, b: ct + d, kind: KIND.get(plain(c)), coda: true, syl: wi * 100 + si, ...base}); ct += d; }
+      reach = Math.max(reach, ct, vEnd);
     });
   });
   // gaps: a short one holds the last sound, a long one relaxes to rest
@@ -243,7 +250,8 @@ function vertexNormals(pos, idx, n) {
 const lin = hex => { const v = parseInt(hex.slice(1), 16); return [(v >> 16) & 255, (v >> 8) & 255, v & 255].map(c => { c /= 255; return c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4; }); };
 // Chimera scene.ts: the skin's colours, the lips' vermilion, warmth over cheeks, nose, ears and chin, shade in creases
 const SKIN = lin('#dab09b'), LIPC = lin('#b9625f'), BLUSH = lin('#cf8674'), SHADE = lin('#9c6a5c'), MUCOSA = lin('#b4555c'), FLUSH = [1.04, .87, .84];
-const HAIR = lin('#3a2a21');
+// a mid brown: a dark one (#3a2a21) measured 1.47:1 against the panel, and the short male hair read as a bald head
+const HAIR = lin('#8a6a52');
 function mottle(x, y, z) {
   const hash = (i, j, k) => { const h = Math.sin(i * 127.1 + j * 311.7 + k * 74.7) * 43758.5453; return h - Math.floor(h); };
   const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z), e = t => t * t * (3 - 2 * t), fx = e(x - ix), fy = e(y - iy), fz = e(z - iz);
@@ -386,7 +394,8 @@ function makeBody(tag) {
   }
   // the skin's midline for the cut (front: neck → chin → lower lip; back: upper lip → crown → neck), from a posed buffer
   const outline = buf => { const flat = ids => { const o = new Float32Array(2 * ids.length); ids.forEach((i, j) => { o[2 * j] = buf[6 * i]; o[2 * j + 1] = buf[6 * i + 1]; }); return o; }; return {front: flat(sh.midFront), back: flat(sh.midBack)}; };
-  return {tag, k, ph: B.pharynx, pivot: {x: B.pivot[0], y: B.pivot[1]}, jawRest: B.jawRest, n, rest, far: Uint32Array.from(far), colors, posture, pose, outline, dur: scale,
+  let bottom = Infinity; for (let i = 1; i < rest.length; i += 3) bottom = Math.min(bottom, rest[i]);
+  return {tag, k, ph: B.pharynx, pivot: {x: B.pivot[0], y: B.pivot[1]}, jawRest: B.jawRest, n, rest, bottom, far: Uint32Array.from(far), colors, posture, pose, outline, dur: scale,
     hair: {pos: hpos, nrm: hnrm, tan: htan, far: Uint32Array.from(hfar), n: hn, band}, still, nose,
     // the air comes up from the trachea where the neck is cut
     neck: Math.max(rest[3 * sh.midFront[0] + 1], rest[3 * sh.midBack[sh.midBack.length - 1] + 1]) + .2 * k};
@@ -408,7 +417,8 @@ function baredLips(lp, s, k) {
 // Chimera section.ts: the midsagittal section, painted on a canvas the scene maps onto the plane of the cut. Its source
 // is shared with a worker (painterSource.toString()), so the painting runs off the trainer's main thread where it can.
 function painterSource() {
-  const CUT = {skin: '#e3b59c', fat: '#efd17c', muscle: '#a04442', deep: '#8c3d3c', bone: '#efe6d2', marrow: '#e2d2b4', cartilage: '#c4dcd6', brain: '#dcbcb6', brainFold: '#b98d8a', white: '#efe3d8', cord: '#ecdcae', tongue: '#b5484e', fibre: '#c8656b', mucosa: '#d4868a', enamel: '#f6f2e8', dentine: '#e8dcc0', hollow: '#3b1517', hair: '#3a2a21', strand: '#6b5444'};
+  const LUMEN = 1.0;   // cm above the glottis (body scale) up to which the air on the cut face is painted, not cut out
+  const CUT = {skin: '#e3b59c', fat: '#efd17c', muscle: '#a04442', deep: '#8c3d3c', bone: '#efe6d2', marrow: '#e2d2b4', cartilage: '#c4dcd6', brain: '#dcbcb6', brainFold: '#b98d8a', white: '#efe3d8', cord: '#ecdcae', tongue: '#b5484e', fibre: '#c8656b', mucosa: '#d4868a', enamel: '#f6f2e8', dentine: '#e8dcc0', hollow: '#3b1517', hair: '#80604a', strand: '#a8876b'};
   function offsetIn(pts, d) { const out = []; for (let i = 0; i < pts.length; i++) { const a = pts[Math.max(0, i - 2)], b = pts[Math.min(pts.length - 1, i + 2)], tx = b.x - a.x, ty = b.y - a.y, l = Math.hypot(tx, ty) || 1; out.push({x: pts[i].x - (ty / l) * d, y: pts[i].y + (tx / l) * d}); } return out; }
   function smoothOpen(pts, per = 8) { const n = pts.length, out = []; if (n < 3) return pts; for (let i = 0; i + 1 < n; i++) { const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(n - 1, i + 2)]; for (let s = 0; s < per; s++) { const t = s / per, t2 = t * t, t3 = t2 * t; out.push({x: .5 * (2 * p1.x + (p2.x - p0.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (3 * p1.x - p0.x - 3 * p2.x + p3.x) * t3), y: .5 * (2 * p1.y + (p2.y - p0.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (3 * p1.y - p0.y - 3 * p2.y + p3.y) * t3)}); } } out.push(pts[n - 1]); return out; }
   function smoothClosed(pts, per = 6) { const n = pts.length, out = []; for (let i = 0; i < n; i++) { const p0 = pts[(i + n - 1) % n], p1 = pts[i], p2 = pts[(i + 1) % n], p3 = pts[(i + 2) % n]; for (let s = 0; s < per; s++) { const t = s / per, t2 = t * t, t3 = t2 * t; out.push({x: .5 * (2 * p1.x + (p2.x - p0.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (3 * p1.x - p0.x - 3 * p2.x + p3.x) * t3), y: .5 * (2 * p1.y + (p2.y - p0.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (3 * p1.y - p0.y - 3 * p2.y + p3.y) * t3)}); } } return out; }
@@ -532,6 +542,9 @@ function painterSource() {
     for (const name of ['upperTeeth', 'lowerTeeth']) { const t = outline(name); fill(t, CUT.enamel); if (t.length > 2) stroke(t, CUT.dentine, .06 * k, true); }
     stroke(front, CUT.fat, 2 * .55 * k); stroke(back, CUT.fat, 2 * .55 * k); stroke(front, CUT.skin, 2 * .2 * k); stroke(back, CUT.skin, 2 * .2 * k);
     ctx.restore();
+    // the skin's edge half a millimetre past the midline: turned, the face's edge and the skin's own cut edge left cracks a
+    // texel wide, through which the inside of the far half showed as dark specks
+    stroke(front, CUT.skin, .1 * k); stroke(back, CUT.skin, .1 * k);
     // the hair's band on the scalp (and, long, behind the neck): its colour, with strands along it
     if (d.band && d.band.outer.length > 2) {
       const o = d.band.outer, inn = d.band.inner, poly = [...o, ...inn.slice().reverse()];
@@ -546,7 +559,12 @@ function painterSource() {
     if (d.air[0]) poly(d.air[0]);
     mctx.globalCompositeOperation = 'destination-out'; for (const t of Object.values(d.tissue)) poly(t);
     mctx.globalCompositeOperation = 'source-over'; for (const a of d.air.slice(1)) poly(a);
+    // Below the entrance of the larynx nothing lies behind the cut: turned, the view through the air went out of the head
+    // and showed the page. There the air stays painted, a dark lumen like the windpipe's under it.
+    const low = Math.max(0, Math.min(H, Y(g.y + LUMEN * k)));
+    mctx.globalCompositeOperation = 'source-atop'; mctx.fillStyle = CUT.hollow; mctx.fillRect(0, low, W, H - low);
     ctx.save(); path(ctx, head); ctx.clip(); ctx.shadowColor = CUT.mucosa; ctx.shadowBlur = .12 * k * S; ctx.globalCompositeOperation = 'source-atop'; ctx.drawImage(mctx.canvas, 0, 0); ctx.restore();
+    mctx.globalCompositeOperation = 'destination-out'; mctx.fillRect(0, low, W, H - low); mctx.globalCompositeOperation = 'source-over';
     ctx.globalCompositeOperation = 'destination-out'; ctx.drawImage(mctx.canvas, 0, 0); ctx.globalCompositeOperation = 'source-over';
   }
   return {paint, CUT};
@@ -554,6 +572,10 @@ function painterSource() {
 const PAINTER = painterSource();
 // The section's extent (body cm): the neck's cut to the crown, the nape (and the hair) to the nose
 const sectionBounds = k => ({x0: -15 * k, x1: 10.5 * k, y0: -5.4 * k, y1: 25.6 * k});
+// The phone's small overlay shows the mouth to the larynx (body cm, [x0, x1, y0, y1]): from behind the spine to past the
+// nostril, from the neck's cut (or 2 cm under the glottis, where the neck runs on) to above the nasal cavity, so the
+// nose's way and the soft palate stay inside and the space in front of the neck holds the body's tag.
+const cropBox = b => [-3.4 * b.k, 10.2 * b.k, Math.max(b.bottom, -2 * b.k), 14.4 * b.k];
 // The input of one painting, flat (it crosses to the worker as a few typed arrays): the blended posture's points, the
 // posed skin's midline, the hair's band; unpack() turns it into the polygons the painter draws.
 function paintInput(body, p, front, back, scale) {
@@ -626,8 +648,10 @@ void main() {
   vec3 h = normalize(uKey + v);
   if (uKind == 1) {
     // hair: a highlight stretched along the strands (Kajiya–Kay)
+    // and a light rim where the shell turns away, so its outline holds against the dark panel
     vec3 t = normalize(vT - n * dot(vT, n)); float th = dot(t, h), band = pow(sqrt(max(0.0, 1.0 - th * th)), 60.0);
-    col = vCol * (amb * 1.2 + d * 0.9) + band * vec3(0.22, 0.18, 0.15) * d;
+    float rim = pow(1.0 - max(dot(n, v), 0.0), 2.0);
+    col = vCol * (amb * 1.2 + d * 0.9 + rim * 0.45) + band * vec3(0.22, 0.18, 0.15) * d;
   } else col += pow(max(dot(n, h), 0.0), 36.0) * 0.07 * d;
   if (inside) col = vCol * vec3(0.55, 0.32, 0.32) * (0.35 + 0.4 * hemi);
   o = vec4(pow(clamp(col, 0.0, 1.0), vec3(1.0 / 2.2)), 1.0);
@@ -721,6 +745,9 @@ function airPath(body, p, nasal, path) {
   path.n = n; path.L[0] = 0;
   for (let i = 1; i < n; i++) path.L[i] = path.L[i - 1] + Math.hypot(path.x[i] - path.x[i - 1], path.y[i] - path.y[i - 1]);
   path.len = path.L[n - 1];
+  // where the mouth's way is narrowest (a closure: the tongue's tip on the ridge, the lips together), as an arc length
+  path.stop = path.len;
+  if (!nasal) { let m = 2; for (let i = 3; i < 2 + NC; i++) if (path.a[i] < path.a[m]) m = i; path.stop = path.L[m]; }
   return path;
 }
 function along(path, u, o) {
@@ -823,11 +850,12 @@ function attach(host) {
     if (k === 'fricative') return ab >= .2 ? 'voiceless' : 'voiced';
     return 'voiced';
   }
-  // the camera: a side view turned toward the face; the head (or, narrow, the mouth to the larynx) fills the view
-  // (one frame for both bodies, the male's: the female head stands 10 % smaller in it, as Chimera sizes them)
+  // the camera: a side view turned toward the face; the whole head fills the view (one frame for both bodies, the male's:
+  // the female head stands 10 % smaller in it, as Chimera sizes them), or, in the phone's small overlay, each body's own
+  // crop from the mouth to the larynx (cropBox)
   function camera(b, w, h) {
     const k = 1, crop = st.box?.crop, yaw = st.yaw * Math.PI / 180, pitch = st.pitch * Math.PI / 180;
-    const box = crop ? [-3.4, 10.2, -4, 12.4] : [-13.4, 9.4, -4.6, 24.6];
+    const box = crop ? cropBox(b) : [-13.4, 9.4, -4.6, 24.6];
     const cx = (box[0] + box[1]) / 2 * k, cy = (box[2] + box[3]) / 2 * k, hw = (box[1] - box[0]) / 2 * k, hh = (box[3] - box[2]) / 2 * k;
     const fov = 26 * Math.PI / 180, half = Math.tan(fov / 2), aspect = w / h;
     // turned, the head shows its depth: its width on screen is the box's width and the head's depth (±8 cm) mixed
@@ -860,6 +888,8 @@ function attach(host) {
         q.u = u / path.len;
       }
       if (U <= 0 && air !== 'closed') continue;
+      // while a closure holds no air passes it: what is beyond it is not drawn
+      if (air === 'closed' && u > path.stop) continue;
       along(path, u, at); const half = .42 * Math.sqrt(Math.max(.05, at.a)) * .8, len = Math.min(.9 * b.k, .12 * b.k + (U > 0 ? .0006 * U * b.k : 0));
       along(path, Math.max(0, u - len), tail);
       const alpha = clamp(Math.min(1, q.life * 1.6), 0, 1) * (air === 'closed' ? .35 : .8);
@@ -879,6 +909,7 @@ function attach(host) {
     st.cur = {q, p, air};
     const dt = st.lastT === null ? 0 : clamp(t - st.lastT, 0, .1); st.lastT = t;
     const lines = stepAir(b, p, air, st.moving ? dt : 0, reduced);   // floats in airBuf
+    st.lines = lines;
     // the cut face: painted again when a point has moved more than 0.2 mm since the last painting, or the body changed
     const G = ensureGL(b), dpr = G?.software ? 1 : host.dpr(), w = Math.max(1, Math.round(st.box.w * dpr)), h = Math.max(1, Math.round(st.box.h * dpr));
     const sb = sectionBounds(b.k), texH = clamp(Math.round(h * 1.15 / 64) * 64, 384, 1024), texW = Math.round(texH * (sb.x1 - sb.x0) / (sb.y1 - sb.y0));
@@ -960,7 +991,7 @@ function attach(host) {
     const c = c2d.getContext('2d');
     if (c2d.width !== w || c2d.height !== h) { c2d.width = w; c2d.height = h; }
     c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, w, h);
-    const sb = sectionBounds(b.k), crop = st.box?.crop ? {x0: -3.2 * b.k, x1: 9.6 * b.k, y0: -3.8 * b.k, y1: 12.6 * b.k} : {x0: -14.6 * b.k, x1: 10 * b.k, y0: -5.2 * b.k, y1: 25.4 * b.k};
+    const cb = st.box?.crop ? cropBox(b) : null, sb = sectionBounds(b.k), crop = cb ? {x0: cb[0], x1: cb[1], y0: cb[2], y1: cb[3]} : {x0: -14.6 * b.k, x1: 10 * b.k, y0: -5.2 * b.k, y1: 25.4 * b.k};
     const S = Math.min(w / (crop.x1 - crop.x0), h / (crop.y1 - crop.y0)) * .96, ox = (w - (crop.x1 - crop.x0) * S) / 2 - crop.x0 * S, oy = (h - (crop.y1 - crop.y0) * S) / 2 + crop.y1 * S;
     if (st.bitmap) c.drawImage(st.bitmap, ox + sb.x0 * S, oy - sb.y1 * S, (sb.x1 - sb.x0) * S, (sb.y1 - sb.y0) * S);
     c.strokeStyle = '#e8ecf4'; c.lineCap = 'round'; c.lineWidth = Math.max(1, 1.4 * host.dpr());
@@ -974,7 +1005,8 @@ function attach(host) {
     // on a phone leaves the word to the lyric band above it
     const sounds = i.phones.split(' ').filter(Boolean).map(s => s.replace('+', '') === (cur || '') || s.split('+').includes(cur) ? '[' + s.replace('+', '') + ']' : s.replace('+', '')).join(' ');
     if (st.box?.mode === 'overlay' && st.box.crop) return (i.approx ? 'приблизно · ' : '') + sounds;
-    return '«' + i.w + '»' + (i.approx ? ' приблизно' : '') + ' · ' + sounds;
+    // the word on the first line and its sounds on the second, so a narrow column cuts none of them
+    return '«' + i.w + '»' + (i.approx ? ' приблизно' : '') + '\n' + sounds;
   }
 
   // a press anywhere on the panel is the panel's: it never scrubs the roll under it
@@ -984,6 +1016,9 @@ function attach(host) {
   view.addEventListener('pointermove', e => { if (!st.drag) return; const dx = e.clientX - st.drag.x; if (Math.abs(dx) > 4) st.drag.moved = true; st.yaw = clamp(st.drag.yaw + dx * .45, -60, 60); render(); });
   view.addEventListener('pointerup', e => { const d = st.drag; st.drag = null; if (d && !d.moved && st.box?.mode === 'overlay' && host.idle()) host.enlarge?.(); });
   view.addEventListener('dblclick', e => { e.stopPropagation(); st.yaw = 15; render(); });
+  // the picture's size follows its box (a long word's sounds can take the caption a line further)
+  if (window.ResizeObserver) new ResizeObserver(() => { if (!st.box) return; const r = view.getBoundingClientRect(); if (r.width < 1 || r.height < 1) return;
+    if (Math.abs(r.width - st.box.w) > .5 || Math.abs(r.height - st.box.h) > .5) { st.box = {...st.box, w: r.width, h: r.height}; if (st.shown) render(); } }).observe(view);
 
   return {
     layout(box) { st.box = box; if (st.shown) render(); },
@@ -1009,6 +1044,7 @@ function attach(host) {
         velum: s ? (s[SC.port] > .05 || s[SC.velum] > .2 ? 'lowered' : 'raised') : null, jaw: s ? +s[SC.jaw].toFixed(3) : null,
         word: cur?.q.info?.w ?? null, approx: !!cur?.q.info?.approx, sound: sound.textContent, painted: st.paintN, paintMs: +st.paintMs.toFixed(2), worker: painter.worker,
         software: !!(st.software || st.G?.software), workMs: st.workMs.slice(), buildMs: st.buildMs ?? null, yaw: st.yaw, outline: b ? outlineSummary(b) : null, particles: st.parts ? st.parts.map(q => +q.u.toFixed(5)) : [],
+        crop: !!st.box?.crop, streaks: Array.from({length: (st.lines || 0) / 6}, (_, i) => [+airBuf[6 * i + 3].toFixed(2), +airBuf[6 * i + 4].toFixed(2)]),
         skinKeys: st.G?.body ? [...st.G.body.keys.keys()] : [], segments: st.tl ? st.tl.segs.length : 0};
     },
     timeline() { const b = body(); return b ? tl(b) : null; },

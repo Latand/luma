@@ -379,7 +379,7 @@ function sync(){
  $('micToggle').textContent=s.stream?'Вимкнути мікрофон':'Увімкнути лише мікрофон';$('micToggle').disabled=active||s.busy||s.awaitFinish;$('takesPanel').dataset.open=prefs.takesOpen?'1':'0';$('takesToggle').setAttribute('aria-expanded',String(prefs.takesOpen));$('takesCount').textContent=s.takes.length;
  $('livesMode').checked=prefs.lives;$('livesCount').value=String(prefs.livesCount);$('livesMode').disabled=$('livesCount').disabled=active||s.busy||s.awaitFinish;renderLives('');
  $('lyricsBtn').setAttribute('aria-pressed',String(prefs.lyrics));$('recordAudio').checked=prefs.audio;renderCamera();
- $('tractBtn').setAttribute('aria-pressed',String(prefs.tract));$('tractBtn').hidden=!tract;for(const b of document.querySelectorAll('[data-body]'))b.setAttribute('aria-pressed',String(b.dataset.body===prefs.tractBody));
+ $('tractBtn').setAttribute('aria-pressed',String(prefs.tract));$('tractBtn').hidden=!tract;for(const b of document.querySelectorAll('[data-body]')){const on=b.dataset.body===prefs.tractBody;b.setAttribute('aria-pressed',String(on));b.classList.toggle('active',on);}
  refreshCloud();renderProgress();renderLatency();
  for(const b of document.querySelectorAll('[data-view]')){b.classList.toggle('active',b.dataset.view===prefs.view);b.setAttribute('aria-pressed',String(b.dataset.view===prefs.view));b.disabled=active||s.busy||s.awaitFinish;}
  const rv=traceShown();$('reviewBar').hidden=$('reviewDivider').hidden=!rv;if(rv){const t=s.trace.take,runs=missRuns(s.trace.score);$('reviewLabel').textContent='Спроба '+String(t.id).padStart(2,'0');const pct=scorePct(s.trace.score);$('reviewPct').textContent=pct===null?'—':pct+'%';$('missCount').textContent=runs.length?runs.length+' '+plural(runs.length,'промах','промахи','промахів'):'без промахів';$('prevMiss').disabled=$('nextMiss').disabled=!runs.length||s.mode!=='idle';}
@@ -1450,19 +1450,22 @@ function measureStage(){if(RENDER)return;if(s.xr){s.dense=false;s.headH=s.railH=
  const dense=box.height<520||innerWidth<=720;if(dense!==s.dense){s.dense=dense;$('chartWrap').dataset.dense=dense?'1':'0';}
  s.headH=Math.max(below($('stageHead')),below($('lyricBand')));const rail=$('stageRail');s.railH=rail?box.bottom-rail.getBoundingClientRect().top:0;placeTract(box);}
 // «Голова» (app/tract3d.js; docs/design/VOCAL_TRACT_3D.md §5): from 720 px a column right of the roll, whose right edge moves
-// left by it (28 % of the stage, 300–420 px from 1100 px, 240–300 px below; under 280 px it shows the mouth to the larynx);
-// on a phone an overlay at the bottom of the sung part of the roll, 40 % of the plot high, which the words climb over. A
-// tap while idle enlarges it to the stage; a second tap or Esc returns. Off, in VR and in a hidden stage it takes nothing.
+// left by it (28 % of the stage, 300–420 px from 1100 px, 240–300 px below), with the whole head; on a phone an overlay at
+// the bottom of the sung part of the roll, 40 % of the plot high, which the words climb over, showing the mouth to the
+// larynx. A tap while idle enlarges it to the stage; a second tap, its ✕ or Esc returns. Off, in VR and in a hidden stage
+// it takes nothing.
+// the phone's overlay enlarged to the stage or back; the words then take their places around it again
+function bigTract(on){s.tractBig=on;measureStage();s.dirty=true;requestDraw();}
 function placeTract(box){const el=$('tract');s.tractW=0;s.tractBox=null;
  const on=!!tract&&prefs.tract&&!!box&&box.width>0&&!s.xr;s.tractOn=on;el.hidden=!on;tract?.show(on);if(!on){s.tractBig=false;return;}
  if(s.mode!=='idle'||box.width>=720)s.tractBig=false;
  const picked=prefs.tractBody==='male'||prefs.tractBody==='female';let r;
- if(box.width>=720){const wide=box.width>=1100,w=Math.round(clamp(box.width*.28,wide?300:240,wide?420:300));s.tractW=w+12;const b=bounds();r={x:box.width-w-12,y:b.top-4,w,h:b.bottom-b.top+4,mode:'column',crop:w<280};}
+ if(box.width>=720){const wide=box.width>=1100,w=Math.round(clamp(box.width*.28,wide?300:240,wide?420:300));s.tractW=w+12;const b=bounds();r={x:box.width-w-12,y:b.top-4,w,h:b.bottom-b.top+4,mode:'column',crop:false};}
  else{const b=bounds();
   if(s.tractBig)r={x:8,y:8,w:box.width-16,h:b.bottom-8,mode:'overlay',big:true};
   else{const h=Math.round((b.bottom-b.top)*.4),w=Math.round(.34*(b.right-b.left)-16);r={x:b.left+4,y:b.bottom-4-h,w,h,mode:'overlay',crop:true};s.tractBox={x0:r.x,y0:r.y,x1:r.x+w,y1:r.y+h};}}
  el.style.left=r.x+'px';el.style.top=r.y+'px';el.style.width=r.w+'px';el.style.height=r.h+'px';el.dataset.mode=r.mode;el.dataset.big=r.big?'1':'0';el.dataset.picked=picked?'1':'0';
- $('tractPick').hidden=picked;$('tractTag').hidden=!picked||r.mode!=='overlay'||!!r.big;$('tractTag').textContent=picked?window.LumaTract.LABEL[prefs.tractBody]:'';
+ $('tractPick').hidden=picked;$('tractClose').hidden=!r.big;$('tractTag').hidden=!picked||r.mode!=='overlay'||!!r.big;$('tractTag').textContent=picked?window.LumaTract.LABEL[prefs.tractBody]:'';
  const v=$('tractView').getBoundingClientRect();tract.layout({mode:r.mode,w:v.width,h:v.height,crop:!!r.crop});}
 // Phones, and phones held sideways: the page scrolls, so the stage takes exactly the height that leaves «Співати» on the first
 // screen — measured, not guessed, because the title, the hint banner and the browser chrome all move the space above it.
@@ -1748,7 +1751,7 @@ $('settingsDialog').addEventListener('close',stopCamPreview);
 $('livesMode').onchange=()=>{prefs.lives=$('livesMode').checked;if(!prefs.lives){s.lives=null;$('livesNotice').hidden=true;}savePrefs();sync();toast(prefs.lives?'Режим життів увімкнено: '+prefs.livesCount+' '+plural(prefs.livesCount,'життя','життя','життів')+' на спробу.':'Режим життів вимкнено.');};
 $('livesCount').onchange=()=>{const n=+$('livesCount').value;if(LIVES.sizes.includes(n))prefs.livesCount=n;s.lives=null;savePrefs();sync();};
 $('historyFile').onchange=()=>{importHistoryFile($('historyFile').files[0]);$('historyFile').value='';};$('lyricsBtn').onclick=()=>{prefs.lyrics=!prefs.lyrics;savePrefs();s.lyricKey='~';resize();sync();};
-$('tractBtn').onclick=()=>{prefs.tract=!prefs.tract;savePrefs();resize();sync();};
+$('tractBtn').onclick=()=>{prefs.tract=!prefs.tract;savePrefs();resize();sync();};$('tractClose').onclick=()=>bigTract(false);
 for(const b of document.querySelectorAll('[data-body]'))b.onclick=()=>{prefs.tractBody=b.dataset.body;savePrefs();sync();if(s.tractOn)tract.frame(now(),false);};
 for(const b of document.querySelectorAll('[data-close]'))b.onclick=()=>$(b.dataset.close).close();
 $('loopBtn').onclick=()=>{prefs.loop=!prefs.loop;if(!prefs.loop)clearTimeout(s.nextTimer);if(prefs.loop&&!customRange())toast('Виділи фрагмент: тягни під хвилею або клавіші A / B під час прослуховування.');
@@ -1791,7 +1794,7 @@ $('editNoteSelect').onchange=()=>selectEdit($('editNoteSelect').value);for(const
 $('applyEdit').onclick=()=>{if(!s.edit)return;const a=+$('editStart').value,b=+$('editEnd').value;if(!Number.isFinite(a)||!Number.isFinite(b)||a<0||b>song.duration||b-a<.04){toast('Перевір межі ноти: мінімум 0.04 с, у межах пісні.');return;}if(song.notes.some(n=>n.id!==s.edit.id&&n.a<b-.001&&n.b>a+.001)){toast('Ця нота перекриває сусідню. Спочатку зміни її межі.');return;}const original=song.notes.find(n=>n.id===s.edit.id);s.edit.originalM=original.originalM??original.m;Object.assign(original,s.edit,{a,b,manual:true,ok:true,n:Math.round(s.edit.m),ignored:$('editIgnore').checked});song.notes.sort((a,b)=>a.a-b.a);s.verified=[];saveEdits();setRangeScale();$('editDialog').close();sync();};
 $('resetEdits').onclick=()=>{if(!confirm('Скинути всі правки до автоматичної чернетки?'))return;song.notes=structuredClone(baseNotes);s.verified=[];saveEdits();$('editDialog').close();setRangeScale();sync();};$('exportTarget').onclick=exportTarget;$('importBtn').onclick=()=>$('importFile').click();$('importFile').onchange=()=>{importFile($('importFile').files[0]);$('importFile').value='';};
 window.addEventListener('keydown',e=>{if(e.ctrlKey||e.metaKey||e.altKey||e.repeat&&!['ArrowLeft','ArrowRight'].includes(e.code)||e.target.closest('input,select,textarea')||document.querySelector('dialog[open]'))return;
- if(e.code==='Space'&&!e.target.closest('button')){e.preventDefault();startTransport(false);}else if(e.code==='KeyR'){e.preventDefault();startTransport(true);}else if(e.code==='Escape'){if(s.tractBig){s.tractBig=false;measureStage();}else stopTransport();}else if(e.key==='[')adjacent(-1);else if(e.key===']')adjacent(1);
+ if(e.code==='Space'&&!e.target.closest('button')){e.preventDefault();startTransport(false);}else if(e.code==='KeyR'){e.preventDefault();startTransport(true);}else if(e.code==='Escape'){if(s.tractBig)bigTract(false);else stopTransport();}else if(e.key==='[')adjacent(-1);else if(e.key===']')adjacent(1);
  else if(e.code==='ArrowLeft'||e.code==='ArrowRight'){if(s.mode==='singing')return;e.preventDefault();applySeek(now()+(e.code==='ArrowRight'?1:-1)*(e.shiftKey?5:1));}else if(e.key===',')jumpMiss(-1);else if(e.key==='.')jumpMiss(1);
  else if(e.code==='KeyA')markRange('a');else if(e.code==='KeyB')markRange('b');else if(e.code==='KeyL'){$('loopBtn').click();}else if(e.code==='KeyV'){$('vocalBtn').click();}});
 window.addEventListener('beforeunload',e=>{if(s.unsaved||s.mode==='singing'){e.preventDefault();e.returnValue='';}});
@@ -2075,7 +2078,7 @@ window.Luma={diagnostics:()=>({mode:s.mode,busy:s.busy,pending:s.awaitFinish,tim
   history:historyHooks}};
 if(RENDER)window.Luma.render={load:renderLoad,frame:async u=>{const info=await renderFrame(u);window.LumaRender?.overlay(g,info);return info;}};
 if(!RENDER&&window.LumaTract)tract=window.LumaTract.attach({el:$('tract'),song:()=>song,now:()=>now(),reduced:()=>reduced.matches,dpr:()=>Math.min(window.devicePixelRatio||1,2),idle:()=>s.mode==='idle'&&!s.busy,
- body:()=>prefs.tractBody,enlarge:()=>{if(s.mode!=='idle'||!s.tractOn||$('tract').dataset.mode!=='overlay')return;s.tractBig=!s.tractBig;measureStage();}});
+ body:()=>prefs.tractBody,enlarge:()=>{if(s.mode!=='idle'||!s.tractOn||$('tract').dataset.mode!=='overlay')return;bigTract(!s.tractBig);}});
 populateSong();fitStage();resize();setRangeScale();updateReadout(s.pos);if(!RENDER)loadHistory();
 // The record line («Рекорд») gave way to the dust of past takes, which has no switch: a saved `shadow` is dropped, never
 // read as «cloud off», which nothing could turn back on (docs/design/TAKE_CLOUD.md).

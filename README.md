@@ -18,8 +18,9 @@ of your voice, no server after the file is built.
   do; the choice is remembered); both heads have hair. It shows the target only, never your voice. Under the head, the
   word and its sounds, the one due now in brackets; «приблизно» when the sounds are a guess (a word the build could not
   read, or one whose timing is uncertain). From 1100 px it is a column of 300–420 px right of the roll; from 720 px a
-  narrower one that shows the mouth to the larynx; on a phone it stands on the sung part of the roll, words climbing
-  over it, and a tap while nothing plays enlarges it. Drag it to turn the head up to 60° (a double click turns it back).
+  narrower one; on a phone it stands on the sung part of the roll and shows the mouth to the larynx, words climbing
+  over it, and a tap while nothing plays enlarges it (its ✕, a second tap or Esc returns it). Drag it to turn the head
+  up to 60° (a double click turns it back).
   «Голова» in the stage rail hides it. Without WebGL2, or where WebGL runs on the processor alone (no graphics
   processor), the cut face is drawn flat. Everything is baked into the trainer: no network, nothing extra to install ([docs/design/VOCAL_TRACT_3D.md](docs/design/VOCAL_TRACT_3D.md)).
 - **Live match score.** Hits ÷ frames with a target, counted once per 20 ms. Silence under a note is a miss; frames with no
@@ -214,12 +215,14 @@ and dust the take implies, the burn at each loss, the count-in of a rewind on it
 a restart, Range and the player, the layout at 390, 900 and 1440 px, and no process left behind. `tests/video_test.py`
 checks the alignment through Opus, the eviction order, the render deadline, the ffmpeg graph and that the thumbnail
 falls inside a sung segment, without a browser.
-`tract3d.mjs` checks «Голова»: the column at 1440 px and the overlay at 390 px clear of the words, the playhead and the
-next notes, the body's choice across a reload, lesson 1's «ма» (the /m/ through the nose, then the held /a/), the demo's
-«ta» (closure, then voiced), a made-up word marked «приблизно», `--rebuild` keeping the song data and writing the word
-sounds, listening from `file://` without a network request, the frame budget at 390 px and 1440 px under 1× and 4× CPU
-throttle (the flat cut face, which a renderer without a graphics processor gets; the 3D head forced onto it for its own
-work), «Голова» off leaving today's roll, the flat cut face without WebGL2, no head drawn in VR or in a hidden tab, and
+`tract3d.mjs` checks «Голова»: the column at 1440 px and 900 px (the whole head) and the overlay at 390 px clear of the
+words, the playhead and the next notes, the overlay before a choice and enlarged (its ✕), the chosen head marked as the
+roll's chosen view, the body's choice across a reload, lesson 1's «ма» (after the rest an /m/ long enough to be seen,
+through the nose, then the held /a/ on the note), the demo's «ta» (closure with no air in front of the face, then
+voiced), a made-up word marked «приблизно» with every sound whole at three widths, `--rebuild` keeping the song data
+and writing the word sounds, listening from `file://` without a network request, the frame budget at 390 px and 1440 px
+under 1× and 4× CPU throttle (the flat cut face, which a renderer without a graphics processor gets; the 3D head forced
+onto it for its own work), «Голова» off leaving today's roll, the flat cut face without WebGL2, no head drawn in VR or in a hidden tab, and
 still air with reduced motion. `tests/phonemes_test.py` checks the build's word sounds (CMUdict and the Ukrainian rules).
 `xr.mjs` enters VR on Meta's WebXR emulator (the `iwer` dev dependency) as a Quest 3: the panel 1.5 m ahead with the
 chart at its size, «Слухати», «Вокал» and a seek on the progress bar by a controller's trigger, «Сюди» by a pinch,

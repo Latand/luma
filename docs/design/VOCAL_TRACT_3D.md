@@ -3,7 +3,8 @@
 > **Status (2026-11-14):** slice 1 is built (§8): the panel with the male or female head, hair, articulation from the
 > lyric's sounds on the target's timing, the air, the three layouts, the frame budget and the 2D fallback, baked from
 > Chimera commit **`e81bc07`** (the fork's main was still at `2e567e2` when the build started). Slices 2 (engaged zones and
-> hints) and 3 (the air in detail) are still to come. Below, the design as settled on 2026-11-13; § [Operator
+> hints) and 3 (the air in detail) are still to come. The build changed three settled details, each marked where it
+> stands: the hair's colour (§4.2), an onset's length after a rest (§4.5) and the head in the narrower column (§5). Below, the design as settled on 2026-11-13; § [Operator
 > decisions](#operator-decisions-settled-2026-11-13) pins the operator's answers.
 
 ## Originating requirement
@@ -342,8 +343,9 @@ temples, above the ears, the nape) are pushed out along their normals:
 - female: 1.2 cm over the scalp, plus a drape lofted from the back of the skull down to the level of the larynx,
   1.5–2.5 cm thick, closed at its edges and kept behind the neck so the larynx on the cut face stays visible.
 
-The shell is one closed, opaque surface (an estimated 2,000–3,000 vertices per body), dark brown, with a highlight band
-stretched along a strand direction the generator bakes per vertex. At the cut plane the same clip removes the near
+The shell is one closed, opaque surface (an estimated 2,000–3,000 vertices per body), mid brown with a light rim where it
+turns away (built: `#8a6a52` on the shell, `#80604a` on the cut; a dark brown measured 1.47:1 against the panel and the
+short style read as a bald head), with a highlight band stretched along a strand direction the generator bakes per vertex. At the cut plane the same clip removes the near
 half, and the cut face paints the hair's section between the scalp outline and the shell's midline loop (baked like
 the skin's `midFront` and `midBack` loops) in the hair colour with fine strand strokes. The cut shows hair as a band on
 the scalp and, for the long style, a band behind the neck. Both bands stay outside the tract's region.
@@ -474,6 +476,9 @@ panel then marks the word «приблизно». A word with no letters or no v
    in the note map, notes marked ignored), the word's span is split evenly.
 3. Within a syllable, the vowel starts on the note. Onset consonants end at the note's start; codas end at the next
    onset. Consonant durations are Chimera's phoneme durations × 0.8. A diphthong holds its first vowel for 80 %.
+   After a rest of 0.25 s or more, or at the start, an onset shorter than 180 ms takes its closure up earlier, out of
+   the silence, so it lasts 180 ms (added in the build: at 55 ms the /m/ of lesson 1 was three frames while playing and
+   could not be seen); inside a phrase onsets keep their length.
 4. Transitions are a raised-cosine cross-fade of 30 ms into a consonant and 60 ms into a vowel, in line with the ramps
    of Chimera's planner (probe /əmə/: 0.03 s into /m/, 0.06–0.07 s into /ə/).
 5. A gap of 0.25 s or more between words relaxes the head toward rest over 150 ms; a gap of 0.5 s or more before a
@@ -488,8 +493,8 @@ moment while idle or scrubbing.
 | Width | Place |
 |---|---|
 | ≥ 1100 px | a column on the right inside the stage, 28 % of the stage's width clamped to 300–420 px, the plot's full height. The roll's right edge moves left by it: `bounds()` (`app/app.js:1458`) gets `s.tractW`, measured in `measureStage()` beside `headH` and `railH` (named for the tract because `app.js` already uses `head` for the stage header, `s.headH` and `#stageHead`). The span stays 12 s |
-| 720–1099 px | the same column at 240–300 px; below 280 px it shows the mouth-to-larynx crop |
-| < 720 px | the head stands on the sung third of the roll (between the pitch rail and the playhead), bottom left, at 40 % of the plot's height. The roll fades under it, as the camera video's overlays do ([CAMERA_VIDEO.md](CAMERA_VIDEO.md)); its rectangle goes into `drawWords`' list of placed labels first (`app/app.js:1465`–`1472`), so a word that would fall under it climbs above it the way overlapping words already do. A tap while idle enlarges it to the stage's height; a second tap or Esc returns |
+| 720–1099 px | the same column at 240–300 px, with the whole head (changed in the build: a mouth-to-larynx crop below 280 px cut the skull, the hair and the nose while the whole head fits the column at the same scale as at 1440 px) |
+| < 720 px | the head stands on the sung third of the roll (between the pitch rail and the playhead), bottom left, at 40 % of the plot's height. The roll fades under it, as the camera video's overlays do ([CAMERA_VIDEO.md](CAMERA_VIDEO.md)); its rectangle goes into `drawWords`' list of placed labels first (`app/app.js:1465`–`1472`), so a word that would fall under it climbs above it the way overlapping words already do. It shows the mouth to the larynx: from behind the spine to past the nostril, from the neck's cut (or 2 cm under the glottis) to above the nasal cavity, and «Чоловік» or «Жінка» stands in its bottom right corner, in front of the neck. Before a choice it holds the two buttons and «Обери голову». A tap while idle enlarges it to the stage's height; a second tap, the ✕ in its header or Esc returns |
 
 - **Switch:** «Голова» in the stage rail beside «Слова» (`aria-pressed`), preference `tract`, on by default. The panel's
   header holds «Чоловік · Жінка» and ⓘ. Both preferences join the activity state beside `lyrics` (`app/app.js:359`).
