@@ -2,16 +2,20 @@
 // roll, which shows how to sing what is due now. Fixtures are the built-in lesson 1 (built here into an empty library),
 // the synthetic demo and a made-up word put into a copy of the demo's package; nothing else.
 //   1  the column beside the roll at 1440 px (the roll's right edge and every word left of it; the chosen head marked as
-//      the roll's chosen view), at 900 px with the whole head; the overlay on the sung part at 390 px (no word on it, the
-//      playhead and the next 2 s of notes clear of it, the body's tag in its corner; enlarged, a ✕, the stage covered
-//      from edge to edge and the caption aside under a toast; before a choice the two buttons and the prompt each
-//      whole, one block in the overlay's middle, stepping aside while a toast covers its bottom)
+//      the roll's chosen view; before a choice the prompt with the two buttons under it, one block), at 900 px with the
+//      whole head; a short column (after a take, a low window) shows the mouth to the larynx at least 90 px wide beside
+//      its words; the overlay on the sung part at 390 px (no word on it, the playhead and the next 2 s of notes clear of
+//      it, the body's tag in its corner and the enlarge mark in the other; enlarged, a ✕, the stage covered from edge to
+//      edge and the caption aside under a toast; before a choice the two buttons and the prompt each whole, one block in
+//      the overlay's middle, stepping aside while a toast covers its bottom); while the demo is sung through, no note
+//      sung in the last 2 s and no word under the overlay, which moves seldom
 //   2  «Чоловік» / «Жінка» survive a reload; the body's scale; the two heads' outlines differ
 //   3  lesson 1 on «ма»: after the rest the /m/ long enough to be seen (nasal air, lips closed, soft palate lowered), the
 //      vowel on the note, then the held /a/ (voiced), with as much air leaving the mouth at its end as at its start
 //   4  demo «ta»: the closure (no air in front of the face), then voiced after the release; inside a phrase the onset
 //      keeps its short length
-//   5  a word missing from LUMA_PHONES: approx, and «приблизно» and every sound of it whole on screen at three widths
+//   5  a word missing from LUMA_PHONES: approx, and «приблизно» and every sound of it whole on screen at three widths (on
+//      a phone «приблизно» alone on the first line, the sounds on the second)
 //   6  the demo from file://: listening moves the head; no network request
 //   7  --rebuild keeps the song's data line byte for byte and writes LUMA_PHONES; a changed word changes the table
 //   8  the frame budget (§6) at 390 and 1440 px under 1× and 4× CPU throttle; the 3D head through its own multisampled
@@ -112,17 +116,20 @@ execFileSync(py, ['studio/build_html.py', odd, '-o', oddHtml], {encoding: 'utf8'
   await done(n, '900 px layout');
 
   const m = await page(url, {viewport: {width: 390, height: 844}, dpr: 3, settings: seeded('male')}); await ready(m.p);
-  // a moment when the low «do» is on the sung part of the roll, where the overlay stands
-  const t2 = await m.p.evaluate(() => { const w = window.LUMA_SONG.lyrics.flatMap(l => l.words).find(w => w.w === 'do'); return w.b + 1.2; });
-  const s2 = await at(m.p, t2);
-  const r = await m.p.evaluate(t => { const T = window.Luma.test, b = T.plot(), v = T.viewWindow(t), x = a => b.left + (a - v.a) / v.span * (b.right - b.left);
+  // a moment when a word would stand where the overlay is (the overlay keeps clear of the last 2 s of notes, so the words
+  // that fall on it are older ones or ones on their way to it): the first such moment past a word's end
+  const words2 = await m.p.evaluate(() => window.LUMA_SONG.lyrics.flatMap(l => l.words).map(w => w.b));
+  const look2 = t => m.p.evaluate(t => { const T = window.Luma.test, b = T.plot(), v = T.viewWindow(t), x = a => b.left + (a - v.a) / v.span * (b.right - b.left);
     const on = T.wordBoxes(); document.getElementById('tractBtn').click(); const off = T.wordBoxes(); document.getElementById('tractBtn').click();
     const notes = window.LUMA_SONG.notes.filter(n => n.b > t && n.a < t + 2).map(n => ({x0: Math.max(x(n.a), x(t)), x1: x(n.b)}));
-    return {on, off, now: x(t), notes, plot: b}; }, t2);
+    return {on, off, now: x(t), notes, plot: b}; }, t);
+  let t2 = null, s2 = null, r = null;
+  for (const e of words2) for (const d of [.4, .8, 1.2, 1.6, 2]) { if (t2 !== null) break; const q = await at(m.p, e + d), w = await look2(e + d); if (q.overlay && w.off.some(x => overlap(x, q.overlay))) { t2 = e + d; s2 = q; r = w; } }
+  if (t2 === null) { t2 = words2[0] + 1.2; s2 = await at(m.p, t2); r = await look2(t2); }
   const ov = s2.overlay;
   assert(s2.mode === 'overlay' && ov && ov.y1 <= r.plot.bottom && Math.abs((ov.y1 - ov.y0) - .4 * (r.plot.bottom - r.plot.top)) < 2 && ov.x0 >= r.plot.left,
     '390 px: the head is an overlay 40 % of the plot high at the bottom of the roll ' + JSON.stringify({ov, plot: r.plot}));
-  assert(r.off.some(w => overlap(w, ov)), '390 px: without the head a word would stand where the overlay is (' + r.off.filter(w => overlap(w, ov)).map(w => w.w).join(', ') + ')');
+  assert(r.off.some(w => overlap(w, ov)), `390 px, ${t2.toFixed(2)} s, the overlay at the ${s2.spot === 'high' ? 'top' : 'bottom'}: without the head a word would stand where the overlay is (` + r.off.filter(w => overlap(w, ov)).map(w => w.w).join(', ') + ')');
   assert(r.on.length === r.off.length && !r.on.some(w => overlap(w, ov)), '390 px: with the head every word climbs clear of it: ' + JSON.stringify(r.on.filter(w => overlap(w, ov))));
   assert(ov.x1 < r.now && r.notes.length > 0 && r.notes.every(n => n.x0 >= ov.x1), `390 px: the playhead (${r.now.toFixed(1)}) and the next 2 s of notes (${r.notes.length}) stay clear of the overlay (right edge ${ov.x1.toFixed(1)})`);
   // the body's tag stands in the picture's bottom right corner, in front of the neck, off the nose and the soft palate
@@ -130,6 +137,11 @@ execFileSync(py, ['studio/build_html.py', odd, '-o', oddHtml], {encoding: 'utf8'
   assert(s2.crop && tag.text === 'Чоловік' && tag.tag.x1 <= tag.view.x1 && tag.tag.y1 <= tag.view.y1 && tag.view.x1 - tag.tag.x1 < 8 && tag.view.y1 - tag.tag.y1 < 8,
     '390 px: the overlay shows the crop, and «Чоловік» stands in its bottom right corner ' + JSON.stringify(tag));
   // enlarged by a tap while idle, the head covers the roll; its header holds a ✕ of a full tap's size that returns it
+  // the enlarge mark stands in the overlay's top right corner, a target of 24 px at least, and works from the keyboard
+  const grow = await m.p.evaluate(() => { const b = document.getElementById('tractGrow'), r = b.getBoundingClientRect(), v = document.getElementById('tractView').getBoundingClientRect(); return {shown: b.checkVisibility(), w: r.width, h: r.height, dx: v.right - r.right, dy: r.top - v.top, label: b.getAttribute('aria-label')}; });
+  assert(grow.shown && grow.w >= 24 && grow.h >= 24 && grow.dx >= 0 && grow.dx < 8 && grow.dy >= 0 && grow.dy < 8 && /Збільшити/.test(grow.label), '390 px: the enlarge mark in the overlay\'s top right corner ' + JSON.stringify(grow));
+  await m.p.focus('#tractGrow'); await m.p.keyboard.press('Enter'); await m.p.waitForFunction(() => window.Luma.test.tract().big);
+  await m.p.click('#tractClose'); await m.p.waitForFunction(() => !window.Luma.test.tract().big);
   await m.p.click('#tractView'); await m.p.waitForFunction(() => window.Luma.test.tract().big);
   const big = await m.p.evaluate(() => { const b = document.getElementById('tractClose'), r = b.getBoundingClientRect(); return {hidden: b.hidden, w: r.width, h: r.height, x0: r.left, x1: r.right, y0: r.top, label: b.getAttribute('aria-label'), vw: innerWidth}; });
   assert(!big.hidden && big.w >= 40 && big.h >= 40 && big.x0 >= 0 && big.x1 <= big.vw && big.y0 >= 0 && big.label, '390 px, enlarged: a ✕ in the header, ' + big.w + '×' + big.h + ' px, inside the screen');
@@ -182,6 +194,64 @@ execFileSync(py, ['studio/build_html.py', odd, '-o', oddHtml], {encoding: 'utf8'
   await done(u, '390 px before a choice');
 }
 
+// ── 1 · the column before a choice: the prompt, and under it the two buttons as the panel's one action ─────────────
+for (const [width, height] of [[1440, 900], [900, 1000]]) {
+  const o = await page(url, {viewport: {width, height}, settings: {audioNotice: true}}); await frames(o.p, 3);
+  const r = await o.p.evaluate(() => { const box = e => { const b = e.getBoundingClientRect(); return {x0: b.left, y0: b.top, x1: b.right, y1: b.bottom}; };
+    const p = document.getElementById('tractPick'), rg = document.createRange(); rg.selectNodeContents(p);
+    const text = [...rg.getClientRects()].filter(q => q.width > 0).map(q => ({x0: q.left, y0: q.top, x1: q.right, y1: q.bottom}));
+    return {mode: window.Luma.test.tract().mode, panel: box(document.getElementById('tract')), group: box(document.querySelector('#tract .tract-body')), male: box(document.getElementById('tractMale')), female: box(document.getElementById('tractFemale')),
+      text: {x0: Math.min(...text.map(q => q.x0)), y0: Math.min(...text.map(q => q.y0)), x1: Math.max(...text.map(q => q.x1)), y1: Math.max(...text.map(q => q.y1))}}; });
+  const mid = q => (q.x0 + q.x1) / 2, block = (r.text.y0 + r.group.y1) / 2, gap = r.group.y0 - r.text.y1;
+  assert(r.mode === 'column' && gap > 0 && gap < 32 && r.male.y1 - r.male.y0 >= 38 && Math.abs(mid(r.group) - mid(r.panel)) < 2 && Math.abs(block - (r.panel.y0 + r.panel.y1) / 2) < .1 * (r.panel.y1 - r.panel.y0),
+    `${width} px, nothing chosen: the prompt with the two buttons ${(r.male.y1 - r.male.y0).toFixed(0)} px high ${gap.toFixed(1)} px under it, one block in the panel's middle ` + JSON.stringify(r));
+  await done(o, width + ' px column before a choice');
+}
+
+// ── 1 · a short column shows the mouth to the larynx large enough to read; a tall one the whole head ────────────────
+// The plot is short after a take and in a low window: there the column takes the wide shape (the mouth to the larynx at
+// the panel's whole height, its words beside it), and the drawn mouth, the lips to the pharynx's back wall, stays 90 CSS
+// px wide at least. Idle at 1440 × 900 and 900 × 1000 (the pinned rows) the whole head stays, hair and all.
+for (const [width, height, take, wide] of [[1440, 900, false, false], [900, 1000, false, false], [1440, 900, true, true], [900, 1000, true, true], [1366, 650, false, true]]) {
+  const o = await page(url, {viewport: {width, height}, settings: seeded('female')}); await ready(o.p);
+  if (take) await o.p.evaluate(async () => { const T = window.Luma.test; T.fakeSing({a: 2, b: 30}); for (let k = 0; k < 240; k++) { const t = T.fakeTick(k / 60); T.tractFrame(t, true); if (k % 8 === 0) await new Promise(r => setTimeout(r)); } T.fakeFinish(); });
+  const t = await o.p.evaluate(() => { const T = window.Luma.test.tractTimeline(), g = T.segs.find(g => g.sym === 'ɑ' && T.words[g.word]?.w === 'na'); return (g.a + g.b) / 2; });
+  const st = await at(o.p, t); await frames(o.p, 2);
+  const s2 = await o.p.evaluate(() => window.Luma.test.tract());
+  const lay = await o.p.evaluate(() => { const box = e => { const b = e.getBoundingClientRect(); return {x0: b.left, y0: b.top, x1: b.right, y1: b.bottom}; }, q = id => box(document.getElementById(id));
+    const cap = document.getElementById('tractSound'), rg = document.createRange(); rg.selectNodeContents(cap);
+    return {panel: q('tract'), view: q('tractView'), male: q('tractMale'), female: q('tractFemale'), title: box(document.querySelector('#tract .tract-title')), caption: [...rg.getClientRects()].filter(r => r.width > 0).map(r => ({x0: r.left, y0: r.top, x1: r.right, y1: r.bottom})), takes: window.Luma.test.takes().length}; });
+  const inside = (a, b) => a.x0 >= b.x0 - .5 && a.x1 <= b.x1 + .5 && a.y0 >= b.y0 - .5 && a.y1 <= b.y1 + .5;
+  if (wide) {
+    const words = [lay.title, lay.male, lay.female, ...lay.caption];
+    assert(s2.shape === 'wide' && s2.crop && s2.mouthPx >= 90 && words.every(w => inside(w, lay.panel) && w.x1 <= lay.view.x0 + .5) && lay.caption.length > 0 && (!take || lay.takes === 1),
+      `${width}×${height}${take ? ' after a take' : ' idle'}: the column shows the mouth to the larynx, the lips to the pharynx ${s2.mouthPx} px wide (≥ 90), its title, choice and caption whole beside it ` + JSON.stringify({view: lay.view, panel: lay.panel}));
+  } else assert(s2.shape === 'tall' && !s2.crop && st.renderer, `${width}×${height} idle: the column shows the whole head (${s2.shape}, the mouth ${s2.mouthPx} px wide)`);
+  await done(o, `${width}×${height} column shape`);
+}
+
+// ── 1 · on a phone, while the demo is sung through, the overlay leaves what was just sung in sight ───────────────────
+// Every 3rd frame of a pass at 60 frames a song second: no note sung in the last 2 s (its bar) lies under the overlay and
+// no word does; the overlay stands at the bottom or the top of the sung part, 30 % of the plot high while singing, and
+// moves seldom.
+{
+  const o = await page(url, {viewport: {width: 390, height: 844}, dpr: 3, settings: seeded('male')}); await ready(o.p);
+  const r = await o.p.evaluate(async () => { const T = window.Luma.test, e = Math.min(window.LUMA_SONG.duration - .5, 32), out = {bad: [], words: [], moves: [], n: 0, share: null}; T.fakeSing({a: 2, b: e});
+    const hit = (a, b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1; let spot = null;
+    for (let k = 0; ; k++) { const t = T.fakeTick(k / 60);
+      if (k % 3 === 0) { const s = T.tract(), ov = s.overlay, pl = T.plot(); out.n++; if (out.share === null) out.share = (ov.y1 - ov.y0) / (pl.bottom - pl.top);
+        for (const n of T.noteRects()) if (n.b > t - 2 && n.a < t && hit(n, ov)) out.bad.push(+t.toFixed(2) + ':' + n.id);
+        for (const w of T.wordBoxes()) if (hit(w, ov)) out.words.push(+t.toFixed(2) + ':' + w.w);
+        if (s.spot !== spot) { if (spot !== null) out.moves.push({t: +t.toFixed(2), spot: s.spot}); spot = s.spot; } }
+      if (k % 6 === 0) await new Promise(r => setTimeout(r)); if (t >= e - .05 || T.state().mode !== 'singing') break; }
+    T.fakeFinish(); await new Promise(r => requestAnimationFrame(r)); const s = T.tract(), pl = T.plot(); out.after = (s.overlay.y1 - s.overlay.y0) / (pl.bottom - pl.top); T.closeTrace(); return out; });
+  const gaps = r.moves.slice(1).map((m, i) => m.t - r.moves[i].t);
+  assert(r.n > 500 && !r.bad.length && !r.words.length, `390 px, the demo sung through (${r.n} frames): no note sung in the last 2 s and no word under the overlay ` + JSON.stringify({notes: r.bad.slice(0, 8), words: r.words.slice(0, 8)}));
+  assert(r.moves.some(m => m.spot === 'high') && r.moves.length <= 8 && (!gaps.length || Math.min(...gaps) >= 2) && Math.abs(r.share - .3) < .01 && Math.abs(r.after - .4) < .01,
+    `390 px, singing: the overlay is 30 % of the plot high (${r.share.toFixed(3)}; ${r.after.toFixed(3)} after the take) and moves ${r.moves.length} times, at least ${gaps.length ? Math.min(...gaps).toFixed(2) : '–'} s apart: ` + r.moves.map(m => m.t + ' ' + m.spot).join(', '));
+  await done(o, '390 px singing');
+}
+
 // ── 2 · the body: chosen, kept across a reload, sized and shaped as Chimera's ────────────────────────────────────────
 {
   const o = await page(url, {settings: {audioNotice: true}});
@@ -209,7 +279,7 @@ execFileSync(py, ['studio/build_html.py', odd, '-o', oddHtml], {encoding: 'utf8'
   const sm = await at(o.p, m.a + .04), sm2 = await at(o.p, m.b - .006), sa = await at(o.p, (a.a + a.b) / 2);
   assert([sm, sm2].every(q => q.phoneme === 'm' && q.air === 'nasal' && q.lips === 'closed' && q.velum === 'lowered' && q.word === 'ма'),
     'lesson 1, «ма», on the /m/ (its start and its end): ' + JSON.stringify([sm, sm2].map(q => ({phoneme: q.phoneme, air: q.air, lips: q.lips, velum: q.velum, word: q.word}))));
-  assert(sa.phoneme === 'a' && sa.air === 'voiced' && sa.lips === 'open' && sa.velum === 'raised' && !sa.approx && sa.sound === '«ма»\nm [a]',
+  assert(sa.phoneme === 'a' && sa.air === 'voiced' && sa.lips === 'open' && sa.velum === 'raised' && !sa.approx && sa.sound === '«ма»\nm[a]',
     'lesson 1, «ма», the held /a/: ' + JSON.stringify({phoneme: sa.phoneme, air: sa.air, lips: sa.lips, velum: sa.velum, sound: sa.sound}));
   // the held /a/ played through, a frame per animation frame: as many streaks of air stand in front of the lips at its
   // end as at its start (they once died on the way and the breath stopped leaving the mouth before the note ended)
@@ -253,8 +323,17 @@ execFileSync(py, ['studio/build_html.py', odd, '-o', oddHtml], {encoding: 'utf8'
         overflow: e.scrollWidth > e.clientWidth + 1 || e.scrollHeight > e.clientHeight + 1, w: +word.reduce((s, t) => s + t.width, 0).toFixed(1)}; });
     assert(!w.inTable && sx.word === MADE_UP && sx.approx === true && vis.found && vis.wordWhole && vis.w > 20,
       `${width} px: the made-up word «${MADE_UP}» is not in LUMA_PHONES, reads approx, and «приблизно» stands whole in the panel: ` + JSON.stringify(vis));
-    assert(/z ɔ ɹ · v i k$/.test(vis.text.replace(/[[\]]/g, '')) && /\[/.test(vis.text) && vis.allWhole && !vis.overflow,
+    // a syllable's sounds stand together, the syllables apart
+    assert(/zɔɹ · vik$/.test(vis.text.replace(/[[\]]/g, '').replace(/\u00a0/g, ' ')) && /\[/.test(vis.text) && vis.allWhole && !vis.overflow,
       `${width} px: every sound of «${MADE_UP}» shows, nothing cut (${vis.lines} lines): ` + JSON.stringify(vis.text));
+    // on a phone «приблизно» stands alone on the first line and the sounds whole on the second
+    if (width < 720) {
+      const two = await x.p.evaluate(() => { const e = document.getElementById('tractSound'), node = e.firstChild, text = node.textContent, i = text.indexOf('\n');
+        const tops = (a, b) => { const r = document.createRange(); r.setStart(node, a); r.setEnd(node, b); return [...new Set([...r.getClientRects()].filter(t => t.width > 0).map(t => Math.round(t.top)))]; };
+        return {first: text.slice(0, i), firstTops: tops(0, i), restTops: tops(i + 1, text.length)}; });
+      assert(two.first === 'приблизно' && two.firstTops.length === 1 && two.restTops.length === 1 && two.restTops[0] > two.firstTops[0],
+        `${width} px: «приблизно» alone on the first line, the sounds whole on the second ` + JSON.stringify(two));
+    }
     await done(x, width + ' px made-up word');
   }
 }

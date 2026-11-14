@@ -18,9 +18,11 @@ of your voice, no server after the file is built.
   do; the choice is remembered); both heads have hair. It shows the target only, never your voice. Under the head, the
   word and its sounds, the one due now in brackets; «приблизно» when the sounds are a guess (a word the build could not
   read, or one whose timing is uncertain). From 1100 px it is a column of 300–420 px right of the roll; from 720 px a
-  narrower one; on a phone it stands on the sung part of the roll and shows the mouth to the larynx, words climbing
-  over it, and a tap while nothing plays enlarges it (its ✕, a second tap or Esc returns it). Drag it to turn the head
-  up to 60° (a double click turns it back).
+  narrower one; where the column is short (after a take, a low window) it shows the mouth to the larynx at its whole
+  height with its words beside it. On a phone it stands on the sung part of the roll, bottom left or, while what was
+  just sung lies low, top left (a little smaller while you sing, so the notes of the last 2 s stay in sight), and shows
+  the mouth to the larynx, words stepping around it; its corner mark or a tap while nothing plays enlarges it (its ✕, a
+  second tap or Esc returns it). Drag it to turn the head up to 60° (a double click turns it back).
   «Голова» in the stage rail hides it. Without WebGL2, or where WebGL runs on the processor alone (no graphics
   processor), the cut face is drawn flat. Everything is baked into the trainer: no network, nothing extra to install ([docs/design/VOCAL_TRACT_3D.md](docs/design/VOCAL_TRACT_3D.md)).
 - **Live match score.** Hits ÷ frames with a target, counted once per 20 ms. Silence under a note is a miss; frames with no
@@ -215,12 +217,15 @@ and dust the take implies, the burn at each loss, the count-in of a rewind on it
 a restart, Range and the player, the layout at 390, 900 and 1440 px, and no process left behind. `tests/video_test.py`
 checks the alignment through Opus, the eviction order, the render deadline, the ffmpeg graph and that the thumbnail
 falls inside a sung segment, without a browser.
-`tract3d.mjs` checks «Голова»: the column at 1440 px and 900 px (the whole head) and the overlay at 390 px clear of the
-words, the playhead and the next notes, the overlay before a choice (the buttons and the prompt in its middle, out of a toast's way) and
+`tract3d.mjs` checks «Голова»: the column at 1440 px and 900 px (the whole head; before a choice the prompt with the two
+buttons under it), a short column (1440 × 900 and 900 × 1000 after a take, 1366 × 650 idle) drawing the lips to the
+pharynx 90 px wide at least beside its words, and the overlay at 390 px clear of the words, the playhead and the next
+notes, and, through a sung pass of the demo, of every note sung in the last 2 s, moving seldom; the overlay before a choice (the buttons and the prompt in its middle, out of a toast's way), its enlarge mark (from the keyboard too) and
 enlarged (its ✕, the stage covered from edge to edge, its caption aside under a toast), the chosen head marked as the roll's chosen view, the body's
 choice across a reload, lesson 1's «ма» (after the rest an /m/ long enough to be seen, through the nose, then the held
 /a/ on the note, its air leaving the mouth as densely at its end as at its start), the demo's «ta» (closure with no air in front of the face, then
-voiced), a made-up word marked «приблизно» with every sound whole at three widths, `--rebuild` keeping the song data
+voiced), a made-up word marked «приблизно» with every sound whole at three widths (on a phone «приблизно» alone on the
+first line, the sounds on the second), `--rebuild` keeping the song data
 and writing the word sounds, listening from `file://` without a network request, the frame budget at 390 px and 1440 px
 under 1× and 4× CPU throttle (the flat cut face, which a renderer without a graphics processor gets; the 3D head forced
 onto it for its own work, and through its own multisampled framebuffer the same picture at each redraw), «Голова» off leaving today's roll, the flat cut face without WebGL2, no head drawn in VR or in a hidden tab, and

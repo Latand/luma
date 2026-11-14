@@ -417,7 +417,10 @@ function baredLips(lp, s, k) {
 // Chimera section.ts: the midsagittal section, painted on a canvas the scene maps onto the plane of the cut. Its source
 // is shared with a worker (painterSource.toString()), so the painting runs off the trainer's main thread where it can.
 function painterSource() {
-  const LUMEN = 1.0;   // cm above the glottis (body scale) up to which the air on the cut face is painted, not cut out
+  // cm above the glottis (body scale): from LUMEN down the air on the cut face is painted dark, fading in over FADE, not
+  // cut out (a hard edge there drew a square box over the folds)
+  const LUMEN = 1.6, FADE = 1.1;
+  const smooth = t => t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t);   // (this source runs in a worker too: nothing from outside it)
   const CUT = {skin: '#e3b59c', fat: '#efd17c', muscle: '#a04442', deep: '#8c3d3c', bone: '#efe6d2', marrow: '#e2d2b4', cartilage: '#c4dcd6', brain: '#dcbcb6', brainFold: '#b98d8a', white: '#efe3d8', cord: '#ecdcae', tongue: '#b5484e', fibre: '#c8656b', mucosa: '#d4868a', enamel: '#f6f2e8', dentine: '#e8dcc0', hollow: '#3b1517', hair: '#80604a', strand: '#a8876b'};
   function offsetIn(pts, d) { const out = []; for (let i = 0; i < pts.length; i++) { const a = pts[Math.max(0, i - 2)], b = pts[Math.min(pts.length - 1, i + 2)], tx = b.x - a.x, ty = b.y - a.y, l = Math.hypot(tx, ty) || 1; out.push({x: pts[i].x - (ty / l) * d, y: pts[i].y + (tx / l) * d}); } return out; }
   function smoothOpen(pts, per = 8) { const n = pts.length, out = []; if (n < 3) return pts; for (let i = 0; i + 1 < n; i++) { const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(n - 1, i + 2)]; for (let s = 0; s < per; s++) { const t = s / per, t2 = t * t, t3 = t2 * t; out.push({x: .5 * (2 * p1.x + (p2.x - p0.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (3 * p1.x - p0.x - 3 * p2.x + p3.x) * t3), y: .5 * (2 * p1.y + (p2.y - p0.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (3 * p1.y - p0.y - 3 * p2.y + p3.y) * t3)}); } } out.push(pts[n - 1]); return out; }
@@ -438,6 +441,18 @@ function painterSource() {
     const J = (x, y) => { const p = T(x, y), dx = p.x - d.pivot.x, dy = p.y - d.pivot.y; return {x: d.pivot.x + dx * jc - dy * js, y: d.pivot.y + dx * js + dy * jc}; };
     const outline = name => d.outline[name] || [];
     const g = d.glottis;
+    // The epiglottis comes as a straight bar of eight points: drawn and cut out of the air as a leaf, rounded at its free
+    // end and bent a little back over the entrance of the larynx, so the airway beside it has no square notch.
+    const epi = d.tissue.epiglottis;
+    if (epi && epi.length === 8) {
+      const mid = (a, b) => ({x: (a.x + b.x) / 2, y: (a.y + b.y) / 2}), base = mid(epi[0], epi[7]), tip = mid(epi[3], epi[4]);
+      const L = Math.hypot(tip.x - base.x, tip.y - base.y) || 1, t = {x: (tip.x - base.x) / L, y: (tip.y - base.y) / L};
+      let n = {x: -t.y, y: t.x}; if ((epi[0].x - base.x) * n.x + (epi[0].y - base.y) * n.y < 0) n = {x: -n.x, y: -n.y};   // n: toward the back
+      const half = Math.hypot(epi[0].x - epi[7].x, epi[0].y - epi[7].y) / 2, steps = [0, .14, .3, .46, .62, .78, .9, 1];
+      const at = (s, side) => { const h = half * (.8 + .45 * Math.sin(Math.PI * Math.min(1, s * 1.15))) * (s > .9 ? 1 - (s - .9) * 4 : 1), b = .16 * k * s * s;
+        return {x: base.x + t.x * L * s + n.x * (b + side * h), y: base.y + t.y * L * s + n.y * (b + side * h)}; };
+      d.tissue.epiglottis = smoothClosed([...steps.map(s => at(s, 1)), {x: base.x + t.x * (L + .05 * k) + n.x * .16 * k, y: base.y + t.y * (L + .05 * k) + n.y * .16 * k}, ...steps.slice().reverse().map(s => at(s, -1))], 4);
+    }
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; ctx.clearRect(0, 0, W, H); ctx.lineJoin = ctx.lineCap = 'round';
     const front = d.front, back = d.back, head = [...front, ...back];
     ctx.save(); path(ctx, head); ctx.clip();
@@ -516,17 +531,23 @@ function painterSource() {
     const lar = .6 * d.larynx * k, hy = {x: T(1.7, 0).x, y: T(0, 3.1).y + lar}, G = (dx, dy) => ({x: g.x + dx * k, y: g.y + dy * k});
     fill(smoothClosed([{x: hy.x - .4 * k, y: hy.y - .5 * k}, G(1.25, 1.95), G(.75, 2.0), G(.5, 2.5), {x: hy.x - .75 * k, y: hy.y + .1 * k}]), CUT.fat);
     fill(smoothClosed([{x: hy.x - .3 * k, y: hy.y + .3 * k}, {x: hy.x + .25 * k, y: hy.y + .2 * k}, {x: hy.x + .4 * k, y: hy.y - .15 * k}, {x: hy.x, y: hy.y - .32 * k}, {x: hy.x - .4 * k, y: hy.y - .1 * k}]), CUT.bone);
-    const lean = dy => .045 * dy, depth = bounds.y0 / k - g.y / k, ahead = [], behind = [];
-    for (let q = 0; q <= 12; q++) { const dy = (depth * q) / 12, wide = .3 + .48 * Math.min(1, -dy / 1.4) ** .7; ahead.push(G(.12 + wide + lean(dy), dy)); behind.push(G(.12 - wide + lean(dy), dy)); }
-    fill([...ahead, ...behind.slice().reverse()], CUT.hollow);
-    stroke(smoothOpen(behind.map(p => ({x: p.x - .42 * k, y: p.y})).slice(2)), CUT.hollow, .09 * k);
-    fill(smoothClosed([G(1.0, 1.75), G(1.42, 1.5), G(1.7, .6), G(1.62, -.35), G(1.3, -.55), G(1.32, .3), G(1.2, 1.1)]), CUT.cartilage);
-    fill(smoothClosed([G(1.12, -.75), G(1.5, -.85), G(1.55, -1.3), G(1.2, -1.4), G(1.0, -1.1)]), CUT.cartilage);
-    fill(smoothClosed([G(-.82, .55), G(-.5, .2), G(-.55, -1.2), G(-.85, -1.5), G(-1.08, -.9), G(-1.05, .1)]), CUT.cartilage);
-    fill(smoothClosed([G(-.8, .6), G(-.48, 1.15), G(-.42, .6), G(-.55, .35)]), CUT.cartilage);
-    for (let q = 0; q < 6; q++) { const dy = -1.95 - q * .95; if (g.y + (dy - .6) * k < bounds.y0) break; const c = G(1.12 + lean(dy), dy - .25); ctx.beginPath(); ctx.ellipse(X(c.x), Y(c.y), .19 * k * S, .3 * k * S, 0, 0, Math.PI * 2); ctx.fillStyle = CUT.cartilage; ctx.fill(); }
-    fill(smoothClosed([G(-.62, .02), G(-.1, .13), G(-.6, .32)]), CUT.mucosa);
-    fill(smoothClosed([G(.72, .02), G(.12, .13), G(.7, .32)]), CUT.mucosa);
+    // The larynx's way down: the vestibule's walls where they reach the glottis (the tube's first and last points) run on
+    // without a step into the windpipe, which widens below the folds. The cartilages stand outside those walls: the
+    // cricoid's plate and the arytenoid behind, the thyroid and the cricoid's arch in front, the windpipe's rings.
+    const lean = dy => .045 * dy, depth = bounds.y0 / k - g.y / k, tube = d.air[1];
+    const B0 = tube.length > 1 ? (tube[0].x - g.x) / k : -.74, F0 = tube.length > 1 ? (tube[tube.length - 1].x - g.x) / k : .49;
+    const wall = (dy, side) => { if (dy >= 0) return side < 0 ? B0 - .03 * dy : F0 - .06 * dy; const f = smooth(Math.min(1, -dy / 1.4)); return (side < 0 ? B0 : F0) + ((.12 + side * .78 + lean(dy)) - (side < 0 ? B0 : F0)) * f; };
+    const ahead = [], behind = [];
+    // (from just above the glottis, inside the vestibule's dark, so the two meet without a seam)
+    for (const dy of [.45, .3, .15, 0, ...Array.from({length: 14}, (_, q) => (depth * (q + 1)) / 14)]) { ahead.push(G(wall(dy, 1), dy)); behind.push(G(wall(dy, -1), dy)); }
+    fill([...smoothOpen(ahead.slice().reverse(), 4), ...smoothOpen(behind, 4)], CUT.hollow);
+    stroke(smoothOpen(behind.map(p => ({x: p.x - .62 * k, y: p.y})).slice(3)), CUT.hollow, .09 * k);
+    fill(smoothClosed([G(F0 + .55, 1.75), G(F0 + .95, 1.5), G(F0 + 1.22, .6), G(F0 + 1.14, -.35), G(F0 + .82, -.55), G(F0 + .84, .3), G(F0 + .72, 1.1)]), CUT.cartilage);
+    fill(smoothClosed([G(wall(-.75, 1) + .2, -.7), G(wall(-.85, 1) + .62, -.85), G(wall(-1.3, 1) + .6, -1.3), G(wall(-1.4, 1) + .24, -1.42), G(wall(-1.1, 1) + .1, -1.1)]), CUT.cartilage);
+    const rear = (dy, dx) => G(wall(dy, -1) + dx, dy);
+    fill(smoothClosed([rear(.5, -.1), rear(.05, -.06), rear(-.6, -.06), rear(-1.25, -.08), rear(-1.55, -.3), rear(-1.45, -.62), rear(-.6, -.58), rear(.15, -.48)]), CUT.cartilage);
+    fill(smoothClosed([rear(.48, -.12), rear(.85, -.08), rear(1.2, -.2), rear(.9, -.4), rear(.5, -.42)]), CUT.cartilage);
+    for (let q = 0; q < 6; q++) { const dy = -1.95 - q * .95; if (g.y + (dy - .6) * k < bounds.y0) break; const c = G(wall(dy - .25, 1) + .26, dy - .25); ctx.beginPath(); ctx.ellipse(X(c.x), Y(c.y), .19 * k * S, .3 * k * S, 0, 0, Math.PI * 2); ctx.fillStyle = CUT.cartilage; ctx.fill(); }
     const tongue = outline('tongue');
     if (tongue.length > 2) {
       fill(smoothClosed([J(6.0, 5.2), J(4.6, 5.0), {x: hy.x + .3 * k, y: hy.y + .25 * k}, {x: hy.x + .35 * k, y: hy.y - .3 * k}, J(4.4, 4.45), J(6.1, 4.75)]), CUT.muscle);
@@ -561,11 +582,20 @@ function painterSource() {
     mctx.globalCompositeOperation = 'source-over'; for (const a of d.air.slice(1)) poly(a);
     // Below the entrance of the larynx nothing lies behind the cut: turned, the view through the air went out of the head
     // and showed the page. There the air stays painted, a dark lumen like the windpipe's under it.
-    const low = Math.max(0, Math.min(H, Y(g.y + LUMEN * k)));
+    // It fades in over FADE from LUMEN down, so the cut-away air and the dark lumen meet without an edge.
+    const low = Math.max(0, Math.min(H, Y(g.y + LUMEN * k))), full = Math.max(low, Math.min(H, Y(g.y + (LUMEN - FADE) * k)));
     mctx.globalCompositeOperation = 'source-atop'; mctx.fillStyle = CUT.hollow; mctx.fillRect(0, low, W, H - low);
     ctx.save(); path(ctx, head); ctx.clip(); ctx.shadowColor = CUT.mucosa; ctx.shadowBlur = .12 * k * S; ctx.globalCompositeOperation = 'source-atop'; ctx.drawImage(mctx.canvas, 0, 0); ctx.restore();
-    mctx.globalCompositeOperation = 'destination-out'; mctx.fillRect(0, low, W, H - low); mctx.globalCompositeOperation = 'source-over';
+    const fade = mctx.createLinearGradient(0, low, 0, full + 1e-3); fade.addColorStop(0, 'rgba(0,0,0,0)'); fade.addColorStop(1, '#000');
+    mctx.globalCompositeOperation = 'destination-out'; mctx.fillStyle = fade; mctx.fillRect(0, low, W, H - low); mctx.globalCompositeOperation = 'source-over';
     ctx.globalCompositeOperation = 'destination-out'; ctx.drawImage(mctx.canvas, 0, 0); ctx.globalCompositeOperation = 'source-over';
+    // The folds, seen on the far wall of the cut larynx: a pale band across the airway at the glottis between the thyroid
+    // in front and the arytenoid behind, and the ventricular fold above it, the ventricle a dark slit between them.
+    const band = (dy, top, bottom, inset) => { const up = [], down = [];
+      for (let q = 0; q <= 8; q++) { const u = q / 8, x = (B0 + inset) + (F0 - inset - (B0 + inset)) * u, bulge = Math.sin(Math.PI * u) ** .6; up.push(G(x, dy + top * (.6 + .4 * bulge))); down.push(G(x, dy - bottom * (.6 + .4 * bulge))); }
+      return smoothClosed([...up, ...down.reverse()], 3); };
+    fill(band(.6, .08, .07, .02), CUT.mucosa);
+    fill(band(.04, .15, .12, -.01), CUT.white);
   }
   return {paint, CUT};
 }
@@ -574,8 +604,19 @@ const PAINTER = painterSource();
 const sectionBounds = k => ({x0: -15 * k, x1: 10.5 * k, y0: -5.4 * k, y1: 25.6 * k});
 // The phone's small overlay shows the mouth to the larynx (body cm, [x0, x1, y0, y1]): from the spine to past the
 // nostril, from the neck's cut (or 2 cm under the glottis, where the neck runs on) to above the nasal cavity, so the
-// nose's way and the soft palate stay inside and the space in front of the neck holds the body's tag.
-const cropBox = b => [-2.8 * b.k, 10.8 * b.k, Math.max(b.bottom, -2 * b.k), 14.4 * b.k];
+// nose's way and the soft palate stay inside and the space in front of the neck holds the body's tag. A short column
+// (tight) takes it closer, with no margin: the front of the spine to the breath in front of the lips, the windpipe under
+// the folds to the nasal cavity's roof, so the mouth stands larger beside the column's words.
+const cropBox = (b, tight) => tight ? [-2.1 * b.k, 9.6 * b.k, Math.max(b.bottom, -1.3 * b.k), 14.1 * b.k] : [-2.8 * b.k, 10.8 * b.k, Math.max(b.bottom, -2 * b.k), 14.4 * b.k];
+// The whole head's frame (the male's, for both bodies; body cm) and how many CSS pixels a centimetre of the cut takes in a
+// view of w × h at the resting turn (15°): the camera below fits the frame's height, or its width turned with the head's
+// depth (8 cm for the whole head, 3 for a crop), with 5 % to spare.
+const WHOLE = [-13.4, 9.4, -4.6, 24.6];
+function frameFit(box, depth, yawDeg = 15) { const yaw = yawDeg * Math.PI / 180; return {hh: (box[3] - box[2]) / 2, across: (box[1] - box[0]) / 2 * Math.abs(Math.cos(yaw)) + depth * Math.abs(Math.sin(yaw))}; }
+const scaleIn = (f, w, h) => Math.min(h / (2 * f.hh * 1.05), w / (2 * f.across * 1.05));
+const wholeScale = (w, h) => scaleIn(frameFit(WHOLE, 8), w, h);
+// the short column's picture, width over height (its tight crop, where the neck runs on below the crop's foot)
+const CROP_ASPECT = (f => f.across / f.hh)(frameFit(cropBox({k: 1, bottom: -9}, true), 3));
 // The input of one painting, flat (it crosses to the worker as a few typed arrays): the blended posture's points, the
 // posed skin's midline, the hair's band; unpack() turns it into the polygons the painter draws.
 function paintInput(body, p, front, back, scale) {
@@ -661,7 +702,7 @@ layout(location=0) in vec2 aXY; uniform mat4 uMVP; uniform vec4 uBox; out vec2 v
 void main() { vec2 p = mix(uBox.xy, uBox.zw, aXY); vUV = vec2(aXY.x, 1.0 - aXY.y); gl_Position = uMVP * vec4(p, 0.004, 1.0); }`;
 const QFS = `#version 300 es
 precision mediump float; in vec2 vUV; uniform sampler2D uTex; out vec4 o;
-void main() { vec4 c = texture(uTex, vUV); if (c.a < 0.5) discard; o = vec4(c.rgb / max(c.a, 1e-3) * 0.97, 1.0); }`;
+void main() { vec4 c = texture(uTex, vUV); if (c.a < 0.02) discard; o = vec4(c.rgb * 0.97, c.a); }`;   // premultiplied, blended over the far half
 const PVS = `#version 300 es
 layout(location=0) in vec3 aP; uniform mat4 uMVP; out float vA;
 void main() { vA = aP.z; gl_Position = uMVP * vec4(aP.xy, 0.03, 1.0); gl_PointSize = 3.0; }`;
@@ -887,12 +928,12 @@ function attach(host) {
   // crop from the mouth to the larynx (cropBox)
   function camera(b, w, h) {
     const k = 1, crop = st.box?.crop, yaw = st.yaw * Math.PI / 180, pitch = st.pitch * Math.PI / 180;
-    const box = crop ? cropBox(b) : [-13.4, 9.4, -4.6, 24.6];
+    const box = crop ? cropBox(b, st.box.tight) : WHOLE;
     const cx = (box[0] + box[1]) / 2 * k, cy = (box[2] + box[3]) / 2 * k, hw = (box[1] - box[0]) / 2 * k, hh = (box[3] - box[2]) / 2 * k;
     const fov = 26 * Math.PI / 180, half = Math.tan(fov / 2), aspect = w / h;
     // turned, the head shows its depth: its width on screen is the box's width and the head's depth (±8 cm) mixed
     const across = hw * Math.abs(Math.cos(yaw)) + (crop ? 3 : 8) * k * Math.abs(Math.sin(yaw));
-    const dist = Math.max(hh / half, across / (half * aspect)) * 1.05;
+    const dist = Math.max(hh / half, across / (half * aspect)) * (crop && st.box.tight ? 1 : 1.05);
     const dir = [Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)];
     const eye = [cx + dir[0] * dist, cy + dir[1] * dist, dir[2] * dist], target = [cx, cy, 0];
     const v = lookAt(eye, target, [0, 1, 0]), pr = perspective(fov, aspect, Math.max(1, dist - 40 * k), dist + 40 * k);
@@ -979,10 +1020,12 @@ function attach(host) {
     const {gl} = G;
     if (glc.width !== w || glc.height !== h) { glc.width = w; glc.height = h; }
     if (st.fresh && st.bitmap) {
-      gl.bindTexture(gl.TEXTURE_2D, G.tex); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+      // premultiplied, as a painted bitmap arrives (a canvas painted on the main thread is premultiplied on the way up)
+      gl.bindTexture(gl.TEXTURE_2D, G.tex); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, st.bitmap); G.texReady = true; st.fresh = false;
     }
-    const ck = w + '|' + h + '|' + st.yaw + '|' + !!st.box?.crop; if (st.camKey !== ck) { st.cam = camera(b, w, h); st.camKey = ck; }
+    const ck = w + '|' + h + '|' + st.yaw + '|' + !!st.box?.crop + '|' + !!st.box?.tight + '|' + b.tag; if (st.camKey !== ck) { st.cam = camera(b, w, h); st.camKey = ck; }
+    { const M = st.cam.mvp; st.proj = (x, y) => { const cw = M[3] * x + M[7] * y + M[15]; return [((M[0] * x + M[4] * y + M[12]) / cw + 1) / 2 * w, (1 - (M[1] * x + M[5] * y + M[13]) / cw) / 2 * h]; }; }
     const cam = st.cam, M = G.mesh;
     const ms = target(G, w, h); gl.bindFramebuffer(gl.FRAMEBUFFER, ms ? ms.fb : null);
     gl.viewport(0, 0, w, h); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -1011,7 +1054,10 @@ function attach(host) {
       const Q = G.quad, sb = sectionBounds(b.k);
       gl.useProgram(Q.p); gl.uniformMatrix4fv(Q.u.uMVP, false, cam.mvp); gl.uniform4f(Q.u.uBox, sb.x0, sb.y0, sb.x1, sb.y1);
       gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, G.tex); gl.uniform1i(Q.u.uTex, 0);
+      // blended, so where the cut face fades (the larynx's lumen, its own edges) the far half shows through by degrees
+      gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       bind(0, G.quadBuf, 2, 8, 0); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      gl.disable(gl.BLEND);
     }
     // the air, just in front of the cut
     if (lines) {
@@ -1029,8 +1075,9 @@ function attach(host) {
     const c = c2d.getContext('2d');
     if (c2d.width !== w || c2d.height !== h) { c2d.width = w; c2d.height = h; }
     c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, w, h);
-    const cb = st.box?.crop ? cropBox(b) : null, sb = sectionBounds(b.k), crop = cb ? {x0: cb[0], x1: cb[1], y0: cb[2], y1: cb[3]} : {x0: -14.6 * b.k, x1: 10 * b.k, y0: -5.2 * b.k, y1: 25.4 * b.k};
-    const S = Math.min(w / (crop.x1 - crop.x0), h / (crop.y1 - crop.y0)) * .96, ox = (w - (crop.x1 - crop.x0) * S) / 2 - crop.x0 * S, oy = (h - (crop.y1 - crop.y0) * S) / 2 + crop.y1 * S;
+    const cb = st.box?.crop ? cropBox(b, st.box.tight) : null, sb = sectionBounds(b.k), crop = cb ? {x0: cb[0], x1: cb[1], y0: cb[2], y1: cb[3]} : {x0: -14.6 * b.k, x1: 10 * b.k, y0: -5.2 * b.k, y1: 25.4 * b.k};
+    const S = Math.min(w / (crop.x1 - crop.x0), h / (crop.y1 - crop.y0)) * (cb && st.box.tight ? 1 : .96), ox = (w - (crop.x1 - crop.x0) * S) / 2 - crop.x0 * S, oy = (h - (crop.y1 - crop.y0) * S) / 2 + crop.y1 * S;
+    st.proj = (x, y) => [ox + x * S, oy - y * S];
     if (st.bitmap) c.drawImage(st.bitmap, ox + sb.x0 * S, oy - sb.y1 * S, (sb.x1 - sb.x0) * S, (sb.y1 - sb.y0) * S);
     c.strokeStyle = '#e8ecf4'; c.lineCap = 'round'; c.lineWidth = Math.max(1, 1.4 * host.dpr());
     for (let i = 0; i < lines; i += 6) { c.globalAlpha = airBuf[i + 2]; c.beginPath(); c.moveTo(ox + airBuf[i] * S, oy - airBuf[i + 1] * S); c.lineTo(ox + airBuf[i + 3] * S, oy - airBuf[i + 4] * S); c.stroke(); }
@@ -1041,8 +1088,13 @@ function attach(host) {
     const cur = q.seg?.sym;
     // the word, «приблизно» when its sounds are a guess, then its sounds with the one due now in brackets; the small overlay
     // on a phone leaves the word to the lyric band above it
-    const sounds = i.phones.split(' ').filter(Boolean).map(s => s.replace('+', '') === (cur || '') || s.split('+').includes(cur) ? '[' + s.replace('+', '') + ']' : s.replace('+', '')).join(' ');
-    if (st.box?.mode === 'overlay' && st.box.crop) return (i.approx ? 'приблизно · ' : '') + sounds;
+    // A syllable's sounds stand together as IPA writes them, the syllables apart (a line breaks only between them), so a
+    // narrow box never separates a consonant from its vowel.
+    const mark = s => { const plain = s.replace('+', ''); return plain === (cur || '') || s.split('+').includes(cur) ? '[' + plain + ']' : plain; };
+    const syl = [[]]; for (const s of i.phones.split(' ').filter(Boolean)) { if (s === '·') syl.push([]); else syl[syl.length - 1].push(mark(s)); }
+    const sounds = syl.filter(a => a.length).map(a => a.join('')).join('\u00a0· ');
+    // the small overlay: «приблизно» alone on its first line, the sounds on the second
+    if (st.box?.mode === 'overlay' && st.box.crop) return (i.approx ? 'приблизно\n' : '') + sounds;
     // the word on the first line and its sounds on the second, so a narrow column cuts none of them
     return '«' + i.w + '»' + (i.approx ? ' приблизно' : '') + '\n' + sounds;
   }
@@ -1050,7 +1102,7 @@ function attach(host) {
   // a press anywhere on the panel is the panel's: it never scrubs the roll under it
   el.addEventListener('pointerdown', e => e.stopPropagation());
   // turning the head: a drag while idle, up to 60° either way; a double click returns to the side view
-  view.addEventListener('pointerdown', e => { e.stopPropagation(); if (!host.idle() || e.button !== 0) return; st.drag = {x: e.clientX, yaw: st.yaw, moved: false}; view.setPointerCapture(e.pointerId); });
+  view.addEventListener('pointerdown', e => { e.stopPropagation(); if (!host.idle() || e.button !== 0 || e.target.closest('button')) return; st.drag = {x: e.clientX, yaw: st.yaw, moved: false}; view.setPointerCapture(e.pointerId); });
   view.addEventListener('pointermove', e => { if (!st.drag) return; const dx = e.clientX - st.drag.x; if (Math.abs(dx) > 4) st.drag.moved = true; st.yaw = clamp(st.drag.yaw + dx * .45, -60, 60); render(); });
   view.addEventListener('pointerup', e => { const d = st.drag; st.drag = null; if (d && !d.moved && st.box?.mode === 'overlay' && host.idle()) host.enlarge?.(); });
   view.addEventListener('dblclick', e => { e.stopPropagation(); st.yaw = 15; render(); });
@@ -1083,7 +1135,7 @@ function attach(host) {
         word: cur?.q.info?.w ?? null, approx: !!cur?.q.info?.approx, sound: sound.textContent, painted: st.paintN, paintMs: +st.paintMs.toFixed(2), worker: painter.worker,
         software: !!(st.software || st.G?.software), workMs: st.workMs.slice(), buildMs: st.buildMs ?? null, yaw: st.yaw, outline: b ? outlineSummary(b) : null, particles: st.parts ? st.parts.map(q => +q.u.toFixed(5)) : [],
         crop: !!st.box?.crop, samples: st.G ? (st.G.ms ? st.G.samples : 0) : null, airOut: st.airOut ?? 0, streaks: Array.from({length: (st.lines || 0) / 6}, (_, i) => [+airBuf[6 * i + 3].toFixed(2), +airBuf[6 * i + 4].toFixed(2)]),
-        skinKeys: st.G?.body ? [...st.G.body.keys.keys()] : [], segments: st.tl ? st.tl.segs.length : 0};
+        skinKeys: st.G?.body ? [...st.G.body.keys.keys()] : [], segments: st.tl ? st.tl.segs.length : 0, tight: !!st.box?.tight, mouthPx: p ? mouthPx(p) : null};
     },
     timeline() { const b = body(); return b ? tl(b) : null; },
     close() { painter.close(); },
@@ -1093,8 +1145,21 @@ function attach(host) {
     const z = a.slice(-60).sort((x, y) => x - y), p95 = z[Math.floor(.95 * z.length)];
     if (st.hz === 60 && p95 > 8) st.hz = 30; else if (st.hz === 30 && p95 < 3 && !st.G?.software) st.hz = 60;
   }
+  // How wide the mouth to the pharynx is drawn, in CSS pixels across the screen: from the airway's hindmost point between
+  // 2 and 6 cm above the glottis (the pharynx's back wall) to the lips (the airway's centreline ends between them).
+  function mouthPx(p) {
+    if (!st.proj) return null;
+    const pts = key => { const [o, m] = SEG[key], out = []; for (let i = 0; i < m; i++) out.push({x: p.pts[2 * (o + i)], y: p.pts[2 * (o + i) + 1]}); return out; };
+    const gy = p.sc[SC.glottisY], k = st.cur && body() ? body().k : 1;
+    let back = null;
+    for (const q of pts('air:envelope')) if (q.y > gy + 2 * k && q.y < gy + 6 * k && (!back || q.x < back.x)) back = q;
+    if (!back) return null;
+    const front = {x: p.cl[2 * NC - 2], y: p.cl[2 * NC - 1]};
+    const dpr = st.G?.software ? 1 : host.dpr();
+    return +(Math.abs(st.proj(front.x, front.y)[0] - st.proj(back.x, back.y)[0]) / dpr).toFixed(1);
+  }
   function outlineSummary(b) { let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity; for (let i = 0; i < b.rest.length; i += 3) { x0 = Math.min(x0, b.rest[i]); x1 = Math.max(x1, b.rest[i]); y0 = Math.min(y0, b.rest[i + 1]); y1 = Math.max(y1, b.rest[i + 1]); } return {x0: +x0.toFixed(2), x1: +x1.toFixed(2), y0: +y0.toFixed(2), y1: +y1.toFixed(2)}; }
 }
 
-window.LumaTract = {attach, key, letterRules, syllables, timeline, LABEL};
+window.LumaTract = {attach, key, letterRules, syllables, timeline, LABEL, wholeScale, CROP_ASPECT};
 })();

@@ -379,7 +379,7 @@ function sync(){
  $('micToggle').textContent=s.stream?'Вимкнути мікрофон':'Увімкнути лише мікрофон';$('micToggle').disabled=active||s.busy||s.awaitFinish;$('takesPanel').dataset.open=prefs.takesOpen?'1':'0';$('takesToggle').setAttribute('aria-expanded',String(prefs.takesOpen));$('takesCount').textContent=s.takes.length;
  $('livesMode').checked=prefs.lives;$('livesCount').value=String(prefs.livesCount);$('livesMode').disabled=$('livesCount').disabled=active||s.busy||s.awaitFinish;renderLives('');
  $('lyricsBtn').setAttribute('aria-pressed',String(prefs.lyrics));$('recordAudio').checked=prefs.audio;renderCamera();
- $('tractBtn').setAttribute('aria-pressed',String(prefs.tract));$('tractBtn').hidden=!tract;for(const b of document.querySelectorAll('[data-body]')){const on=b.dataset.body===prefs.tractBody;b.setAttribute('aria-pressed',String(on));b.classList.toggle('active',on);}
+ $('tractBtn').setAttribute('aria-pressed',String(prefs.tract));$('tractBtn').hidden=!tract;$('tractGrow').disabled=s.mode!=='idle'||s.busy;for(const b of document.querySelectorAll('[data-body]')){const on=b.dataset.body===prefs.tractBody;b.setAttribute('aria-pressed',String(on));b.classList.toggle('active',on);}
  refreshCloud();renderProgress();renderLatency();
  for(const b of document.querySelectorAll('[data-view]')){b.classList.toggle('active',b.dataset.view===prefs.view);b.setAttribute('aria-pressed',String(b.dataset.view===prefs.view));b.disabled=active||s.busy||s.awaitFinish;}
  const rv=traceShown();$('reviewBar').hidden=$('reviewDivider').hidden=!rv;if(rv){const t=s.trace.take,runs=missRuns(s.trace.score);$('reviewLabel').textContent='Спроба '+String(t.id).padStart(2,'0');const pct=scorePct(s.trace.score);$('reviewPct').textContent=pct===null?'—':pct+'%';$('missCount').textContent=runs.length?runs.length+' '+plural(runs.length,'промах','промахи','промахів'):'без промахів';$('prevMiss').disabled=$('nextMiss').disabled=!runs.length||s.mode!=='idle';}
@@ -1456,7 +1456,10 @@ function measureStage(){if(RENDER)return;if(s.xr){s.dense=false;s.headH=s.railH=
 // it takes nothing.
 // the phone's overlay enlarged to the stage or back; the words then take their places around it again
 function bigTract(on){s.tractBig=on;measureStage();s.dirty=true;requestDraw();}
-function placeTract(box){const el=$('tract');s.tractW=0;s.tractBox=null;
+// A column too short for the whole head to stand at TRACT_WHOLE CSS pixels a centimetre (the 900 px column idle gives it
+// about 9) takes the wide shape: the mouth to the larynx at the panel's whole height beside the words.
+const TRACT_WHOLE=8.5;
+function placeTract(box){const el=$('tract');s.tractW=0;s.tractBox=null;s.tractSpots=null;
  const on=!!tract&&prefs.tract&&!!box&&box.width>0&&!s.xr;s.tractOn=on;el.hidden=!on;tract?.show(on);if(!on){s.tractBig=false;return;}
  if(s.mode!=='idle'||box.width>=720)s.tractBig=false;
  const picked=prefs.tractBody==='male'||prefs.tractBody==='female';let r;
@@ -1464,10 +1467,33 @@ function placeTract(box){const el=$('tract');s.tractW=0;s.tractBox=null;
  else{const b=bounds();
   // enlarged, it covers the stage from edge to edge down to the plot's bottom, the piano rail included
   if(s.tractBig)r={x:0,y:0,w:box.width,h:b.bottom,mode:'overlay',big:true};
-  else{const h=Math.round((b.bottom-b.top)*.4),w=Math.round(.34*(b.right-b.left)-16);r={x:b.left+4,y:b.bottom-4-h,w,h,mode:'overlay',crop:true};s.tractBox={x0:r.x,y0:r.y,x1:r.x+w,y1:r.y+h};}}
- el.style.left=r.x+'px';el.style.top=r.y+'px';el.style.width=r.w+'px';el.style.height=r.h+'px';el.dataset.mode=r.mode;el.dataset.big=r.big?'1':'0';el.dataset.picked=picked?'1':'0';
- $('tractPick').hidden=picked;$('tractClose').hidden=!r.big;$('tractTag').hidden=!picked||r.mode!=='overlay'||!!r.big;$('tractTag').textContent=picked?window.LumaTract.LABEL[prefs.tractBody]:'';
- const v=$('tractView').getBoundingClientRect();tract.layout({mode:r.mode,w:v.width,h:v.height,crop:!!r.crop});}
+  // small, it stands bottom left on the sung part of the roll, or top left while what was just sung lies in the bottom
+  // rows (tractSpot(), every frame); while singing it is a quarter smaller (30 % of the plot high), so the notes of the last
+  // 2 s, their marks and the voice on them stay in sight at one of its two places
+  else{const sing=s.mode==='singing',h=Math.round((b.bottom-b.top)*(sing?.3:.4)),w=Math.round((.34*(b.right-b.left)-16)*(sing?.75:1));s.tractSpots={low:b.bottom-4-h,high:b.top+4};const spot=s.tractSpot==='high'?'high':'low';
+   r={x:b.left+4,y:s.tractSpots[spot],w,h,mode:'overlay',crop:true,spot};s.tractBox={x0:r.x,y0:r.y,x1:r.x+w,y1:r.y+h};}}
+ el.style.left=r.x+'px';el.style.top=r.y+'px';el.style.width=r.w+'px';el.style.height=r.h+'px';el.dataset.mode=r.mode;el.dataset.big=r.big?'1':'0';el.dataset.picked=picked?'1':'0';el.dataset.spot=r.spot||'';el.dataset.shape='tall';el.dataset.sing=s.mode==='singing'?'1':'0';
+ $('tractPick').hidden=picked;$('tractClose').hidden=!r.big;$('tractTag').hidden=$('tractGrow').hidden=!picked||r.mode!=='overlay'||!!r.big;$('tractTag').textContent=picked?window.LumaTract.LABEL[prefs.tractBody]:'';
+ let v=$('tractView').getBoundingClientRect();
+ if(r.mode==='column'&&picked){const head=el.querySelector('.tract-head').getBoundingClientRect().height,cap=parseFloat(getComputedStyle($('tractSound')).minHeight)||0;
+  if(window.LumaTract.wholeScale(r.w-2,r.h-2-head-cap)<TRACT_WHOLE){el.dataset.shape='wide';
+   // the words' column keeps the stacked choice whole (its width and 16 px), the picture takes the rest up to its own shape
+   const words=Math.max(88,Math.ceil(el.querySelector('.tract-body').getBoundingClientRect().width)+16);
+   el.style.setProperty('--tract-pic',Math.round(Math.min((r.h-2)*window.LumaTract.CROP_ASPECT,r.w-2-words))+'px');r.crop=r.tight=true;v=$('tractView').getBoundingClientRect();}}
+ tract.layout({mode:r.mode,w:v.width,h:v.height,crop:!!r.crop,tight:!!r.tight});}
+// The phone's small overlay keeps clear of the notes sung in the last 2 s that lie under it (each note's bar and, in the
+// contour view, the mark under it) and, after them, of those that reach it within TRACT_LOOK s: it stays where it is while
+// its place is clear, moves to the other end of the sung part when that one is clearer, and after a seek starts at the
+// bottom unless the top is clearer. The words step around it in drawWords().
+const TRACT_LOOK=.8;
+function tractSpot(t,b,v,y,barH){const sp=s.tractSpots,tb=s.tractBox;if(!sp||!tb||s.tractBig)return;
+ const h=tb.y1-tb.y0,o=effective().octave,at=xx=>v.a+(xx-b.left)/(b.right-b.left)*v.span,ta=Math.max(t-2,at(tb.x0)),tz=at(tb.x1+2),under=prefs.view==='contour'?27:barH/2;
+ // notes under it now count before notes on their way to it
+ const hits=spot=>{const y0=sp[spot]-4,y1=sp[spot]+h+4;let now=0,soon=0;for(const q of song.notes){if(q.a>=tz+TRACT_LOOK)break;if(q.b<=ta)continue;const yy=y(q.m+o);if(yy+under<=y0||yy-barH/2>=y1)continue;if(q.a<tz)now++;else soon++;}return now*1000+soon;};
+ const fresh=s.tractSpotT===undefined||Math.abs(t-s.tractSpotT)>.5,cur=s.tractSpot==='high'?'high':'low',other=cur==='low'?'high':'low';s.tractSpotT=t;
+ let next=cur;if(fresh){const lo=hits('low');next=lo&&hits('high')<lo?'high':'low';}else{const c=hits(cur);if(c&&hits(other)<c)next=other;}
+ if(next===s.tractSpot&&$('tract').dataset.spot===next)return;
+ s.tractSpot=next;const el=$('tract');el.style.top=sp[next]+'px';el.dataset.spot=next;s.tractBox={...tb,y0:sp[next],y1:sp[next]+h};}
 // Phones, and phones held sideways: the page scrolls, so the stage takes exactly the height that leaves «Співати» on the first
 // screen — measured, not guessed, because the title, the hint banner and the browser chrome all move the space above it.
 // Never called from the resize observer: it writes a length, and the observer only reads.
@@ -1491,9 +1517,10 @@ function drawWords(t,v,x,y,b,opt){
    let m=null;if(ms.length){ms.sort((p,q)=>p-q);m=ms[ms.length>>1];}else{for(let d=.04;d<=.6&&m===null;d+=.04){const r=targetAt(w.a-d,opt)||targetAt(w.b+d,opt);if(r)m=r.m;}}
    let yy=(m===null?(b.top+b.bottom)/2:clamp(y(m),b.top+rowH,b.bottom))-11;
    // on a phone the head holds the bottom of the sung part of the roll: a word that would fall on it stands above it
-   const tb=s.tractBox;if(tb&&xx-5<tb.x1&&xx+tw+5>tb.x0&&yy+6>tb.y0&&yy-15<tb.y1)yy=tb.y0-8;
-   for(let k=0;k<6;k++){const hit=placed.some(p=>xx<p.x1+6&&xx+tw>p.x0-6&&Math.abs(yy-p.y)<rowH-1);if(!hit)break;yy-=rowH;}
-   if(yy<b.top+4)yy=b.top+4;placed.push({x0:xx,x1:xx+tw,y:yy});if(wordProbe)wordProbe.push({w:w.w,x0:xx-5,x1:xx+tw+5,y0:yy-(W<720?13:15),y1:yy+(W<720?5:6)});
+   // (below it when it stands at the top)
+   const tb=s.tractBox,below=s.tractSpot==='high',onTb=q=>tb&&xx-5<tb.x1&&xx+tw+5>tb.x0&&q+6>tb.y0&&q-15<tb.y1;if(onTb(yy))yy=below?tb.y1+16:tb.y0-8;
+   for(let k=0;k<6;k++){const hit=placed.some(p=>xx<p.x1+6&&xx+tw>p.x0-6&&Math.abs(yy-p.y)<rowH-1);if(!hit)break;yy+=below&&onTb(yy-rowH)?rowH:-rowH;}
+   if(yy<b.top+4&&!(below&&onTb(b.top+4)))yy=b.top+4;placed.push({x0:xx,x1:xx+tw,y:yy});if(wordProbe)wordProbe.push({w:w.w,x0:xx-5,x1:xx+tw+5,y0:yy-(W<720?13:15),y1:yy+(W<720?5:6)});
    const on=t>=w.a&&t<w.b+.08,past=t>=w.b;g.globalAlpha=(w.c??1)<.5?.72:1;
    g.fillStyle='#0c111aec';g.beginPath();g.roundRect(xx-5,yy-(W<720?13:15),tw+10,W<720?18:21,5);g.fill();// halo so the word stays legible over the lines
    g.fillStyle=on?'#f2f8ff':past?'#a6b3c8':'#c6d0e0';g.fillText(w.w,xx,yy);if(on){g.fillStyle='#a1eed8';g.fillRect(xx,yy+3.5,tw,1.8);}
@@ -1674,6 +1701,7 @@ function draw(t){
    g.fillStyle=(st>=2?'#c9707a':'#a1eed8')+'1f';g.beginPath();g.arc(xx,yy,12,0,Math.PI*2);g.fill();
    g.strokeStyle=c;g.lineWidth=1.4;g.beginPath();g.arc(xx,yy,5.5,0,Math.PI*2);g.stroke();g.fillStyle=c;g.beginPath();g.arc(xx,yy,2.6,0,Math.PI*2);g.fill();}
  }
+ if(s.tractSpots)tractSpot(t,b,v,y,barH);
  drawWords(t,v,x,y,b,opt);
  g.restore();
  g.strokeStyle='#dff0ea52';g.lineWidth=1;g.setLineDash([2,5]);g.beginPath();g.moveTo(nowX,b.laneTop-(s.dense?0:8));g.lineTo(nowX,b.bottom);g.stroke();g.setLineDash([]);
@@ -1753,6 +1781,7 @@ $('livesMode').onchange=()=>{prefs.lives=$('livesMode').checked;if(!prefs.lives)
 $('livesCount').onchange=()=>{const n=+$('livesCount').value;if(LIVES.sizes.includes(n))prefs.livesCount=n;s.lives=null;savePrefs();sync();};
 $('historyFile').onchange=()=>{importHistoryFile($('historyFile').files[0]);$('historyFile').value='';};$('lyricsBtn').onclick=()=>{prefs.lyrics=!prefs.lyrics;savePrefs();s.lyricKey='~';resize();sync();};
 $('tractBtn').onclick=()=>{prefs.tract=!prefs.tract;savePrefs();resize();sync();};$('tractClose').onclick=()=>bigTract(false);
+$('tractGrow').onclick=()=>{if(s.mode==='idle'&&!s.busy&&s.tractOn&&!s.tractBig)bigTract(true);};
 for(const b of document.querySelectorAll('[data-body]'))b.onclick=()=>{prefs.tractBody=b.dataset.body;savePrefs();sync();if(s.tractOn)tract.frame(now(),false);};
 for(const b of document.querySelectorAll('[data-close]'))b.onclick=()=>$(b.dataset.close).close();
 $('loopBtn').onclick=()=>{prefs.loop=!prefs.loop;if(!prefs.loop)clearTimeout(s.nextTimer);if(prefs.loop&&!customRange())toast('Виділи фрагмент: тягни під хвилею або клавіші A / B під час прослуховування.');
@@ -2050,7 +2079,10 @@ window.Luma={diagnostics:()=>({mode:s.mode,busy:s.busy,pending:s.awaitFinish,tim
   noteBoxes:()=>{probe=[];draw(now());const r=probe;probe=null;return r;},
   // the word labels one frame placed (their halo boxes), and what the head shows (app/tract3d.js state())
   wordBoxes:()=>{wordProbe=[];draw(now());const r=wordProbe;wordProbe=null;return r;},
-  tract:()=>{const el=$('tract'),r=el.getBoundingClientRect(),c=$('chartWrap').getBoundingClientRect();return {...(tract?tract.state():{}),pref:prefs.tract,pref_body:prefs.tractBody,hidden:el.hidden,mode:el.dataset.mode||null,big:!!s.tractBig,box:{x0:r.left-c.left,y0:r.top-c.top,x1:r.right-c.left,y1:r.bottom-c.top},overlay:s.tractBox?{...s.tractBox}:null};},
+  // every note's bar as the roll draws it at the moment shown (chart coordinates), with its times
+  noteRects:()=>{const t=now(),b=bounds(),v=view(t),o=effective().octave,rowH=(b.bottom-b.top)/(s.rangeHi-s.rangeLo),barH=clamp(rowH*.74,7,26),x=a=>b.left+(a-v.a)/v.span*(b.right-b.left),y=m=>b.bottom-(m-s.rangeLo)/(s.rangeHi-s.rangeLo)*(b.bottom-b.top);
+   return song.notes.filter(n=>n.b>=v.a&&n.a<=v.b).map(n=>({id:n.id,a:n.a,b:n.b,x0:Math.max(b.left,x(n.a)),x1:Math.min(b.right,Math.max(x(n.a)+2,x(n.b))),y0:y(n.m+o)-barH/2,y1:y(n.m+o)+barH/2}));},
+  tract:()=>{const el=$('tract'),r=el.getBoundingClientRect(),c=$('chartWrap').getBoundingClientRect();return {...(tract?tract.state():{}),pref:prefs.tract,pref_body:prefs.tractBody,hidden:el.hidden,mode:el.dataset.mode||null,shape:el.dataset.shape||null,spot:el.dataset.spot||null,big:!!s.tractBig,box:{x0:r.left-c.left,y0:r.top-c.top,x1:r.right-c.left,y1:r.bottom-c.top},overlay:s.tractBox?{...s.tractBox}:null};},
   // one frame of the head alone at song time t (as the trainer's tick draws it), and its own time
   tractFrame:(t,moving=true)=>{if(!s.tractOn)return null;const t0=performance.now();const drew=tract.frame(t,moving);return {ms:performance.now()-t0,drew};},
   tractYaw:v=>tract?.yaw(v),tractTimeline:()=>tract?.timeline(),
