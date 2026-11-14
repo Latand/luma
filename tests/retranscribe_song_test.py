@@ -5,6 +5,7 @@ and no payment happen.
 """
 import json
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -16,6 +17,9 @@ sys.path.insert(0, str(ROOT / 'tests'))
 import align_lyrics as al
 import retranscribe_song as rt
 from lyrics_align_test import synthetic_package, TEXT
+from lyrics_synced_test import (phrase_identity_fixture, consecutive_repeat_fixture,
+                                gapped_phrase_fixture, synthetic_package as timed_package)
+from prepare_song import sha256
 
 
 class RetranscribeCorrectionReplayTests(unittest.TestCase):
@@ -62,6 +66,84 @@ class RetranscribeCorrectionReplayTests(unittest.TestCase):
         words = [w['w'] for w in al.flat(after['lyrics'])]
         self.assertEqual(words, ['one', 'two', 'THREE', 'four', 'five', 'six.'])
         self.assertIsNone(out['correction'], "with no cached source, the result must say there was no correction, not omit the key")
+
+
+class SyncedRetranscriptionCliTests(unittest.TestCase):
+    def test_gapped_short_line_refusal_preserves_the_entire_record_tree(self):
+        for vocal_exists in [False, True]:
+            for mix_exists in [False, True]:
+                with self.subTest(vocal_exists=vocal_exists, mix_exists=mix_exists):
+                    self.check_cli('gapped', vocal_exists, mix_exists, shift=-4.)
+
+    def test_gap_only_and_compensated_missing_repeat_controls_replay(self):
+        for kind in ['gapped', 'compensated_separate', 'compensated_combined']:
+            with self.subTest(kind=kind):
+                self.check_cli(kind, False, False, shift=0.)
+
+    def test_cache_only_refusal_preserves_existing_and_absent_transcripts(self):
+        for kind in ['repeat', 'short2']:
+            for vocal_exists in [False, True]:
+                for mix_exists in [False, True]:
+                    with self.subTest(kind=kind, vocal_exists=vocal_exists, mix_exists=mix_exists):
+                        self.check_cli(kind, vocal_exists, mix_exists, shift=-4.)
+
+    def test_cache_only_valid_control_saves_transcripts_and_corrected_words(self):
+        for kind in ['repeat', 'short2']:
+            with self.subTest(kind=kind):
+                self.check_cli(kind, False, False, shift=0.)
+
+    def check_cli(self, kind, vocal_exists, mix_exists, shift):
+        if kind == 'gapped':
+            _, words, song, text, lrc = gapped_phrase_fixture(shift=shift, only_gap=not shift)
+        else:
+            if kind.startswith('compensated_'):
+                _, words, song, text, lrc = consecutive_repeat_fixture(kind.endswith('combined'), missing=51.)
+                lrc = '[offset:10000]\n' + lrc
+            else:
+                _, words, song, text, lrc = phrase_identity_fixture(kind, 'pitch', shift=shift)
+            words = [dict(w, a=w['a'] + .6, b=w['b'] + .6) for w in words]
+        with tempfile.TemporaryDirectory() as tmp:
+            end = 4. if kind.startswith('compensated_') else 3.
+            pkg = timed_package(Path(tmp), bursts=[(i * 10 + 1., i * 10 + end) for i in range(12)],
+                                asr_words=['flim'] * 12, duration=120.)
+            target = json.loads((pkg / 'target.json').read_text())
+            target['lyrics'] = song['lyrics']
+            target['lyricsSource'] = 'synthetic mix transcript'
+            (pkg / 'target.json').write_text(json.dumps(target))
+            mix = pkg / 'lyrics/mix.json'
+            if mix_exists:
+                mix.write_text(json.dumps({'source': 'mix', 'lines': song['lyrics']}))
+            else:
+                mix.unlink(missing_ok=True)
+            vocal = pkg / 'lyrics/vocal.json'
+            if vocal_exists:
+                vocal.write_text(json.dumps({'source': 'old vocal', 'lines': song['lyrics']}))
+            else:
+                vocal.unlink(missing_ok=True)
+            (pkg / 'lyrics/source.txt').write_text(text)
+            (pkg / 'lyrics/source.meta.json').write_text(json.dumps({
+                'title': target['title'], 'artist': target['artist'], 'synced_lrc': lrc}))
+            tokens = [{'text': (' ' if i else '') + w['w'], 'start_ms': round(w['a'] * 1000),
+                       'end_ms': round(w['b'] * 1000), 'confidence': .9} for i, w in enumerate(words)]
+            payload = {'model': 'stt-async-v5', 'created': '2026-01-01T00:00:00', 'tokens': tokens}
+            (pkg / 'lyrics' / f'soniox-{sha256(pkg / "vocals_44k.flac")[:16]}.json').write_text(json.dumps(payload))
+            def snapshot():
+                return {str(p.relative_to(pkg)): p.read_bytes() for p in pkg.rglob('*') if p.is_file()}
+            before = snapshot()
+            command = [sys.executable, str(ROOT / 'studio/retranscribe_song.py'), '--cache-only', '--no-html', str(pkg)]
+            for _ in range(2):  # Restart the actual consumer; no in-memory state may mask a write.
+                result = subprocess.run(command, capture_output=True, timeout=90)
+                if shift:
+                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                    self.assertRegex(result.stderr.decode(), r'line 6 at 47.00s: .*contradicts.*51.60s')
+                    self.assertEqual(snapshot(), before)
+                else:
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn('"correction": "applied"', result.stdout.decode())
+                    saved = json.loads((pkg / 'target.json').read_text())
+                    self.assertEqual([w['w'] for w in al.flat(saved['lyrics'])], text.split())
+                    self.assertTrue(mix.exists())
+                    self.assertTrue(vocal.exists())
 
 
 if __name__ == '__main__':
