@@ -626,6 +626,7 @@ def build_correction(pkg: Path, song: dict, asr_words: list[dict], ctx: dict, ra
     Optional synced LRC is checked for a coherent recording clock and stem evidence
     before use. It bounds matching and gap filling to sections and disables repeat
     invention. Unsafe timelines raise LyricsSourceError naming the line and time;
+    a quiet line's unique phrase evidence can veto a majority-validated clock.
     --force cannot override this. With no timeline the original path is unchanged.
     """
     true_tokens = tokenize(raw_text)

@@ -2,8 +2,9 @@
 
 LRC supplies section boundaries; the verified text supplies words. A coherent clock
 offset needs several independent phrase matches. Unpitched passages use stem energy;
-quiet passages may use a separately validated clock. Changed edits, unsupported clocks
-and unplaceable text raise SyncedLyricsError with a line number and recording time.
+quiet passages may use a separately validated clock unless their own phrase evidence
+contradicts it. Changed edits, unsupported clocks and unplaceable text raise
+SyncedLyricsError with a line number and recording time.
 No file access or network access occurs here.
 """
 from __future__ import annotations
@@ -76,16 +77,23 @@ def clock_offset(rows: list[dict], words: list[dict]) -> dict:
 
     Ordinary ASR latency is retained. Large, consistent offsets are reported and
     compensated. Distributed disagreement refuses an offset or a different edit.
+    Retain each line's evidence, including outliers, for the quiet-placement gate.
     """
     norms = [al.norm(w['w']) for w in words]
+    prefixes = [tuple(al.norm(w) for w in r['tokens'][:3]) for r in rows]
     by_occurrence = {}
-    for row in rows:
-        prefix = [al.norm(w) for w in row['tokens'][:3]]
+    line_evidence = []
+    for row, prefix in zip(rows, prefixes):
         if len(prefix) < 3:
             continue
-        candidates = [(i, words[i]['a'] - row['a']) for i in range(len(words) - 2)
-                      if norms[i:i + 3] == prefix
-                      and abs(words[i]['a'] - row['a']) <= MAX_CLOCK_OFFSET]
+        occurrences = [i for i in range(len(words) - 2) if tuple(norms[i:i + 3]) == prefix]
+        if occurrences:
+            index = min(occurrences, key=lambda i: (abs(words[i]['a'] - row['a']), i))
+            line_evidence.append({'line': row['line'], 'synced_time_s': row['a'],
+                                  'asr_time_s': words[index]['a'], 'asr_delta_s': words[index]['a'] - row['a'],
+                                  'unambiguous': len(occurrences) == 1 and prefixes.count(prefix) == 1})
+        candidates = [(i, words[i]['a'] - row['a']) for i in occurrences
+                      if abs(words[i]['a'] - row['a']) <= MAX_CLOCK_OFFSET]
         if candidates:
             index, delta = min(candidates, key=lambda pair: (abs(pair[1]), pair[0]))
             previous = by_occurrence.get(index)
@@ -118,7 +126,10 @@ def clock_offset(rows: list[dict], words: list[dict]) -> dict:
     # timed line in the denominator, including short lines and missed ASR lines.
     validated = (share >= .5 and len(coherent) >= .8 * len(evidence)
                  and spread <= 1.0 and group_spread <= .75 and span >= .5)
+    for match in line_evidence:
+        match['residual_s'] = round(match['asr_delta_s'] - median, 3)
     return {'offset_s': round(offset, 3), 'phrase_matches': len(evidence),
+            'line_evidence': line_evidence,
             'coherent_matches': len(coherent), 'timed_lines': len(timed),
             'agreeing_line_share': round(share, 4), 'median_asr_delta_s': round(median, 3),
             'residual_p10_s': round(float(np.percentile(residuals, 10)), 3),
@@ -235,7 +246,9 @@ def seed_sections(tokens: list[str], words: list[dict], ctx: dict, lrc: str,
     """
     clock_rows = parse_lrc(lrc)
     clock = clock_offset(clock_rows, words)
-    rows = [{**r, 'a': r['a'] + clock['offset_s'], 'clock_offset_s': clock['offset_s']} for r in clock_rows]
+    evidence = {(m['line'], m['synced_time_s']): m for m in clock['line_evidence']}
+    rows = [{**r, 'a': r['a'] + clock['offset_s'], 'clock_offset_s': clock['offset_s'],
+             'clock_evidence': evidence.get((r['line'], r['a']))} for r in clock_rows]
     for row in rows:
         if not 0 <= row['a'] <= ctx['duration']:
             fail(row, 'timestamp is outside the recording after clock correction')
@@ -282,6 +295,13 @@ def seed_sections(tokens: list[str], words: list[dict], ctx: dict, lrc: str,
                 ctx['regions'] = al.regions(ctx['voiced'])
                 ctx['onsets'] = np.array(sorted(set(ctx['onsets']) | set(energy_attacks)))
             elif energy['available'] and clock['validated_without_voice']:
+                # Quiet placement also needs this line's evidence to agree.
+                # Check this line before discarding ASR or exempting its window
+                # from the harm gate. Repeated phrases remain ambiguous.
+                match = row['clock_evidence']
+                if match and match['unambiguous'] and abs(match['residual_s']) > CLOCK_TOLERANCE:
+                    fail(row, f"phrase evidence contradicts timestamp: unique ASR occurrence at "
+                         f"{match['asr_time_s']:.2f}s; clock residual {match['residual_s']:+.3f}s")
                 # The quiet passage cannot validate its own clock. Recheck the
                 # other lines, including stability of the inferred offset.
                 try:
