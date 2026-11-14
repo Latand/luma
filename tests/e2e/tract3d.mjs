@@ -763,8 +763,18 @@ for (const body of ['male', 'female']) {
   for (;;) { const t = await o.p.evaluate(async () => { const T = window.Luma.test; let t; for (let i = 0; i < 6; i++) { t = T.fakeTick(window.__k++ / 60); T.tractFrame(t, true); } await new Promise(r => requestAnimationFrame(r)); return T.state().mode === 'singing' ? t : null; });
     if (t === null || t > 31.5) break; const w = await check(); out.n++; if (w.hint) out.shown++; for (const b of w.bad) out.bad.push(t.toFixed(2) + ':' + b); }
   await o.p.evaluate(() => window.Luma.test.fakeFinish());
-  for (let t = 2.5; t <= 30.5; t += .5) { await at(o.p, t); const w = await check(); out.n++; if (w.hint) out.shown++; for (const b of w.bad) out.bad.push('paused ' + t.toFixed(2) + ':' + b); }
+  // paused, the hint stands where it covers none of the notes sung in the last 2 s, or, where a run of notes fills the sung
+  // part, the least of them: on average it covers a tenth of their bars at most
+  const cover = []; let blocked = 0;
+  for (let t = 2.5; t <= 30.5; t += .5) { await at(o.p, t); const w = await check(); out.n++; if (w.hint) out.shown++; for (const b of w.bad) out.bad.push('paused ' + t.toFixed(2) + ':' + b);
+    const c = await o.p.evaluate(() => { const T = window.Luma.test, h = document.getElementById('tractHint'), now = T.state().time, wrap = document.getElementById('chartWrap').getBoundingClientRect(); if (!h.checkVisibility() || !h.textContent) return null;
+      const q = h.getBoundingClientRect(), hb = {x0: q.left - wrap.left, y0: q.top - wrap.top, x1: q.right - wrap.left, y1: q.bottom - wrap.top}, past = T.noteRects().filter(n => n.b > now - 2 && n.a < now);
+      const inter = n => Math.max(0, Math.min(n.x1, hb.x1) - Math.max(n.x0, hb.x0)) * Math.max(0, Math.min(n.y1, hb.y1) - Math.max(n.y0, hb.y0)), all = past.reduce((s, n) => s + (n.x1 - n.x0) * (n.y1 - n.y0), 0);
+      return all ? {share: past.reduce((s, n) => s + inter(n), 0) / all, blocked: T.tract().hintBlocked} : null; });
+    if (c) { cover.push(c.share); if (c.blocked) blocked++; } }
+  const meanCover = cover.reduce((s, x) => s + x, 0) / Math.max(1, cover.length);
   assert(out.n > 150 && out.shown > 100 && !out.bad.length, `390 px, the demo sung through and paused after it (${out.n} frames, a hint in ${out.shown}): the hint beside the overlay whole and on no word, playhead or upcoming note ` + JSON.stringify(out.bad.slice(0, 8)));
+  assert(cover.length > 30 && meanCover <= .1, `390 px, paused: the hint covers ${(100 * meanCover).toFixed(1)} % of the bars of the notes sung in the last 2 s on average (${blocked} of ${cover.length} stops with no clear place)`);
   await o.p.evaluate(() => window.Luma.test.closeTrace());
   await done(o, '390 px hint while singing');
 }

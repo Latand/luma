@@ -247,7 +247,7 @@ the larynx with the high-note hint for the male head and not for the female, the
 lesson 1's /m/ naming the soft palate, the hint, the labels and the honesty line measured from their text ranges in every
 panel state (the column idle and after a take at 1440 × 900, 900 × 1000, 1366 × 650 and 1200 × 800, the phone overlay small
 and enlarged; whole, readable and on no word, playhead, upcoming note, button or label), the phone's hint through a sung
-pass and paused after it, the ⓘ dialog (modal, Esc closes it) and the zones on the flat cut face without WebGL2. `tests/phonemes_test.py` checks the build's word sounds (CMUdict and the Ukrainian rules).
+pass and paused after it (covering under a tenth of the bars of the notes just sung, on average), the ⓘ dialog (modal, Esc closes it) and the zones on the flat cut face without WebGL2. `tests/phonemes_test.py` checks the build's word sounds (CMUdict and the Ukrainian rules).
 `xr.mjs` enters VR on Meta's WebXR emulator (the `iwer` dev dependency) as a Quest 3: the panel 1.5 m ahead with the
 chart at its size, «Слухати», «Вокал» and a seek on the progress bar by a controller's trigger, «Сюди» by a pinch,
 «Вийти», a refused session (the page stays out of VR, and its toast is true to the microphone) and a hidden one

@@ -1459,7 +1459,7 @@ function bigTract(on){s.tractBig=on;measureStage();s.dirty=true;requestDraw();}
 // A column too short for the whole head to stand at TRACT_WHOLE CSS pixels a centimetre (the 900 px column idle gives it
 // about 9) takes the wide shape: the mouth to the larynx at the panel's whole height beside the words.
 const TRACT_WHOLE=8.5;
-function placeTract(box){const el=$('tract');s.tractW=0;s.tractBox=null;s.tractSpots=null;s.tractHintBox=null;s.tractWordBox=null;
+function placeTract(box){const el=$('tract');s.tractW=0;s.tractBox=null;s.tractSpots=null;s.tractHintBox=null;s.tractWordBox=null;s.tractHintAway=null;
  const on=!!tract&&prefs.tract&&!!box&&box.width>0&&!s.xr;s.tractOn=on;el.hidden=!on;tract?.show(on);if(!on){s.tractBig=false;$('tractNote').hidden=true;$('tractHint').hidden=true;return;}
  if(s.mode!=='idle'||box.width>=720)s.tractBig=false;
  const picked=prefs.tractBody==='male'||prefs.tractBody==='female';let r;
@@ -1498,15 +1498,42 @@ function placeTractWords(r,picked){const el=$('tract'),hint=$('tractHint'),stage
  el.dataset.hint=r.w>=360?'beside':'below';hint.hidden=!picked;
  if(small){if(hint.parentNode!==stage)stage.appendChild(hint);}else{if(hint.parentNode!==el)$('tractSound').after(hint);hint.removeAttribute('style');}
  $('tractNote').hidden=!picked||small;$('tractNoteText').textContent=TRACT_NOTE;}
-// the hint beside the phone's small overlay: from its left edge to 6 px short of the playhead, three lines high at most,
-// under the overlay standing at the top, over it standing at the bottom; the words climb clear of both
+// The hint beside the phone's small overlay: on the sung part of the roll, from the overlay's left edge to 6 px short of the
+// playhead, as high as its text (three lines at most). It stands next to the overlay, under it when the overlay stands at
+// the top and over it when at the bottom, or, where the notes sung in the last 2 s (and their marks) lie there, at the
+// nearest place further along the sung part that is clear of them (kept while it stays clear); the words step around the
+// overlay and the hint.
 const TRACT_HINT_H=52;
-function tractHintAt(q,spot){const b=bounds(),w=Math.max(q.x1-q.x0,Math.round(b.left+.34*(b.right-b.left)-6-q.x0));
- return spot==='high'?{x0:q.x0,y0:q.y1+4,x1:q.x0+w,y1:q.y1+4+TRACT_HINT_H}:{x0:q.x0,y0:q.y0-4-TRACT_HINT_H,x1:q.x0+w,y1:q.y0-4};}
-function placeTractHint(q,spot){const h=tractHintAt(q,spot),el=$('tractHint');s.tractHintBox=h;
- s.tractWordBox={x0:Math.min(q.x0,h.x0),y0:Math.min(q.y0,h.y0),x1:Math.max(q.x1,h.x1),y1:Math.max(q.y1,h.y1)};
- el.style.left=h.x0+'px';el.style.maxWidth=h.x1-h.x0+'px';el.dataset.spot=spot;
- if(spot==='high'){el.style.top=h.y0+'px';el.style.bottom='';}else{el.style.top='';el.style.bottom=(H-h.y1)+'px';}}
+// (its room: up to 6 px short of the playhead; its box: as wide and as high as its text, measured when the text changes)
+function tractHintRoom(q){const b=bounds();return Math.max(q.x1-q.x0,Math.round(b.left+.34*(b.right-b.left)-6-q.x0));}
+function tractHintAt(q,spot,y0){const room=tractHintRoom(q),w=Math.min(room,s.tractHintWd||room),h=Math.min(TRACT_HINT_H,s.tractHintHt||TRACT_HINT_H);
+ if(y0===undefined)y0=spot==='high'?q.y1+4:q.y0-4-h;return {x0:q.x0,y0,x1:q.x0+w,y1:y0+h};}
+function placeTractHint(q,spot,y0){const h=tractHintAt(q,spot,y0),el=$('tractHint'),next=spot==='high'?h.y0<=q.y1+4.5:h.y1>=q.y0-4.5;s.tractHintBox=h;
+ // next to the overlay the words step around the two as one block; away from it, around each
+ s.tractWordBox=next?{x0:Math.min(q.x0,h.x0),y0:Math.min(q.y0,h.y0),x1:Math.max(q.x1,h.x1),y1:Math.max(q.y1,h.y1)}:null;s.tractHintAway=next?null:h;
+ el.style.left=h.x0+'px';el.style.maxWidth=tractHintRoom(q)+'px';el.dataset.spot=spot;el.style.top=h.y0+'px';el.style.bottom='';}
+// → where the hint stands (its top): next to the overlay q standing at spot, else the nearest place further along the sung
+// part clear of the notes sung in the last 2 s (keep: its place a frame ago, kept while clear); {y0, clear}. Where no place
+// is clear (a run of notes fills the sung part) it takes the place that covers the least of them.
+function tractHintSlot(q,spot,t,b,v,y,barH,keep){
+ const o=effective().octave,at=xx=>v.a+(xx-b.left)/(b.right-b.left)*v.span,under=prefs.view==='contour'?27:barH/2,h=Math.min(TRACT_HINT_H,s.tractHintHt||TRACT_HINT_H);
+ // how much of those notes a place covers (a note's rows: its bar, the mark under it in the contour view, its word over it)
+ const cover=y0=>{const r=tractHintAt(q,spot,y0),ta=Math.max(t-2,at(r.x0)),tz=at(r.x1),x=a=>b.left+(a-v.a)/v.span*(b.right-b.left);let area=0;
+  for(const n of song.notes){if(n.a>=tz)break;if(n.b<=ta)continue;const yy=y(n.m+o),top=Math.max(r.y0-2,yy-barH/2-24),bot=Math.min(r.y1+2,yy+under);if(bot<=top)continue;
+   area+=(bot-top)*Math.max(1,Math.min(r.x1,x(n.b))-Math.max(r.x0,x(n.a)));}return area;};
+ const near=spot==='high'?q.y1+4:q.y0-4-h,step=spot==='high'?6:-6,last=spot==='high'?b.bottom-h:b.top;
+ if(!cover(near))return {y0:near,clear:true};
+ if(keep!==undefined&&keep!==null&&(spot==='high'?keep>=near&&keep<=last:keep<=near&&keep>=last)&&!cover(keep))return {y0:keep,clear:true};
+ let best=near,least=cover(near);
+ for(let c=near+step;spot==='high'?c<=last:c>=last;c+=step){const a=cover(c);if(!a)return {y0:c,clear:true};if(a<least-1){least=a;best=c;}}
+ return {y0:best,clear:false};}
+function tractHintSpot(t,b,v,y,barH){const q=s.tractBox,el=$('tractHint');if(!q||!s.tractSpots||s.tractBig||el.parentNode!==$('chartWrap')||el.hidden)return;
+ // its size, measured when its text changes
+ const room=tractHintRoom(q);if(el.textContent!==s.tractHintText||room!==s.tractHintRoomW){s.tractHintText=el.textContent;s.tractHintRoomW=room;el.style.maxWidth=room+'px';s.tractHintHt=el.textContent?el.offsetHeight:0;s.tractHintWd=el.textContent?el.offsetWidth:0;}
+ const spot=s.tractSpot==='high'?'high':'low',h=Math.min(TRACT_HINT_H,s.tractHintHt||TRACT_HINT_H),slot=tractHintSlot(q,spot,t,b,v,y,barH,s.tractHintY),y0=slot.y0;
+ s.tractHintBlocked=!slot.clear&&!!el.textContent;
+ s.tractHintY=y0;const cur=s.tractHintBox;if(cur&&Math.abs(cur.y0-y0)<.5&&cur.x0===q.x0&&cur.y1-cur.y0===h&&cur.x1-cur.x0===Math.min(room,s.tractHintWd||room))return;
+ placeTractHint(q,spot,y0);}
 // The phone's small overlay keeps clear of the notes sung in the last 2 s that lie under it (each note's bar and, in the
 // contour view, the mark under it). Where no whole box at either end of the sung part is clear of them, it draws in toward
 // an end's corner (TRACT_SIZES of its box), the largest that is clear. Paused, it stands at each moment drawn where the
@@ -1523,15 +1550,14 @@ function tractSpot(t,b,v,y,barH){const sp=s.tractSpots;if(!sp||!s.tractBox||s.tr
  // [notes under it now, notes on their way to it]
  const hits=(spot,k)=>{const q0=tractBoxAt(spot,k),ta=Math.max(t-2,at(q0.x0)),tz=at(q0.x1+2);let now=0,soon=0;
   for(const q of song.notes){if(q.a>=tz+TRACT_LOOK)break;if(q.b<=ta)continue;const yy=y(q.m+o);if(yy+under<=q0.y0-4||yy-barH/2>=q0.y1+4)continue;if(q.a<tz)now++;else soon++;}return [now,soon];};
- // notes sung in the last 2 s under the hint beside it (its room toward the plot's middle): second to the overlay's own
- const hintHits=(spot,k)=>{const h=tractHintAt(tractBoxAt(spot,k),spot),ta=Math.max(t-2,at(h.x0)),tz=at(h.x1);let n=0;
-  for(const q of song.notes){if(q.a>=tz)break;if(q.b<=ta)continue;const yy=y(q.m+o);if(yy+under<=h.y0-2||yy-barH/2>=h.y1+2)continue;n++;}return n;};
  const play=s.mode!=='idle',fresh=s.tractSpotT===undefined||Math.abs(t-s.tractSpotT)>.5,cur=s.tractSpot==='high'?'high':'low',other=cur==='low'?'high':'low',k=s.tractScale||1,calm=t-(s.tractMovedT??-1e9)>=TRACT_HOLD;s.tractSpotT=t;
  let next=cur,nk=k;
- if(!play){nk=1;place:for(const z of TRACT_SIZES)for(const clearHint of [true,false])for(const e of [cur,other])if(!hits(e,z)[0]&&(!clearHint||!hintHits(e,z))){next=e;nk=z;break place;}}
+ if(!play){nk=1;const roomy=(e,z)=>!$('tractHint').textContent||tractHintSlot(tractBoxAt(e,z),e,t,b,v,y,barH).clear;
+  // (at the same size, an end where the hint beside it finds a clear place first)
+  place:for(const z of TRACT_SIZES)for(const pass of [0,1])for(const e of [cur,other])if(!hits(e,z)[0]&&(pass||roomy(e,z))){next=e;nk=z;break place;}}
  else if(fresh){nk=1;const lo=hits('low',1),hi=hits('high',1);if((lo[0]||lo[1])&&hi[0]*1000+hi[1]<lo[0]*1000+lo[1])next='high';else next='low';}
  else{const [now,soon]=hits(cur,k);
-  if(now){const rank=(e,z,[n,w])=>[n>0?1:0,w>0?1:0,-z,hintHits(e,z)>0?1:0,e===cur?0:1],less=(p,q)=>{for(let i=0;i<p.length;i++)if(p[i]!==q[i])return p[i]<q[i];return false;};
+  if(now){const rank=(e,z,[n,w])=>[n>0?1:0,w>0?1:0,-z,e===cur?0:1],less=(p,q)=>{for(let i=0;i<p.length;i++)if(p[i]!==q[i])return p[i]<q[i];return false;};
    let best=rank(cur,k,[now,soon]);for(const e of [cur,other])for(const z of TRACT_SIZES){const r=rank(e,z,hits(e,z));if(less(r,best)){best=r;next=e;nk=z;}}}
   else if(soon){if(calm&&!hits(other,k).some(Boolean))next=other;}
   else if(k<1&&calm)for(const z of TRACT_SIZES){if(z<=k)break;if(!hits(cur,z).some(Boolean)){nk=z;break;}}}
@@ -1563,6 +1589,8 @@ function drawWords(t,v,x,y,b,opt){
    // on a phone the head holds the bottom of the sung part of the roll: a word that would fall on it stands above it
    // (below it when it stands at the top)
    const tb=s.tractWordBox||s.tractBox,below=s.tractSpot==='high',onTb=q=>tb&&xx-5<tb.x1&&xx+tw+5>tb.x0&&q+6>tb.y0&&q-15<tb.y1;if(onTb(yy))yy=below?tb.y1+16:tb.y0-8;
+   // (the phone's hint standing away from the overlay: a word on it stands over it, or under it at the plot's top)
+   const hb=s.tractHintAway,onHb=q=>hb&&xx-5<hb.x1&&xx+tw+5>hb.x0&&q+6>hb.y0&&q-15<hb.y1;if(onHb(yy)){yy=hb.y0-8-15>=b.top+4?hb.y0-8:hb.y1+16;if(onTb(yy))yy=hb.y1+16;}
    for(let k=0;k<6;k++){const hit=placed.some(p=>xx<p.x1+6&&xx+tw>p.x0-6&&Math.abs(yy-p.y)<rowH-1);if(!hit)break;yy+=below&&onTb(yy-rowH)?rowH:-rowH;}
    if(yy<b.top+4&&!(below&&onTb(b.top+4)))yy=b.top+4;placed.push({x0:xx,x1:xx+tw,y:yy});if(wordProbe)wordProbe.push({w:w.w,x0:xx-5,x1:xx+tw+5,y0:yy-(W<720?13:15),y1:yy+(W<720?5:6)});
    const on=t>=w.a&&t<w.b+.08,past=t>=w.b;g.globalAlpha=(w.c??1)<.5?.72:1;
@@ -1746,7 +1774,7 @@ function draw(t){
    g.fillStyle=(st>=2?'#c9707a':'#a1eed8')+'1f';g.beginPath();g.arc(xx,yy,12,0,Math.PI*2);g.fill();
    g.strokeStyle=c;g.lineWidth=1.4;g.beginPath();g.arc(xx,yy,5.5,0,Math.PI*2);g.stroke();g.fillStyle=c;g.beginPath();g.arc(xx,yy,2.6,0,Math.PI*2);g.fill();}
  }
- if(s.tractSpots)tractSpot(t,b,v,y,barH);
+ if(s.tractSpots){tractSpot(t,b,v,y,barH);tractHintSpot(t,b,v,y,barH);}
  drawWords(t,v,x,y,b,opt);
  g.restore();
  g.strokeStyle='#dff0ea52';g.lineWidth=1;g.setLineDash([2,5]);g.beginPath();g.moveTo(nowX,b.laneTop-(s.dense?0:8));g.lineTo(nowX,b.bottom);g.stroke();g.setLineDash([]);
@@ -2127,7 +2155,7 @@ window.Luma={diagnostics:()=>({mode:s.mode,busy:s.busy,pending:s.awaitFinish,tim
   // every note's bar as the roll draws it at the moment shown (chart coordinates), with its times
   noteRects:()=>{const t=now(),b=bounds(),v=view(t),o=effective().octave,rowH=(b.bottom-b.top)/(s.rangeHi-s.rangeLo),barH=clamp(rowH*.74,7,26),x=a=>b.left+(a-v.a)/v.span*(b.right-b.left),y=m=>b.bottom-(m-s.rangeLo)/(s.rangeHi-s.rangeLo)*(b.bottom-b.top);
    return song.notes.filter(n=>n.b>=v.a&&n.a<=v.b).map(n=>({id:n.id,a:n.a,b:n.b,x0:Math.max(b.left,x(n.a)),x1:Math.min(b.right,Math.max(x(n.a)+2,x(n.b))),y0:y(n.m+o)-barH/2,y1:y(n.m+o)+barH/2}));},
-  tract:()=>{const el=$('tract'),r=el.getBoundingClientRect(),c=$('chartWrap').getBoundingClientRect();return {...(tract?tract.state():{}),pref:prefs.tract,pref_body:prefs.tractBody,hidden:el.hidden,mode:el.dataset.mode||null,shape:el.dataset.shape||null,spot:el.dataset.spot||null,small:el.dataset.small==='1',big:!!s.tractBig,box:{x0:r.left-c.left,y0:r.top-c.top,x1:r.right-c.left,y1:r.bottom-c.top},overlay:s.tractBox?{...s.tractBox}:null,hintBox:s.tractHintBox?{...s.tractHintBox}:null};},
+  tract:()=>{const el=$('tract'),r=el.getBoundingClientRect(),c=$('chartWrap').getBoundingClientRect();return {...(tract?tract.state():{}),pref:prefs.tract,pref_body:prefs.tractBody,hidden:el.hidden,mode:el.dataset.mode||null,shape:el.dataset.shape||null,spot:el.dataset.spot||null,small:el.dataset.small==='1',big:!!s.tractBig,box:{x0:r.left-c.left,y0:r.top-c.top,x1:r.right-c.left,y1:r.bottom-c.top},overlay:s.tractBox?{...s.tractBox}:null,hintBox:s.tractHintBox?{...s.tractHintBox}:null,hintBlocked:!!s.tractHintBlocked};},
   // one frame of the head alone at song time t (as the trainer's tick draws it), and its own time
   tractFrame:(t,moving=true)=>{if(!s.tractOn)return null;const t0=performance.now();const drew=tract.frame(t,moving);return {ms:performance.now()-t0,drew};},
   tractYaw:v=>tract?.yaw(v),tractTimeline:()=>tract?.timeline(),

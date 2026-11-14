@@ -449,10 +449,14 @@ folds' state), «Навчальна схема» (the lit zones and hints, the f
   sound. A short column (after a take, 1366 × 650, 1200 × 800): the hint's short form on one or two lines along the
   panel's bottom, under the words and the picture, ⓘ at its end (the words' column holds no more: at 1366 × 650 a
   three-line hint there ran onto the buttons, and widening the column left an empty strip beside the spine while no
-  hint stood). The phone's small overlay: the hint's short form beside it on the
-  sung part of the roll, toward the plot's middle (under it at the top, over it at the bottom), from its left edge to
-  6 px short of the playhead, three lines at most; the words step around both, and paused the overlay prefers, at the
-  same size, a place where the notes of the last 2 s are clear of the hint as well. The enlarged head: as a tall column.
+  hint stood). The phone's small overlay: the hint's short form on the sung part of the roll, from the overlay's left edge
+  to 6 px short of the playhead, three lines at most, next to the overlay (under it at the top, over it at the bottom),
+  or, where notes sung in the last 2 s (with their marks and words) lie there, at the nearest place further along the
+  sung part clear of them, kept while it stays clear; paused, at the same size the overlay prefers an end where such a
+  place exists. Where a run of notes fills the sung part no place is clear, and the hint takes the place that covers
+  the least of them: measured paused every 0.25 s at 390 px, it touched a note of the last 2 s at 15 of 100 stops on
+  the demo (female head), 41 of 185 on lesson 2 (male) and 36 of 148 on lesson 1 (female), covering 1–4.5 % of those notes' bars on average (the
+  suite holds it under a tenth). The words step around the overlay and the hint. The enlarged head: as a tall column.
 - *Honesty.* The line along the panel's bottom reads «Форма — модель Chimera, зони й підказки — навчальна схема» with ⓘ
   at its end; a column reaches down over the strip the roll's time axis leaves free under it (a time label that would
   reach it is left out), so the picture keeps its size. The full statement and the three lists stand in a dialog behind
