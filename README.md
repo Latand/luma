@@ -216,8 +216,8 @@ a restart, Range and the player, the layout at 390, 900 and 1440 px, and no proc
 checks the alignment through Opus, the eviction order, the render deadline, the ffmpeg graph and that the thumbnail
 falls inside a sung segment, without a browser.
 `tract3d.mjs` checks «Голова»: the column at 1440 px and 900 px (the whole head) and the overlay at 390 px clear of the
-words, the playhead and the next notes, the overlay before a choice (the buttons and the prompt in its middle) and
-enlarged (its ✕, the stage covered from edge to edge), the chosen head marked as the roll's chosen view, the body's
+words, the playhead and the next notes, the overlay before a choice (the buttons and the prompt in its middle, out of a toast's way) and
+enlarged (its ✕, the stage covered from edge to edge, its caption aside under a toast), the chosen head marked as the roll's chosen view, the body's
 choice across a reload, lesson 1's «ма» (after the rest an /m/ long enough to be seen, through the nose, then the held
 /a/ on the note, its air leaving the mouth as densely at its end as at its start), the demo's «ta» (closure with no air in front of the face, then
 voiced), a made-up word marked «приблизно» with every sound whole at three widths, `--rebuild` keeping the song data

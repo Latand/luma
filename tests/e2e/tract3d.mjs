@@ -3,8 +3,9 @@
 // the synthetic demo and a made-up word put into a copy of the demo's package; nothing else.
 //   1  the column beside the roll at 1440 px (the roll's right edge and every word left of it; the chosen head marked as
 //      the roll's chosen view), at 900 px with the whole head; the overlay on the sung part at 390 px (no word on it, the
-//      playhead and the next 2 s of notes clear of it, the body's tag in its corner; enlarged, a ✕ and the stage covered
-//      from edge to edge; before a choice the two buttons and the prompt each whole, one block in the overlay's middle)
+//      playhead and the next 2 s of notes clear of it, the body's tag in its corner; enlarged, a ✕, the stage covered
+//      from edge to edge and the caption aside under a toast; before a choice the two buttons and the prompt each
+//      whole, one block in the overlay's middle, stepping aside while a toast covers its bottom)
 //   2  «Чоловік» / «Жінка» survive a reload; the body's scale; the two heads' outlines differ
 //   3  lesson 1 on «ма»: after the rest the /m/ long enough to be seen (nasal air, lips closed, soft palate lowered), the
 //      vowel on the note, then the held /a/ (voiced), with as much air leaving the mouth at its end as at its start
@@ -137,6 +138,14 @@ execFileSync(py, ['studio/build_html.py', odd, '-o', oddHtml], {encoding: 'utf8'
     const wrap = r('chartWrap'), b = window.Luma.test.plot(); return {panel: r('tract'), wrap, rail: {x0: wrap.x0, x1: wrap.x0 + b.left, y0: wrap.y0 + b.top, y1: wrap.y0 + b.bottom}}; });
   assert(cover.panel.x0 <= cover.wrap.x0 + .5 && cover.panel.x1 >= cover.wrap.x1 - .5 && cover.panel.y0 <= cover.rail.y0 && cover.panel.y1 >= cover.rail.y1 - .5,
     '390 px, enlarged: the head covers the stage from edge to edge, the piano rail included ' + JSON.stringify(cover));
+  // a toast (L, «Повторювати» with no fragment drawn) stands over the plot's bottom, where the enlarged head's caption lies:
+  // the caption steps aside meanwhile, and no button of the panel is under the toast
+  await m.p.keyboard.press('l'); await m.p.waitForFunction(() => document.getElementById('toast').classList.contains('show')); await m.p.waitForTimeout(400);
+  const bt = await m.p.evaluate(() => { const box = q => ({x0: q.left, y0: q.top, x1: q.right, y1: q.bottom}), t = box(document.getElementById('toast').getBoundingClientRect()), cap = document.getElementById('tractSound'), rg = document.createRange(); rg.selectNodeContents(cap);
+    const hit = q => q.x0 < t.x1 && t.x0 < q.x1 && q.y0 < t.y1 && t.y0 < q.y1;
+    return {toast: t, big: window.Luma.test.tract().big, caption: cap.textContent, shown: getComputedStyle(cap).visibility !== 'hidden', under: [...rg.getClientRects()].filter(q => q.width).map(box).some(hit),
+      buttons: [...document.querySelectorAll('#tract button')].filter(b => b.checkVisibility() && hit(box(b.getBoundingClientRect()))).map(b => b.id)}; });
+  assert(bt.big && bt.caption && !(bt.shown && bt.under) && !bt.buttons.length, '390 px, enlarged, a toast over the plot\'s bottom: the caption steps aside, no button under it ' + JSON.stringify(bt));
   await m.p.click('#tractClose');
   const back = await m.p.evaluate(() => ({t: window.Luma.test.tract(), close: document.getElementById('tractClose').hidden}));
   assert(!back.t.big && back.t.overlay && back.close, '390 px: the ✕ returns the head to the small overlay and hides itself');
@@ -156,6 +165,20 @@ execFileSync(py, ['studio/build_html.py', odd, '-o', oddHtml], {encoding: 'utf8'
   const above = ask.group.y0 - ask.panel.y0, below = ask.panel.y1 - Math.max(...ask.text.map(r => r.y1));
   assert(ask.caption === 0 && Math.abs(above - below) <= 4,
     `390 px, nothing chosen: ${above.toFixed(1)} px above the buttons and ${below.toFixed(1)} px below the prompt (the caption ${ask.caption} px high)`);
+  // a toast (L, «Повторювати» with no fragment drawn) stands over the overlay's bottom, where the buttons cannot clear it:
+  // the overlay steps aside until the toast goes, then stands where it stood
+  const before = await u.p.evaluate(() => { const q = document.getElementById('tract').getBoundingClientRect(); return {x0: q.left, y0: q.top, x1: q.right, y1: q.bottom}; });
+  await u.p.keyboard.press('l'); await u.p.waitForFunction(() => document.getElementById('toast').classList.contains('show')); await u.p.waitForTimeout(400);
+  const look = () => u.p.evaluate(() => { const box = q => ({x0: q.left, y0: q.top, x1: q.right, y1: q.bottom}), t = box(document.getElementById('toast').getBoundingClientRect()), panel = document.getElementById('tract');
+    const hit = q => q.x0 < t.x1 && t.x0 < q.x1 && q.y0 < t.y1 && t.y0 < q.y1, rg = document.createRange(); rg.selectNodeContents(document.getElementById('tractPick'));
+    return {toast: t, shown: panel.checkVisibility(), panel: box(panel.getBoundingClientRect()), buttons: [...panel.querySelectorAll('button')].filter(b => b.checkVisibility() && hit(box(b.getBoundingClientRect()))).map(b => b.id),
+      prompt: document.getElementById('tractPick').checkVisibility({visibilityProperty: true}) && [...rg.getClientRects()].filter(q => q.width).map(box).some(hit)}; });
+  const during = await look();
+  assert(during.toast.y0 < before.y1 && !during.shown && !during.buttons.length && !during.prompt,
+    '390 px, nothing chosen, a toast over the overlay: the overlay steps aside, no button or text under the toast ' + JSON.stringify({before, during}));
+  await u.p.waitForFunction(() => !document.getElementById('toast').classList.contains('show'), null, {timeout: 8000});
+  const after = await look();
+  assert(after.shown && ['x0', 'y0', 'x1', 'y1'].every(k => Math.abs(after.panel[k] - before[k]) < .5), '390 px, nothing chosen: when the toast goes the overlay is back in its place ' + JSON.stringify(after.panel));
   await done(u, '390 px before a choice');
 }
 

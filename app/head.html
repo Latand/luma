@@ -179,6 +179,11 @@ button[aria-pressed=true]{color:var(--mint);border-color:#a1eed840;background:#a
 .tract-tag[hidden]{display:none}
 /* a toast on a phone sits over the bottom of the roll, where the small overlay stands: its words step aside meanwhile */
 body:has(#toast.show) .tract[data-mode=overlay]:not([data-big="1"]) :is(.tract-pick,.tract-tag,.tract-sound){visibility:hidden}
+/* ...and before a choice the small overlay steps aside until the toast goes: the toast covers its lowest 50 to 65 px,
+   and the two buttons do not fit above that */
+body:has(#toast.show) .stage>.tract[data-mode=overlay][data-picked="0"]:not([data-big="1"]){display:none}
+/* enlarged, its caption lies at the plot's bottom, where the toast stands: it steps aside too */
+body:has(#toast.show) .tract[data-big="1"] .tract-sound{visibility:hidden}
 .countdown b{font:300 72px/1.15 var(--mono);color:var(--mint);letter-spacing:-.03em}
 .countdown span{font-size:13px;color:#c8d8dc}
 
