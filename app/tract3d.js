@@ -572,10 +572,10 @@ function painterSource() {
 const PAINTER = painterSource();
 // The section's extent (body cm): the neck's cut to the crown, the nape (and the hair) to the nose
 const sectionBounds = k => ({x0: -15 * k, x1: 10.5 * k, y0: -5.4 * k, y1: 25.6 * k});
-// The phone's small overlay shows the mouth to the larynx (body cm, [x0, x1, y0, y1]): from behind the spine to past the
+// The phone's small overlay shows the mouth to the larynx (body cm, [x0, x1, y0, y1]): from the spine to past the
 // nostril, from the neck's cut (or 2 cm under the glottis, where the neck runs on) to above the nasal cavity, so the
 // nose's way and the soft palate stay inside and the space in front of the neck holds the body's tag.
-const cropBox = b => [-3.4 * b.k, 10.2 * b.k, Math.max(b.bottom, -2 * b.k), 14.4 * b.k];
+const cropBox = b => [-2.8 * b.k, 10.8 * b.k, Math.max(b.bottom, -2 * b.k), 14.4 * b.k];
 // The input of one painting, flat (it crosses to the worker as a few typed arrays): the blended posture's points, the
 // posed skin's midline, the hair's band; unpack() turns it into the polygons the painter draws.
 function paintInput(body, p, front, back, scale) {
