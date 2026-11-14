@@ -76,6 +76,16 @@ class ClockTests(unittest.TestCase):
         with self.assertRaisesRegex(sy.SyncedLyricsError, 'independent'):
             sy.clock_offset(rows, self.words[:3])
 
+    def test_missing_early_repeat_cannot_consume_later_clock_evidence(self):
+        phrases = [PHRASES[0]] * 3 + [PHRASES[-1]]
+        rows = sy.parse_lrc('\n'.join(f'[00:{t:05.2f}] {p}' for t, p in zip(TIMES, phrases)))
+        words = [{'w': w, 'a': t + i * .4, 'b': t + i * .4 + .3}
+                 for t, phrase in zip(TIMES[1:], phrases[1:]) for i, w in enumerate(phrase.split())]
+        clock = sy.clock_offset(rows, words)
+        self.assertEqual(clock['offset_s'], 0.)
+        self.assertEqual(clock['phrase_matches'], 3)
+
+
     def test_distributed_disagreement_refuses_different_edit(self):
         shifted = [{**w, 'a': w['a'] + (6 if i >= 6 else 0)} for i, w in enumerate(self.words)]
         with self.assertRaisesRegex(sy.SyncedLyricsError, 'different edit'):

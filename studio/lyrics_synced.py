@@ -73,18 +73,23 @@ def clock_offset(rows: list[dict], words: list[dict]) -> dict:
     compensated. Distributed disagreement refuses an offset or a different edit.
     """
     norms = [al.norm(w['w']) for w in words]
-    evidence, used = [], set()
+    by_occurrence = {}
     for row in rows:
         prefix = [al.norm(w) for w in row['tokens'][:3]]
         if len(prefix) < 3:
             continue
         candidates = [(i, words[i]['a'] - row['a']) for i in range(len(words) - 2)
-                      if norms[i:i + 3] == prefix and i not in used
+                      if norms[i:i + 3] == prefix
                       and abs(words[i]['a'] - row['a']) <= MAX_CLOCK_OFFSET]
         if candidates:
             index, delta = min(candidates, key=lambda pair: (abs(pair[1]), pair[0]))
-            used.add(index)
-            evidence.append((row, delta))
+            previous = by_occurrence.get(index)
+            if previous is None or abs(delta) < abs(previous[1]):
+                by_occurrence[index] = (row, delta)
+    # A missed early repeat must not consume the ASR occurrence whose own
+    # timed row arrives later. Pick each occurrence's closest row, then count
+    # those distinct observations in chronological order.
+    evidence = sorted(by_occurrence.values(), key=lambda item: item[0]['a'])
     if len(evidence) < 3:
         fail(next(r for r in rows if r['tokens']), 'insufficient independent phrase evidence for the clock')
     median = float(np.median([d for _, d in evidence]))
