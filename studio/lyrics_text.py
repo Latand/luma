@@ -51,13 +51,14 @@ in the refusal, not just the first one found.
 Optional `--synced` accepts a local LRC file. Three-word phrase matches establish
 its clock against ASR; at least three distinct occurrences must agree within 1.5 s.
 A coherent offset up to 30 s is reported and compensated; changed clocks refuse.
-Each line also needs a recorded vocal attack within 1.5 s. Matching and gap filling
-stay inside that line's voiced window, empty timed rows bound instrumental breaks,
+Each line uses a pitch-supported attack or sustained vocal-stem energy within
+1.5 s. Quiet passages require the stronger clock validation documented in
+lyrics_synced.py and carry timing_source=synced_time_without_voice_support.
+Matching and gap filling stay inside the line window; empty timed rows bound instrumental breaks,
 and complete performance text is used without repeat restoration. Every final word,
-including matched words, is checked for voice support and section boundaries.
+including matched words, is checked for its evidence and section boundaries.
 Unsupported or crowded lines refuse with line number and time, even with --force.
-Pitch-mask omissions can therefore require a better verified timeline or vocal
-analysis before the correction can be applied. Successful writes cache LRC content
+Without voice support or a validated clock the correction refuses. Successful writes cache LRC content
 with source metadata; realignment and retranscription revalidate it on replay.
 Dry runs read these inputs and never populate caches.
 
@@ -500,6 +501,8 @@ def seed_words(entries: list[dict], asr_words: list[dict]) -> list[dict]:
         else:
             span, conf = GUESS_SPAN, .3
         ws.append({'a': round(e['a'], 3), 'b': round(e['a'] + span, 3), 'w': e['w'], 'c': conf})
+        if 'timing_source' in e:
+            ws[-1]['timing_source'] = e['timing_source']
     return ws
 
 # ---------------------------------------------------------------- placement and harm checks
@@ -551,7 +554,8 @@ def substituted_shifts(asr_words: list[dict], entries: list[dict], flat_words: l
 
 def placement_problems(entries: list[dict], flat_words: list[dict], ctx: dict, before_lines: list[dict] | None = None,
                         before_metrics: dict | None = None, after_metrics: dict | None = None,
-                        max_substituted_shift: float = 0.0) -> tuple[list[str], list[str]]:
+                        max_substituted_shift: float = 0.0,
+                        allowed_unvoiced: set[int] = frozenset()) -> tuple[list[str], list[str]]:
     """Placement faults, all measured on the realigned words (flat_words), never a pre-snap estimate:
 
     - an inserted word off the sung voice — always worth refusing over;
@@ -576,7 +580,8 @@ def placement_problems(entries: list[dict], flat_words: list[dict], ctx: dict, b
     if max_substituted_shift > MAX_SUBSTITUTED_SHIFT_S:
         blocking.append(f'a substituted word moved {max_substituted_shift:.2f}s from its heard time '
                          f'(more than {MAX_SUBSTITUTED_SHIFT_S}s)')
-    off_voice = sum(1 for e, w in zip(entries, flat_words) if e['kind'] == 'inserted' and not in_voice(w['a'], ctx))
+    off_voice = sum(1 for i, (e, w) in enumerate(zip(entries, flat_words))
+                    if e['kind'] == 'inserted' and i not in allowed_unvoiced and not in_voice(w['a'], ctx))
     if off_voice: blocking.append(f'{off_voice} inserted word(s) placed off the sung voice')
     crowded = 0
     for i, e in enumerate(entries):
@@ -618,7 +623,7 @@ def build_correction(pkg: Path, song: dict, asr_words: list[dict], ctx: dict, ra
     vocal retranscription command alike, so a realignment or a fresh transcription always runs the same checks a
     direct correction would and never regresses or over-applies one.
 
-    Optional synced LRC is checked for a coherent recording clock and vocal attacks
+    Optional synced LRC is checked for a coherent recording clock and stem evidence
     before use. It bounds matching and gap filling to sections and disables repeat
     invention. Unsafe timelines raise LyricsSourceError naming the line and time;
     --force cannot override this. With no timeline the original path is unchanged.
@@ -626,6 +631,7 @@ def build_correction(pkg: Path, song: dict, asr_words: list[dict], ctx: dict, ra
     true_tokens = tokenize(raw_text)
     if not true_tokens: raise LyricsSourceError(f'{pkg.name}: no words found in the lyrics source')
     anchor_checks, anchor_clock = [], None
+    metric_ctx = ctx
     if synced_text is None:
         true_tokens, entries, repeats_restored = restore_repeats(asr_words, true_tokens)
         entries = fill_gaps(entries, ctx)
@@ -637,17 +643,47 @@ def build_correction(pkg: Path, song: dict, asr_words: list[dict], ctx: dict, ra
             raise LyricsSourceError(str(e)) from e
         repeats_restored = 0
     seed = seed_words(entries, asr_words)
-    lines = al.realign(seed, ctx)
+    lines = synced.realign_sections(seed, anchor_checks, ctx) if anchor_checks else al.realign(seed, ctx)
     assert [w['w'] for w in al.flat(lines)] == true_tokens, 'the true lyric text must survive re-alignment untouched'
+    flat_words = al.flat(lines)
+    for row in anchor_checks:
+        row['start'] = flat_words[row['index']]['a']
+        row['start_residual_s'] = round(row['start'] - row['a'], 3)
     agreement = al.agreement(asr_words, [{'w': t} for t in true_tokens])
     conf = confidence(agreement['agreement_pct'], len(asr_words), len(true_tokens))
     before_lines = song.get('lyrics') or []
-    before_m = al.metrics(before_lines, ctx) if before_lines else None
-    after_m = al.metrics(lines, ctx)
-    passed, reason = gate_verdict(conf, before_m, after_m)
+    before_m = al.metrics(before_lines, metric_ctx) if before_lines else None
+    after_m = al.metrics(lines, metric_ctx)
+    # Keep reported pitch metrics comparable. The harm gate excludes only
+    # sections independently accepted by stem energy or the stronger clock test.
+    harm_ctx = metric_ctx
+    fallback_rows = [r for r in anchor_checks if r['timing_source'] != 'pitch_supported']
+    silences = ctx.get('synced_silences', []) if anchor_clock and anchor_clock['validated_without_voice'] else []
+    if fallback_rows or silences:
+        v = metric_ctx['voiced'].copy()
+        accepted_spans = [(min(r['a'], r['start']), r['end_time']) for r in fallback_rows] + silences
+        for a, b in accepted_spans:
+            v[max(0, int(a / al.HOP)):int(b / al.HOP)] = False
+        regs = al.regions(v)
+        harm_ctx = {**metric_ctx, 'voiced': v, 'regions': regs, 'phrases': al.sung_phrases(regs)}
+    if anchor_checks:
+        harm_before = al.metrics(before_lines, harm_ctx) if before_lines else None
+        harm_after = al.metrics(lines, harm_ctx)
+        # The onset detector permits attacks 50 ms before a region. Apply that
+        # same tolerance to anchored hole checks, including millisecond rounding.
+        for measured, placed in [(harm_before, before_lines), (harm_after, lines)]:
+            if measured is not None:
+                starts = [w['a'] for w in al.flat(placed)]
+                measured['silent_holes'] = sum(b - a >= 1.2 and not any(a - SILENCE_MARGIN_S <= t <= b for t in starts)
+                                               for a, b in harm_ctx['regions'])
+        passed, reason = gate_verdict(conf, harm_before, harm_after)
+    else:
+        passed, reason = gate_verdict(conf, before_m, after_m)
     flat_words = al.flat(lines)
     max_shift = max(substituted_shifts(asr_words, entries, flat_words), default=0.0)
-    blocking, info = placement_problems(entries, flat_words, ctx, before_lines, before_m, after_m, max_shift)
+    unvoiced = {i for r in anchor_checks if r['timing_source'] == 'synced_time_without_voice_support'
+                for i in range(r['index'], r['end_index'])}
+    blocking, info = placement_problems(entries, flat_words, ctx, before_lines, before_m, after_m, max_shift, unvoiced)
     anchor_errors = synced.placement_errors(anchor_checks, flat_words, ctx)
     blocking.extend(anchor_errors)
     if anchor_checks and blocking:
@@ -657,7 +693,9 @@ def build_correction(pkg: Path, song: dict, asr_words: list[dict], ctx: dict, ra
             local_words = flat_words[row['index']:row['end_index']]
             local_shift = max(substituted_shifts(asr_words, local_entries, local_words), default=0.)
             faults, _ = placement_problems(local_entries, local_words, ctx,
-                                           before_lines, max_substituted_shift=local_shift)
+                                           before_lines, max_substituted_shift=local_shift,
+                                           allowed_unvoiced={i - row['index'] for i in unvoiced
+                                                             if row['index'] <= i < row['end_index']})
             if faults:
                 anchor_errors.append(f"synced line {row['line']} at {row['a']:.2f}s: " + '; '.join(faults))
         blocking.extend(e for e in anchor_errors if e not in blocking)
@@ -739,6 +777,9 @@ def process_package(pkg: Path, text_file: str | None, write: bool, rebuild: bool
            'placement_problems': c['placement_problems'],
            'before': c['before_metrics'], 'after': c['after_metrics'], 'synced_clock': c['synced_clock'],
            **report_metrics(asr_words, c['true_tokens'], c['entries'], c['lines'])}
+    if c['anchor_checks']:
+        out['synced_lines'] = [{k: r[k] for k in ('line', 'a', 'start', 'start_residual_s', 'timing_source', 'energy')}
+                               for r in c['anchor_checks']]
     if not c['passed']:
         out['skipped'] = c['reason'] + (' (synced timing cannot be forced)' if c['unsafe_synced']
                                         else ' (use --force to override)')

@@ -262,6 +262,227 @@ class SectionTests(unittest.TestCase):
         words[2]['a'] = 5.1
         self.assertTrue(any('section boundary' in e for e in sy.placement_errors(c['anchor_checks'], words, self.ctx)))
 
+    def test_early_next_attack_keeps_the_previous_words_in_their_own_line(self):
+        ctx = copy.deepcopy(self.ctx)
+        ctx['voiced'][100:700] = True
+        ctx['regions'] = al.regions(ctx['voiced'])
+        ctx['phrases'] = ctx['regions']
+        ctx['onsets'] = np.r_[1., 1.4, 2.8, 4.2, 6.2, 6.6, ctx['onsets'][ctx['onsets'] >= 9]]
+        words = copy.deepcopy(self.words)
+        words[2]['a'] = 4.3
+        result = self.correct(words=words, ctx=ctx)
+        self.assertTrue(result['passed'], result['reason'])
+        placed = al.flat(result['lines'])
+        self.assertEqual(placed[3]['a'], 4.2)
+        self.assertLessEqual(placed[2]['a'], placed[3]['a'] - lt.MIN_INSERTED_SPACING_S)
+
+    def test_final_check_protects_the_room_reserved_for_the_next_actual_attack(self):
+        result = self.correct()
+        words = al.flat(result['lines'])
+        ctx = {**self.ctx, 'regions': [(0., 17.)]}
+        words[2]['a'] = 4.94
+        self.assertEqual(sy.placement_errors(result['anchor_checks'], words, ctx), [])
+        words[2]['a'] = 4.98
+        self.assertTrue(any('section boundary' in e for e in sy.placement_errors(
+            result['anchor_checks'], words, ctx)))
+
+
+class UnpitchedTests(unittest.TestCase):
+    def setUp(self):
+        self.ctx, self.words, self.song = fixture()
+        self.ctx['voiced'][:300] = False
+        self.ctx['regions'] = al.regions(self.ctx['voiced'])
+        self.ctx['phrases'] = self.ctx['regions']
+        self.ctx['onsets'] = self.ctx['onsets'][self.ctx['onsets'] >= 5]
+        self.ctx['energy_db'] = np.full(1700, -80.)
+        for t in TIMES[1:]:
+            self.ctx['energy_db'][int(t * 100):int((t + 2) * 100)] = -18.
+        self.ctx['stem_onsets'] = np.array([1.1, 1.5, 1.9])
+
+    def correct(self, words=None, lrc=LRC):
+        return lt.build_correction(Path('synthetic'), self.song,
+                                   self.words[3:] if words is None else words,
+                                   self.ctx, TEXT, 'mix', lrc)
+
+    def test_a_sustained_stem_energy_places_unpitched_line_on_its_attacks(self):
+        self.ctx['energy_db'][110:280] = -20.
+        result = self.correct()
+        self.assertTrue(result['passed'], result['reason'])
+        row = result['anchor_checks'][0]
+        self.assertEqual(row['timing_source'], 'vocal_stem_energy')
+        self.assertEqual(row['energy']['floor_db'], -80.)
+        self.assertEqual(row['energy']['threshold_db'], -53.)
+        self.assertEqual(al.flat(result['lines'])[0]['a'], 1.1)
+        self.assertFalse(self.ctx['voiced'][:300].any(), 'caller pitch mask must remain untouched')
+
+    def test_a_short_noise_spike_cannot_supply_voice_support(self):
+        self.ctx['energy_db'][110:115] = -20.
+        row = self.correct()['anchor_checks'][0]
+        self.assertEqual(row['timing_source'], 'synced_time_without_voice_support')
+
+    def test_continuous_loud_voice_is_not_mistaken_for_its_own_noise_floor(self):
+        self.ctx['energy_db'][:] = -20.
+        self.ctx['stem_onsets'] = np.array([1.1, 1.5, 1.9])
+        result = self.correct()
+        self.assertTrue(result['passed'], result['reason'])
+        row = result['anchor_checks'][0]
+        self.assertEqual(row['timing_source'], 'vocal_stem_energy')
+        self.assertEqual(row['energy']['floor_db'], -40.)
+
+    def test_sustained_voice_at_synced_time_is_energy_supported_without_a_new_attack(self):
+        self.ctx['voiced'][500:700] = False
+        self.ctx['regions'] = al.regions(self.ctx['voiced'])
+        self.ctx['onsets'] = self.ctx['onsets'][self.ctx['onsets'] >= 9]
+        self.ctx['energy_db'][:] = -20.
+        self.ctx['stem_onsets'] = np.array([])
+        result = self.correct(words=self.words)
+        row = result['anchor_checks'][1]
+        self.assertEqual(row['timing_source'], 'vocal_stem_energy')
+        self.assertEqual(row['start'], 5.)
+        self.assertTrue(row['energy']['sustained_at_synced_time'])
+
+    def test_closer_stem_attack_replaces_a_pitch_attack_from_previous_phrase(self):
+        self.ctx['voiced'][:80] = True
+        self.ctx['regions'] = al.regions(self.ctx['voiced'])
+        self.ctx['onsets'] = np.r_[.6, self.ctx['onsets']]
+        self.ctx['energy_db'][110:280] = -20.
+        result = self.correct()
+        self.assertTrue(result['passed'], result['reason'])
+        self.assertEqual(result['anchor_checks'][0]['start'], 1.1)
+
+    def test_unrelated_asr_cannot_supply_substitution_times_in_a_verified_section(self):
+        self.ctx['energy_db'][110:280] = -20.
+        words = [dict(w, w='unrelated') if i < 3 else w for i, w in enumerate(self.words)]
+        result = self.correct(words=words)
+        self.assertTrue(result['passed'], result['reason'])
+        self.assertEqual([e['kind'] for e in result['entries'][:3]], ['anchored', 'inserted', 'inserted'])
+
+    def test_b_quiet_stem_uses_validated_clock_and_marks_every_word(self):
+        result = self.correct()
+        self.assertTrue(result['passed'], result['reason'])
+        clock = result['synced_clock']
+        self.assertTrue(clock['validated_without_voice'])
+        self.assertEqual(clock['agreeing_line_share'], .75)
+        self.assertEqual(clock['residual_spread_s'], 0.)
+        words = al.flat(result['lines'])
+        self.assertEqual(words[0]['a'], 1.)
+        self.assertTrue(all(w['timing_source'] == 'synced_time_without_voice_support' for w in words[:3]))
+        self.assertFalse(any(lt.in_voice(w['a'], self.ctx) for w in words[:3]))
+
+    def test_b_separation_residue_below_dynamic_floor_stays_unsupported(self):
+        self.ctx['energy_db'][100:300] = -65.
+        self.assertEqual(self.correct()['anchor_checks'][0]['timing_source'],
+                         'synced_time_without_voice_support')
+
+    def test_numerical_silence_in_the_entire_stem_cannot_become_voice_support(self):
+        self.ctx['energy_db'][:] = -240.
+        result = self.correct()
+        self.assertEqual(result['anchor_checks'][0]['timing_source'], 'synced_time_without_voice_support')
+        self.assertEqual(result['anchor_checks'][0]['energy']['threshold_db'], -80.)
+
+    def test_c_quiet_line_refuses_when_share_of_all_lines_is_insufficient(self):
+        # Three coherent observations can validate local alignment, but cannot
+        # authorize quiet passages across eight timed lines.
+        rows = sy.parse_lrc(LRC)
+        rows += [{'a': float(i), 'tokens': ['unheard', str(i), 'phrase'], 'line': i} for i in range(14, 18)]
+        clock = sy.clock_offset(rows, self.words[3:])
+        self.assertFalse(clock['validated_without_voice'])
+        with patch.object(sy, 'clock_offset', return_value=clock):
+            with self.assertRaisesRegex(lt.LyricsSourceError, 'line 1 at 1.00s: .*clock not validated'):
+                self.correct()
+
+    def test_c_missing_energy_measurement_cannot_authorize_silent_placement(self):
+        del self.ctx['energy_db']
+        with self.assertRaisesRegex(lt.LyricsSourceError, 'line 1 at 1.00s'):
+            self.correct()
+
+    def test_c_quiet_passage_cannot_count_itself_as_clock_evidence(self):
+        with self.assertRaisesRegex(lt.LyricsSourceError, 'line 1 at 1.00s: clock not validated by the other lines'):
+            lt.build_correction(Path('synthetic'), self.song, self.words[:9], self.ctx,
+                                '\n'.join(PHRASES[:3]), 'mix', '\n'.join(LRC.splitlines()[:3]))
+
+    def test_c_changed_edit_refuses_even_with_loud_unpitched_stem(self):
+        self.ctx['energy_db'][110:280] = -20.
+        changed = [dict(w, a=w['a'] + (6 if i >= 6 else 0)) for i, w in enumerate(self.words)]
+        with self.assertRaisesRegex(lt.LyricsSourceError, 'synced line .*different edit'):
+            self.correct(words=changed)
+
+    def test_clock_fallback_requires_narrow_residuals_and_stable_group_medians(self):
+        rows = [{'a': float(i * 10 + 1), 'tokens': [f'a{i}', f'b{i}', f'c{i}'], 'line': i + 1}
+                for i in range(12)]
+        for deltas in ([-.6, .6] * 6, [0.] * 6 + [1.] * 6):
+            words = [{'w': w, 'a': r['a'] + d, 'b': r['a'] + d + .1}
+                     for r, d in zip(rows, deltas) for w in r['tokens']]
+            self.assertFalse(sy.clock_offset(rows, words)['validated_without_voice'])
+
+    def test_quiet_placement_cannot_cross_next_line(self):
+        result = self.correct()
+        words = al.flat(result['lines'])
+        words[2]['a'] = 5.1
+        self.assertTrue(any('section boundary' in e for e in sy.placement_errors(
+            result['anchor_checks'], words, self.ctx)))
+
+    def test_quiet_first_word_cannot_move_away_from_the_published_time(self):
+        result = self.correct()
+        words = al.flat(result['lines'])
+        words[0]['a'] += .2
+        self.assertTrue(any('quiet line moved' in e for e in sy.placement_errors(
+            result['anchor_checks'], words, self.ctx)))
+
+    def test_section_snap_retains_a_seed_when_an_attack_would_crowd_its_neighbour(self):
+        ctx = {**self.ctx, 'regions': [(1., 3.)], 'onsets': np.array([1., 1.02])}
+        seed = [{'w': 'flim', 'a': 1., 'b': 1.2}, {'w': 'borp', 'a': 1.2, 'b': 1.4}]
+        checks = [{'index': 0, 'end_index': 2, 'start': 1., 'placement_end': 3., 'timing_source': 'pitch_supported'}]
+        placed = al.flat(sy.realign_sections(seed, checks, ctx))
+        self.assertEqual([w['a'] for w in placed], [1., 1.2])
+
+    def test_crowded_snap_uses_the_next_voice_attack_when_the_seed_is_in_a_gap(self):
+        ctx = {**self.ctx, 'regions': [(1., 1.15), (1.8, 3.)],
+               'onsets': np.array([1., 1.02, 1.8, 2.1])}
+        seed = [{'w': 'flim', 'a': 1., 'b': 1.2}, {'w': 'borp', 'a': 1.2, 'b': 1.4}]
+        checks = [{'index': 0, 'end_index': 2, 'start': 1., 'placement_end': 3., 'timing_source': 'pitch_supported'}]
+        placed = al.flat(sy.realign_sections(seed, checks, ctx))
+        self.assertEqual([w['a'] for w in placed], [1., 1.8])
+
+    def test_seed_rounding_past_the_last_voiced_frame_uses_the_next_attack(self):
+        ctx = {**self.ctx, 'regions': [(1., 1.21), (1.8, 3.)],
+               'onsets': np.array([1., 1.02, 1.8])}
+        seed = [{'w': 'flim', 'a': 1., 'b': 1.2}, {'w': 'borp', 'a': 1.207, 'b': 1.4}]
+        checks = [{'index': 0, 'end_index': 2, 'start': 1., 'placement_end': 3., 'timing_source': 'pitch_supported'}]
+        self.assertEqual(al.flat(sy.realign_sections(seed, checks, ctx))[1]['a'], 1.8)
+
+    def test_text_only_retains_off_voice_and_hole_refusals(self):
+        entries = [{'kind': 'inserted'}] * 2
+        words = [{'a': 1.}, {'a': 2.}]
+        faults, _ = lt.placement_problems(entries, words, self.ctx)
+        self.assertTrue(any('off the sung voice' in e for e in faults))
+        self.assertFalse(lt.gate_verdict('high', {'uncovered_seconds': 0., 'silent_holes': 0},
+                                      {'uncovered_seconds': 0., 'silent_holes': 1})[0])
+
+    def test_energy_window_clipping_cannot_create_a_false_attack(self):
+        self.ctx['energy_db'][:700] = -20.
+        self.ctx['stem_onsets'] = np.array([])
+        _, _, attacks = sy.passage_energy({'a': 5.}, 9., self.ctx)
+        self.assertFalse(any(abs(t - 5.) <= sy.START_TOLERANCE for t in attacks))
+
+    def test_fallback_does_not_excuse_a_hole_outside_its_section(self):
+        self.ctx['voiced'][1520:1690] = True
+        self.ctx['regions'] = al.regions(self.ctx['voiced'])
+        self.ctx['phrases'] = self.ctx['regions']
+        self.song['lyrics'].append({'words': [{'w': 'old', 'a': 16., 'b': 16.5}]})
+        result = self.correct()
+        self.assertFalse(result['passed'])
+        self.assertIn('silent hole', result['reason'])
+
+    def test_validated_empty_timed_outro_does_not_require_invented_words(self):
+        self.ctx['voiced'][1520:1690] = True
+        self.ctx['regions'] = al.regions(self.ctx['voiced'])
+        self.ctx['phrases'] = self.ctx['regions']
+        self.song['lyrics'].append({'words': [{'w': 'old', 'a': 16., 'b': 16.5}]})
+        result = self.correct(lrc=LRC + '\n[00:15.00]')
+        self.assertTrue(result['passed'], result['reason'])
+        self.assertTrue(all(w['a'] < 15 for w in al.flat(result['lines'])))
+
 
 class PackageTests(unittest.TestCase):
     def setUp(self):
@@ -357,6 +578,35 @@ class PackageTests(unittest.TestCase):
                                 capture_output=True, timeout=30)
         self.assertEqual(result.returncode, 2)
         self.assertIn(b'--synced applies to a single package', result.stderr)
+
+    def test_quiet_clock_fallback_survives_cli_restart_and_cache_replay(self):
+        import soundfile as sf
+        y, sr = sf.read(self.pkg / 'vocals_44k.flac')
+        y[:int(3 * sr)] = 0
+        sf.write(self.pkg / 'vocals_44k.flac', y, sr)
+        song = json.loads((self.pkg / 'target.json').read_text())
+        for p in song['points'][:150]:
+            p[1] = None
+        (self.pkg / 'target.json').write_text(json.dumps(song))
+        snapshot = self.snapshot()
+        command = [sys.executable, str(ROOT / 'studio/lyrics_text.py'), '--text', str(self.text),
+                   '--synced', str(self.lrc), '--dry-run', '--json', str(self.pkg)]
+        first = subprocess.run(command, capture_output=True, check=True, timeout=90)
+        second = subprocess.run(command, capture_output=True, check=True, timeout=90)
+        self.assertEqual(first.stdout, second.stdout)
+        report = json.loads(first.stdout)
+        self.assertNotIn('skipped', report)
+        self.assertEqual(report['synced_lines'][0]['timing_source'], 'synced_time_without_voice_support')
+        self.assertEqual(report['synced_lines'][0]['start'], 1.)
+        self.assertEqual(self.snapshot(), snapshot)
+        # Exercise the real cache writer and both replay consumers on this
+        # synthetic package. The private-library campaign uses dry-run only.
+        lt.process_package(self.pkg, str(self.text), True, rebuild=False, synced_file=str(self.lrc))
+        saved = json.loads((self.pkg / 'target.json').read_text())
+        words = al.flat(lt.resolve_transcript(self.pkg, saved, 'auto')[0])
+        replay = al.corrected_seed(self.pkg, saved, words, al.context(self.pkg, saved))
+        self.assertTrue(replay['passed'], replay['reason'])
+        self.assertEqual(al.flat(saved['lyrics']), al.flat(replay['lines']))
 
 
 if __name__ == '__main__':

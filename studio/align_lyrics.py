@@ -75,12 +75,17 @@ def sung_phrases(regs, gap=GAP):
         else: out.append([a, b])
     return [tuple(p) for p in out]
 
-def onsets(y, sr, v, song):
-    """Onset candidates on the stem: spectral-flux attacks inside voiced regions, region starts, note re-attacks."""
+def stem_onsets(y, sr):
+    """Spectral-flux attacks, including unpitched passages for optional LRC checks."""
     env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=256, aggregate=np.median)
     fr = librosa.onset.onset_detect(onset_envelope=env, sr=sr, hop_length=256, backtrack=True, units='frames',
                                     pre_max=3, post_max=3, pre_avg=10, post_avg=10, delta=.08, wait=3)
-    regs = regions(v); flux = [float(t) for t in librosa.frames_to_time(fr, sr=sr, hop_length=256) if any(a - .05 <= t <= b for a, b in regs)]
+    return librosa.frames_to_time(fr, sr=sr, hop_length=256)
+
+def onsets(y, sr, v, song, flux=None):
+    """Onset candidates on the stem: spectral-flux attacks inside voiced regions, region starts, note re-attacks."""
+    if flux is None: flux = stem_onsets(y, sr)
+    regs = regions(v); flux = [float(t) for t in flux if any(a - .05 <= t <= b for a, b in regs)]
     notes = [n['a'] for i, n in enumerate(song['notes']) if i == 0 or n['a'] - song['notes'][i - 1]['b'] >= .06]
     cands = sorted(set(round(float(x), 3) for x in flux + [a for a, _ in regs] + notes))
     out = cands[:1]
@@ -131,6 +136,14 @@ def realign(words, ctx):
     prev = -1e9
     for i, w in enumerate(ws):
         start = float(o[match[i]]) if match[i] is not None else float(w['a'])
+        spacing = ctx.get('min_word_spacing_s')
+        if spacing is not None and round(start - prev, 3) < spacing:
+            start = max(float(w['a']), prev + spacing)
+            frame_time = round(start / HOP) * HOP
+            if not any(a - .05 <= frame_time < b for a, b in ctx['regions']):
+                later = o[o >= prev + spacing]
+                if len(later):
+                    start = float(min(later, key=lambda t: (abs(t - w['a']), t)))
         if start <= prev: start = prev + .02                      # order is never traded for a closer onset
         w['span'] = min(max(float(w['b']) - float(w['a']), MIN_DUR), MAX_DUR); w['a'] = round(start, 3); prev = start
     ra = np.array([r[0] for r in ctx['regions']] or [0.]); rb = np.array([r[1] for r in ctx['regions']] or [dur])
@@ -155,7 +168,9 @@ def realign(words, ctx):
 def context(pkg: Path, song: dict) -> dict:
     db, y, sr, dur = stem(pkg / 'vocals_44k.flac')
     v = voiced(db, song); regs = regions(v)
-    return {'voiced': v, 'regions': regs, 'phrases': sung_phrases(regs), 'onsets': onsets(y, sr, v, song),
+    flux = stem_onsets(y, sr)
+    return {'voiced': v, 'regions': regs, 'phrases': sung_phrases(regs), 'onsets': onsets(y, sr, v, song, flux),
+            'energy_db': db, 'stem_onsets': flux,
             'notes': np.array(sorted(set(round(n['a'], 3) for n in song['notes']))), 'duration': min(dur, song['duration'])}
 
 # ---------------------------------------------------------------- measurement
