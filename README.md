@@ -26,6 +26,16 @@ of your voice, no server after the file is built.
   second tap or Esc returns it). Drag it to turn the head up to 60° (a double click turns it back).
   «Голова» in the stage rail hides it. Without WebGL2, or where WebGL runs on the processor alone (no graphics
   processor), the cut face is drawn flat. Everything is baked into the trainer: no network, nothing extra to install ([docs/design/VOCAL_TRACT_3D.md](docs/design/VOCAL_TRACT_3D.md)).
+  **What engages:** four zones on the cut face (the jaw, the tongue, the soft palate, the larynx) take a warm amber
+  tint by how much the sound due now engages them, each named on screen: one hint in plain words under the head (the
+  part of the tongue raised, the soft palate lowered for a nasal, the larynx on a note high or low for the chosen head's
+  range, or a clamp to avoid, «Не затискай щелепу…»), and in a tall column and the enlarged head a label on a line for
+  each other zone engaged; a zone lights only while its name stands on screen. A short column puts the hint in a short
+  form along its bottom; on a phone it stands beside the small overlay, on the sung part of the roll, clear of the
+  words, the playhead and the next notes. The line along the panel's bottom says what is the model and what is the
+  teaching illustration (in a short column it stays behind ⓘ), and its ⓘ opens the three lists: what Chimera models, what is illustration (the lit zones, the
+  hints, the folds' stretch with pitch judged by a default range, C3–E4 for the male head and A3–C♯5 for the female),
+  and what nothing measures (your own voice and muscles).
 - **Live match score.** Hits ÷ frames with a target, counted once per 20 ms. Silence under a note is a miss; frames with no
   target are excluded; draft notes count and are labelled as draft. In a song with lyrics, notes that come nowhere near
   a word (stem bleed in a break, wordless singing) are drawn dimmed and never scored: «Без слів — не рахується». Hit notes turn mint with ✓, misses hatched red with ×,
@@ -231,7 +241,13 @@ first line, the sounds on the second; in the short column the sounds on one line
 and writing the word sounds, listening from `file://` without a network request, the frame budget at 390 px and 1440 px
 under 1× and 4× CPU throttle (the flat cut face, which a renderer without a graphics processor gets; the 3D head forced
 onto it for its own work, and through its own multisampled framebuffer the same picture at each redraw), «Голова» off leaving today's roll, the flat cut face without WebGL2, no head drawn in VR or in a hidden tab, and
-still air with reduced motion. `tests/phonemes_test.py` checks the build's word sounds (CMUdict and the Ukrainian rules).
+still air with reduced motion. Its slice 2 checks read each zone's level and word from the model for every sound of both
+bodies and the hint's order (the larynx on a high or a low note, the clamp tips, the tongue), lesson 3's top note lighting
+the larynx with the high-note hint for the male head and not for the female, the demo's /s/ lighting the tongue's tip,
+lesson 1's /m/ naming the soft palate, the hint, the labels and the honesty line measured from their text ranges in every
+panel state (the column idle and after a take at 1440 × 900, 900 × 1000, 1366 × 650 and 1200 × 800, the phone overlay small
+and enlarged; whole, readable and on no word, playhead, upcoming note, button or label), the phone's hint through a sung
+pass and paused after it (covering under a tenth of the bars of the notes just sung, on average), the ⓘ dialog (modal, Esc closes it) and the zones on the flat cut face without WebGL2. `tests/phonemes_test.py` checks the build's word sounds (CMUdict and the Ukrainian rules).
 `xr.mjs` enters VR on Meta's WebXR emulator (the `iwer` dev dependency) as a Quest 3: the panel 1.5 m ahead with the
 chart at its size, «Слухати», «Вокал» and a seek on the progress bar by a controller's trigger, «Сюди» by a pinch,
 «Вийти», a refused session (the page stays out of VR, and its toast is true to the microphone) and a hidden one

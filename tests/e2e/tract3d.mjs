@@ -28,6 +28,17 @@
 //  10  no WebGL2: the 2D cut face, no console error
 //  11  in VR and in a hidden tab the head draws no frames
 //  12  reduced motion: two frames 200 ms apart show the same particles
+// Slice 2 (what engages, §4.3):
+//  13  each zone's level and word from the model for every sound of both bodies (the tongue's raised part, the soft palate,
+//      the jaw's opening, the folds); the hint's order: the larynx on a high or a low note, the clamp tips, the tongue
+//  14  pinned row 3: lesson 3's top note lights the larynx zone with the high-note hint (male); not high for the female
+//      head; every lit zone named once on screen
+//  15  pinned row 5: the demo's /s/ lights the tongue's tip, no sparks (slice 3); lesson 1's /m/ names the soft palate
+//  16  the hint, the labels and the honesty note in every panel state (the column idle and after a take at 1440×900,
+//      900×1000, 1366×650, 1200×800; the phone overlay small and enlarged), measured from text ranges: whole, readable, on
+//      no word, playhead, upcoming note, button or label; the clamp tip names and lights the jaw
+//  17  the phone's hint beside the small overlay through a sung pass of the demo and paused after it
+//  18  ⓘ: a modal dialog with the honesty statement and three lists; without WebGL2 the flat cut face shows the zones
 // Every page must keep a clean console; SwiftShader's own notes on reading a canvas back are the driver's, not the page's.
 import {execFileSync} from 'node:child_process';
 import {cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
@@ -593,6 +604,200 @@ for (const [width, height] of [[1440, 900], [390, 844]]) {
   const m = await moving.p.evaluate(async () => { const T = window.Luma.test, a = 2; T.fakeSing({a, b: a + 10}); let t = T.fakeTick(1.0); T.tractFrame(t, true); t = T.fakeTick(1.02); T.tractFrame(t, true); const p0 = T.tract().particles; await new Promise(r => setTimeout(r, 200)); t = T.fakeTick(1.2); T.tractFrame(t, true); const p1 = T.tract().particles; T.fakeFinish(); return p0.join() !== p1.join(); });
   assert(m, 'without reduced motion the same two frames move the air');
   await done(o, 'reduced motion'); await done(moving, 'motion');
+}
+
+// ══ slice 2 · what engages (§4.3): the zones, their levels, tints and labels, one hint, the clamp tips, ⓘ and the honesty
+// note, in every panel state slice 1 established ═══════════════════════════════════════════════════════════════════════
+// 13  zone levels and words from the model, for every sound of both bodies; the hint's choice and its order
+{
+  const o = await page(url, {settings: seeded('male')});
+  const r = await o.p.evaluate(() => { const L = window.LumaTract, out = {}; for (const tag of ['male', 'female']) { out[tag] = {}; const [lo, hi] = L.RANGE[tag], mid = (lo + hi) / 2;
+    for (const sym of window.LUMA_TRACT3D.symbols) { const s = L.study(tag, sym, mid); out[tag][sym] = {jaw: s.zones.jaw, tongue: s.zones.tongue, velum: s.zones.velum, larynx: s.zones.larynx, hint: s.hint}; }
+    out[tag].at = {high: L.study(tag, 'a', hi + 1).hint, low: L.study(tag, 'a', lo + 1).hint, jawClamp: L.study(tag, 'i', lo + .7 * (hi - lo)).hint, rootClamp: L.study(tag, 'ɔ', lo + .25 * (hi - lo)).hint, round: L.study(tag, 'u', mid).hint, none: L.study(tag, 'a', null)}; }
+    return {out, range: L.RANGE}; });
+  assert(JSON.stringify(r.range) === '{"male":[48,64],"female":[57,73]}', 'the range a high or a low note is judged by: Chimera\'s keyboard per body, C3–E4 and A3–C♯5 ' + JSON.stringify(r.range));
+  const parts = {tip: ['t', 'd', 'n', 's', 'z', 'l', 'r', 'θ', 'ð', 'ts'], front: ['i', 'ɪ', 'e', 'j', 'ʃ', 'ʒ', 'tʃ', 'dʒ', 'ç'], back: ['u', 'k', 'g', 'ŋ', 'x'], root: ['a', 'ɑ', 'ɔ']};
+  for (const tag of ['male', 'female']) {
+    const z = r.out[tag], wrong = [];
+    for (const [part, syms] of Object.entries(parts)) for (const s of syms) if (z[s].tongue.part !== part || z[s].tongue.level < .3) wrong.push(s + ':' + z[s].tongue.part + '@' + z[s].tongue.level.toFixed(2));
+    assert(!wrong.length, `${tag}: the tongue's raised part is read from the posture (§4.3's lists: tip, front, back, root), each engaged ` + JSON.stringify(wrong));
+    const nas = ['m', 'n', 'ŋ', 'ɲ'], oral = () => Object.keys(z).filter(s => s !== 'at' && !nas.includes(s));
+    assert(nas.every(s => z[s].velum.level <= .21 && z[s].velum.word === 'опущене' && z[s].hint.zones.includes('velum') && /піднебіння опущене/.test(z[s].hint.text)) && oral().every(s => z[s].velum.level >= .99 && z[s].velum.word === 'підняте'),
+      `${tag}: the soft palate is raised (level 1) for every oral sound and lowered (0.2) for a nasal, whose hint names it`);
+    assert(z.a.jaw.word === 'відкрита' && z.a.jaw.level > .55 && z.i.jaw.word === 'майже закрита' && z.u.jaw.level < .2 && ['e', 'ɛ', 'ə'].some(s => z[s].jaw.word === 'напіввідкрита'),
+      `${tag}: the jaw's level is its opening over Chimera's largest (2.6 cm): /a/ ${z.a.jaw.level.toFixed(2)} відкрита, /i/ ${z.i.jaw.level.toFixed(2)} майже закрита, /u/ ${z.u.jaw.level.toFixed(2)}`);
+    assert(['p', 't', 'k', 'f', 's', 'ʃ', 'x', 'h'].every(s => z[s].larynx.folds === 'apart') && z['ʔ'].larynx.folds === 'shut' && ['a', 'i', 'm', 'b', 'z', 'v'].every(s => z[s].larynx.folds === 'voiced'),
+      `${tag}: the folds' state from the planner: apart for the voiceless sounds, shut for /ʔ/, sounding for the voiced`);
+    const at = z.at;
+    assert(at.high.kind === 'high' && at.high.zones.join() === 'larynx' && at.high.text === 'Висока нота: складки тонші й натягнуті. Гортань не тягни вгору' && at.low.kind === 'low' && at.low.text === 'Низька нота: не тисни гортань униз',
+      `${tag}: on a vowel a note above 80 % of the range gives the high-note hint, below 15 % the low-note hint (larynx)`);
+    assert(at.jawClamp.kind === 'clamp' && at.jawClamp.zones.join() === 'jaw' && /^Не затискай щелепу/.test(at.jawClamp.text) && at.rootClamp.kind === 'clamp' && at.rootClamp.zones.join() === 'tongue' && /^Не затискай корінь язика/.test(at.rootClamp.text) && at.round.kind === 'clamp' && /^Не затискай губи/.test(at.round.text),
+      `${tag}: the clamp tips: the jaw on a closed vowel high in the range, the tongue's root on a back vowel low in it, the lips on a rounded vowel ` + JSON.stringify([at.jawClamp.text, at.rootClamp.text, at.round.text]));
+    assert(at.none.zones.larynx.pos === null && at.none.hint.kind === 'shape', `${tag}: with no note due no pitch is claimed: no high or low hint, no clamp that needs one (${at.none.hint.text})`);
+    const texts = Object.entries(z).filter(([s]) => s !== 'at').flatMap(([, v]) => v.hint ? [v.hint.text, v.hint.short] : []);
+    assert(texts.length > 80 && texts.every(t => /^[А-ЩЬЮЯЄІЇҐа-щьюяєіїґ’ :,.\-—]+$/.test(t) && t.length <= 64) && texts.every(t => t.length) , `${tag}: every hint is plain Ukrainian, 64 characters at most (${new Set(texts).size} texts)`);
+  }
+  await done(o, 'zones and hints from the model');
+}
+
+// the hint's text and labels, measured from their text ranges, in one page: whole inside their box and the viewport, one
+// hint at a time, readable (11 px or more, contrast 4.5:1 or more against the ground under them), and none over a word, the
+// playhead or the next 2 s of notes, the panel's buttons, the caption or another label
+async function words2(p) {
+  return p.evaluate(() => { const T = window.Luma.test, $ = id => document.getElementById(id), box = q => ({x0: q.left, y0: q.top, x1: q.right, y1: q.bottom}), hit = (a, b) => a.x0 < b.x1 - .5 && b.x0 < a.x1 - .5 && a.y0 < b.y1 - .5 && b.y0 < a.y1 - .5;
+    const rects = el => { if (!el || !el.checkVisibility() || !el.firstChild) return []; const r = document.createRange(); r.selectNodeContents(el); return [...r.getClientRects()].filter(q => q.width > 0).map(box); };
+    const lum = c => { const v = c.match(/[\d.]+/g).slice(0, 3).map(x => { x /= 255; return x <= .03928 ? x / 12.92 : ((x + .055) / 1.055) ** 2.4; }); return .2126 * v[0] + .7152 * v[1] + .0722 * v[2]; };
+    const ground = el => { for (let e = el; e; e = e.parentElement) { const c = getComputedStyle(e).backgroundColor; if (c && !/rgba\(0, 0, 0, 0\)|transparent/.test(c)) return c; } return 'rgb(11,14,21)'; };
+    const contrast = el => { const a = lum(getComputedStyle(el).color), b = lum(ground(el)); return (Math.max(a, b) + .05) / (Math.min(a, b) + .05); };
+    // (the word boxes come from a frame drawn now, which may move the phone's overlay and its hint: everything after it)
+    const c = $('chartWrap').getBoundingClientRect(), wordsOn = T.wordBoxes().map(w => ({x0: c.left + w.x0, y0: c.top + w.y0, x1: c.left + w.x1, y1: c.top + w.y1, w: w.w}));
+    const s = T.tract(), plot = T.plot(), vw = innerWidth, vh = innerHeight, hint = $('tractHint'), panel = box($('tract').getBoundingClientRect()), view = box($('tractView').getBoundingClientRect());
+    const hintRects = rects(hint), container = hint.parentElement === $('tract') ? panel : box(hint.getBoundingClientRect());
+    const v = T.viewWindow(T.state().time), x = a => c.left + plot.left + (a - v.a) / v.span * (plot.right - plot.left), now = x(T.state().time);
+    const notes = window.LUMA_SONG.notes.filter(n => n.a < T.state().time + 2 && n.b > T.state().time).map(n => ({x0: Math.max(x(n.a), now), x1: x(n.b), y0: c.top + plot.top, y1: c.top + plot.bottom}));
+    const labels = [...document.querySelectorAll('#tract .tract-zone')].filter(e => e.checkVisibility()).map(e => ({zone: e.dataset.zone, r: box(e.getBoundingClientRect()), text: rects(e), px: parseFloat(getComputedStyle(e).fontSize), contrast: contrast(e)}));
+    const buttons = [...document.querySelectorAll('#tract button')].filter(b => b.checkVisibility()).map(b => ({id: b.id || b.className, r: box(b.getBoundingClientRect())}));
+    const caption = rects($('tractSound').firstChild ? $('tractSound') : null), note = rects($('tractNoteText'));
+    const inside = (a, b) => a.x0 >= b.x0 - .5 && a.x1 <= b.x1 + .5 && a.y0 >= b.y0 - .5 && a.y1 <= b.y1 + .5;
+    const vp = {x0: 0, y0: 0, x1: vw, y1: vh};
+    const bad = [];
+    if (hintRects.length) {
+      if (!hintRects.every(q => inside(q, container) && inside(q, vp))) bad.push('hint outside its box or the screen');
+      if (hint.scrollHeight > hint.clientHeight + 1) bad.push('hint clipped');
+      // (the enlarged head covers the roll with its own ground: nothing of the roll shows under it)
+      if (!s.big) {
+        for (const w of wordsOn) if (hintRects.some(q => hit(q, w))) bad.push('hint on the word ' + w.w);
+        if (hintRects.some(q => q.x0 < now + 1 && q.x1 > now - 1 && q.y1 > c.top + plot.top && q.y0 < c.top + plot.bottom)) bad.push('hint on the playhead');
+        for (const n of notes) if (hintRects.some(q => hit(q, n) && q.y1 > c.top + plot.top)) bad.push('hint on an upcoming note');
+      }
+      for (const b of buttons) if (hintRects.some(q => hit(q, b.r))) bad.push('hint on the button ' + b.id);
+      if (caption.some(q => hintRects.some(h => hit(q, h)))) bad.push('hint on the caption');
+      if (hint.parentElement === $('tract') && hintRects.some(q => hit(q, view))) bad.push('hint on the picture');
+      if (parseFloat(getComputedStyle(hint).fontSize) < 11 || contrast(hint) < 4.5) bad.push('hint unreadable ' + getComputedStyle(hint).fontSize + ' ' + contrast(hint).toFixed(1));
+    }
+    for (const l of labels) {
+      if (!inside(l.r, view) || !l.text.every(q => inside(q, l.r))) bad.push('label ' + l.zone + ' outside the picture');
+      if (l.px < 11 || l.contrast < 4.5) bad.push('label ' + l.zone + ' unreadable');
+      for (const m of labels) if (m !== l && hit(l.r, m.r)) bad.push('labels ' + l.zone + '/' + m.zone + ' overlap');
+      for (const b of buttons) if (hit(l.r, b.r)) bad.push('label ' + l.zone + ' on ' + b.id);
+      if (hintRects.some(q => hit(q, l.r))) bad.push('label ' + l.zone + ' on the hint');
+    }
+    if (note.length && !note.every(q => inside(q, panel) && inside(q, vp))) bad.push('honesty note outside the panel');
+    const visibleHints = [...document.querySelectorAll('.tract-hint')].filter(e => e.checkVisibility() && e.textContent).length;
+    const info = $('tractInfo'), ir = info.checkVisibility() ? box(info.getBoundingClientRect()) : null;
+    if (ir && (!inside(ir, panel) || ir.x1 - ir.x0 < 24 || ir.y1 - ir.y0 < 24 || hintRects.some(q => hit(q, ir)) || note.some(q => hit(q, ir)))) bad.push('ⓘ cut, under 24 px or on text');
+    return {bad, info: !!ir, hint: hint.textContent, lines: new Set(hintRects.map(q => Math.round(q.y0))).size, place: hint.parentElement === $('tract') ? 'panel' : 'stage', visibleHints, labels: labels.map(l => l.zone), lit: s.lit, kind: s.hint?.kind ?? null, zones: s.hint?.zones ?? [], note: note.length ? $('tractNoteText').textContent : null, mode: s.mode, shape: s.shape, small: s.small, spot: s.spot}; });
+}
+
+// 14 · pinned row 3: lesson 3, «Довга нота», its top note (A4): for the male head the larynx zone is lit, with the high-note
+// hint; the female head sings the same note at 75 % of its range, so no high-note hint (the data says it is not high for her)
+{
+  const lesson3 = join(library, 'Luma_Lesson_3_Ekspert.html');
+  for (const body of ['male', 'female']) {
+    const o = await page(fileUrl(lesson3), {settings: seeded(body)}); await ready(o.p);
+    const t = await o.p.evaluate(() => { const n = window.LUMA_SONG.notes.filter(n => n.b - n.a > 3).reduce((a, b) => b.m > a.m ? b : a); return (n.a + n.b) / 2; });
+    const s = await at(o.p, t); await frames(o.p, 2); const w = await words2(o.p);
+    if (body === 'male') assert(s.phoneme === 'a' && s.zones.larynx.m === 69 && s.zones.larynx.pos > .8 && s.zones.larynx.level >= .65 && s.lit.includes('larynx') && s.hint.kind === 'high' && s.hintText === 'Висока нота: складки тонші й натягнуті. Гортань не тягни вгору' && !w.bad.length,
+      `lesson 3, «Довга нота», the top note (A4), male: the larynx zone lit (level ${s.zones.larynx.level}), the high-note hint whole beside the caption ` + JSON.stringify({pos: s.zones.larynx.pos, lit: s.lit, bad: w.bad}));
+    else assert(s.zones.larynx.m === 69 && Math.abs(s.zones.larynx.pos - .75) < .01 && s.hint.kind !== 'high' && !w.bad.length,
+      `lesson 3, the same A4 for the female head (A3–C♯5): ${(100 * s.zones.larynx.pos).toFixed(0)} % of her range, no high-note hint («${s.hintText}»)`);
+    // the zones whose names stand on screen are lit, and only those: each lit zone is named in a label or in the hint
+    assert(s.lit.length > 0 && s.lit.every(z => s.hint?.zones.includes(z) || s.labels.some(l => l.zone === z)) && s.labels.every(l => s.lit.includes(l.zone)) && !s.labels.some(l => s.hint?.zones.includes(l.zone)),
+      `lesson 3, ${body}: each lit zone is named once on screen, in the hint or in its own label ` + JSON.stringify({lit: s.lit, hint: s.hint?.zones, labels: s.labels.map(l => l.text)}));
+    await done(o, `lesson 3 top note, ${body}`);
+  }
+}
+
+// 15 · pinned row 5: the demo's «sa» on the /s/: the tongue's tip zone lit and named, the folds apart; the sparks of slice
+// 3 are not drawn (the air is the slice 1 streaks only)
+for (const body of ['male', 'female']) {
+  const o = await page(url, {settings: seeded(body)}); await ready(o.p);
+  const t = await o.p.evaluate(() => { const T = window.Luma.test.tractTimeline(), g = T.segs.find(g => g.sym === 's' && T.words[g.word]?.w === 'sa'); return (g.a + g.b) / 2; });
+  const s = await at(o.p, t);
+  assert(s.phoneme === 's' && s.zones.tongue.part === 'tip' && s.zones.tongue.level >= .7 && s.lit.includes('tongue') && s.hint.zones.includes('tongue') && /^Кінчик язика/.test(s.hintText) && s.zones.larynx.folds === 'apart' && s.air === 'voiceless' && !('sparks' in s),
+    `demo «sa» on /s/, ${body}: the tongue's tip zone lit (${s.zones.tongue.level}) and the hint names it («${s.hintText}»), the folds apart, no sparks`);
+  // lesson 1's /m/ (row 1): the hint names the soft palate, lowered
+  await done(o, `demo sa, ${body}`);
+}
+{
+  const o = await page(fileUrl(lesson1), {settings: seeded('male')}); await ready(o.p);
+  const m = await o.p.evaluate(() => { const g = window.Luma.test.tractTimeline().segs.find(g => g.sym === 'm'); return (g.a + g.b) / 2; });
+  const s = await at(o.p, m);
+  assert(s.phoneme === 'm' && s.hint.zones.join() === 'velum' && /М’яке піднебіння опущене/.test(s.hintText) && s.lit.includes('velum') && s.zones.velum.word === 'опущене',
+    `lesson 1 on /m/: the hint names the soft palate, lowered, and lights it («${s.hintText}»)`);
+  await done(o, 'lesson 1 m hint');
+}
+
+// 16 · the hint, the labels and the honesty note in every panel state: the column idle and after a take at 1440×900,
+// 900×1000, 1366×650 and 1200×800, and the phone's overlay small and enlarged at 390×844, for a high note (lesson 3) and
+// a clamp tip (lesson 2's «лі»), both heads
+{
+  const lesson2 = join(library, 'Luma_Lesson_2_Seredniy.html'), lesson3 = join(library, 'Luma_Lesson_3_Ekspert.html');
+  // a «лі» whose note lies between 62 and 78 % of the head's range: the closed /i/ high in it, the jaw's clamp tip
+  const findClamp = p => p.evaluate(() => { const T = window.Luma.test, tl = T.tractTimeline(), [lo, hi] = window.LumaTract.RANGE[T.tract().body];
+    for (const g of tl.segs) { if (g.sym !== 'i' || tl.words[g.word]?.w !== 'лі') continue; const t = (g.a + g.b) / 2, n = window.LUMA_SONG.notes.find(n => n.a <= t && n.b > t); if (n && (n.m - lo) / (hi - lo) > .62 && (n.m - lo) / (hi - lo) < .78) return t; } return null; });
+  const states = [[1440, 900, 2, false], [1440, 900, 2, true], [900, 1000, 2, false], [900, 1000, 2, true], [1366, 650, 2, false], [1200, 800, 2, false], [1200, 800, 2, true], [390, 844, 3, false], [390, 844, 3, 'big']];
+  for (const [file, label, pick] of [[lesson3, 'high note', p => p.evaluate(() => { const n = window.LUMA_SONG.notes.filter(n => n.b - n.a > 3).reduce((a, b) => b.m > a.m ? b : a); return (n.a + n.b) / 2; })], [lesson2, 'clamp tip', findClamp]])
+    for (const body of ['male', 'female']) for (const [width, height, dpr, take] of states) {
+      const o = await page(fileUrl(file), {viewport: {width, height}, dpr, settings: seeded(body)}); await ready(o.p);
+      if (take === true) await o.p.evaluate(async () => { const T = window.Luma.test; T.fakeSing({a: 2, b: 30}); for (let k = 0; k < 240; k++) { const t = T.fakeTick(k / 60); T.tractFrame(t, true); if (k % 8 === 0) await new Promise(r => setTimeout(r)); } T.fakeFinish(); });
+      const t = await pick(o.p);
+      if (t === null) { assert(false, `${label}, ${body}: a moment for it in the lesson`); await done(o, label); continue; }
+      await at(o.p, t); if (take === 'big') { await o.p.click('#tractView'); await o.p.waitForFunction(() => window.Luma.test.tract().big); } await frames(o.p, 3);
+      const w = await words2(o.p), name = `${width}×${height}${take === true ? ' after a take' : take === 'big' ? ' enlarged' : ''}, ${label}, ${body}`;
+      const small = width < 720 && take !== 'big', wide = w.shape === 'wide' && !small, note = !small && !wide;
+      assert(!w.bad.length && w.visibleHints === 1 && w.hint && w.place === (small ? 'stage' : 'panel') && (small ? w.lines <= 3 : w.lines <= 2) && (note ? w.note === 'Форма — модель Chimera, зони й підказки — навчальна схема' : w.note === null) && w.info === !small,
+        `${name}: one hint («${w.hint}», ${w.lines} line(s), ${w.place}), whole and readable, on no word, playhead, upcoming note, button or label; ${note ? 'the honesty note whole' : small ? 'the honesty note left to the enlarged head' : 'the honesty note behind ⓘ at the hint\'s end'}; labels ${JSON.stringify(w.labels)} ` + JSON.stringify(w.bad));
+      if (label === 'clamp tip') assert(w.kind === 'clamp' && w.zones.join() === 'jaw' && w.lit.includes('jaw') && /^Не затискай щелепу/.test(w.hint), `${name}: the clamp tip names the jaw and lights it`);
+      await done(o, name);
+    }
+}
+
+// 17 · on a phone, while the demo is sung through and paused after it: the hint beside the small overlay stands on no word,
+// the playhead or an upcoming note, whole, at every 6th frame and every 0.5 s stop
+{
+  const o = await page(url, {viewport: {width: 390, height: 844}, dpr: 3, settings: seeded('female')}); await ready(o.p);
+  const check = async () => { const w = await words2(o.p); return w; };
+  const out = {n: 0, shown: 0, bad: []};
+  await o.p.evaluate(() => { const T = window.Luma.test; T.fakeSing({a: 2, b: Math.min(window.LUMA_SONG.duration - .5, 32)}); window.__k = 0; });
+  for (;;) { const t = await o.p.evaluate(async () => { const T = window.Luma.test; let t; for (let i = 0; i < 6; i++) { t = T.fakeTick(window.__k++ / 60); T.tractFrame(t, true); } await new Promise(r => requestAnimationFrame(r)); return T.state().mode === 'singing' ? t : null; });
+    if (t === null || t > 31.5) break; const w = await check(); out.n++; if (w.hint) out.shown++; for (const b of w.bad) out.bad.push(t.toFixed(2) + ':' + b); }
+  await o.p.evaluate(() => window.Luma.test.fakeFinish());
+  // paused, the hint stands where it covers none of the notes sung in the last 2 s, or, where a run of notes fills the sung
+  // part, the least of them: on average it covers a tenth of their bars at most
+  const cover = []; let blocked = 0;
+  for (let t = 2.5; t <= 30.5; t += .5) { await at(o.p, t); const w = await check(); out.n++; if (w.hint) out.shown++; for (const b of w.bad) out.bad.push('paused ' + t.toFixed(2) + ':' + b);
+    const c = await o.p.evaluate(() => { const T = window.Luma.test, h = document.getElementById('tractHint'), now = T.state().time, wrap = document.getElementById('chartWrap').getBoundingClientRect(); if (!h.checkVisibility() || !h.textContent) return null;
+      const q = h.getBoundingClientRect(), hb = {x0: q.left - wrap.left, y0: q.top - wrap.top, x1: q.right - wrap.left, y1: q.bottom - wrap.top}, past = T.noteRects().filter(n => n.b > now - 2 && n.a < now);
+      const inter = n => Math.max(0, Math.min(n.x1, hb.x1) - Math.max(n.x0, hb.x0)) * Math.max(0, Math.min(n.y1, hb.y1) - Math.max(n.y0, hb.y0)), all = past.reduce((s, n) => s + (n.x1 - n.x0) * (n.y1 - n.y0), 0);
+      return all ? {share: past.reduce((s, n) => s + inter(n), 0) / all, blocked: T.tract().hintBlocked} : null; });
+    if (c) { cover.push(c.share); if (c.blocked) blocked++; } }
+  const meanCover = cover.reduce((s, x) => s + x, 0) / Math.max(1, cover.length);
+  assert(out.n > 150 && out.shown > 100 && !out.bad.length, `390 px, the demo sung through and paused after it (${out.n} frames, a hint in ${out.shown}): the hint beside the overlay whole and on no word, playhead or upcoming note ` + JSON.stringify(out.bad.slice(0, 8)));
+  assert(cover.length > 30 && meanCover <= .1, `390 px, paused: the hint covers ${(100 * meanCover).toFixed(1)} % of the bars of the notes sung in the last 2 s on average (${blocked} of ${cover.length} stops with no clear place)`);
+  await o.p.evaluate(() => window.Luma.test.closeTrace());
+  await done(o, '390 px hint while singing');
+}
+
+// 18 · ⓘ: the dialog with the honesty statement and its three lists; modal (the background inert), Esc closes it; and
+// without WebGL2 the flat cut face shows the zones too
+{
+  const o = await page(url, {settings: seeded('female')}); await ready(o.p);
+  await o.p.focus('#tractInfo'); await o.p.keyboard.press('Enter'); await o.p.waitForFunction(() => document.getElementById('tractDialog').open);
+  const d = await o.p.evaluate(() => { const g = document.getElementById('tractDialog'), r = g.getBoundingClientRect(); return {heads: [...g.querySelectorAll('h3')].map(h => h.textContent), text: g.textContent, modal: g.matches(':modal'), inside: r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight, focus: g.contains(document.activeElement)}; });
+  await o.p.mouse.click(5, 5); const still = await o.p.evaluate(() => document.getElementById('tractDialog').open);
+  await o.p.keyboard.press('Escape'); const closed = await o.p.evaluate(() => !document.getElementById('tractDialog').open);
+  assert(d.heads.join('|') === 'Модель Chimera|Навчальна схема|Не вимірюється' && /твій голос і твої м’язи вона не вимірює/.test(d.text) && /C3–E4/.test(d.text) && /A3–C♯5/.test(d.text) && d.modal && d.inside && d.focus && closed,
+    'ⓘ opens a modal dialog with the honesty statement and the three lists (the range named), focus inside it, Esc closes it ' + JSON.stringify({heads: d.heads, modal: d.modal, focus: d.focus, still, closed}));
+  await done(o, 'info dialog');
+
+  const g = await page(url, {settings: seeded('female'), init: () => { const f = HTMLCanvasElement.prototype.getContext; HTMLCanvasElement.prototype.getContext = function (kind, opt) { return kind === 'webgl2' ? null : f.call(this, kind, opt); }; }});
+  await ready(g.p);
+  const t = await g.p.evaluate(() => { const T = window.Luma.test.tractTimeline(), s = T.segs.find(s => s.sym === 's' && T.words[s.word]?.w === 'sa'); return (s.a + s.b) / 2; });
+  const s0 = await at(g.p, t); await g.p.waitForFunction(n => window.Luma.test.tract().painted > n, s0.painted, {timeout: 20000}).catch(() => {}); await frames(g.p, 3);
+  const r = await g.p.evaluate(() => { const c = document.querySelector('#tract canvas.tract-2d'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let amber = 0; for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 200 && Math.abs(d[i] - 211) < 14 && Math.abs(d[i + 1] - 184) < 14 && Math.abs(d[i + 2] - 143) < 14) amber++; const s = window.Luma.test.tract(); return {renderer: s.renderer, lit: s.lit, amber, labels: s.labels.length}; });
+  assert(r.renderer === '2d' && r.lit.includes('tongue') && r.amber > 60 && r.labels > 0, 'no WebGL2: the flat cut face shows the zones (their outline in the amber of the zones, ' + r.amber + ' px), and their labels ' + JSON.stringify(r));
+  await done(g, 'no WebGL2 zones');
 }
 
 if (process.env.LUMA_SHOT) { const o = await page(url, {settings: seeded('male')}); await ready(o.p); await at(o.p, 10.74); await o.p.screenshot({path: process.env.LUMA_SHOT}); await o.ctx.close(); }

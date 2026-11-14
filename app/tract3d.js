@@ -421,7 +421,7 @@ function painterSource() {
   // cut out (a hard edge there drew a square box over the folds)
   const LUMEN = 1.6, FADE = 1.1;
   const smooth = t => t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t);   // (this source runs in a worker too: nothing from outside it)
-  const CUT = {skin: '#e3b59c', fat: '#efd17c', muscle: '#a04442', deep: '#8c3d3c', bone: '#efe6d2', marrow: '#e2d2b4', cartilage: '#c4dcd6', brain: '#dcbcb6', brainFold: '#b98d8a', white: '#efe3d8', cord: '#ecdcae', tongue: '#b5484e', fibre: '#c8656b', mucosa: '#d4868a', enamel: '#f6f2e8', dentine: '#e8dcc0', hollow: '#3b1517', hair: '#80604a', strand: '#a8876b'};
+  const CUT = {skin: '#e3b59c', fat: '#efd17c', muscle: '#a04442', deep: '#8c3d3c', bone: '#efe6d2', marrow: '#e2d2b4', cartilage: '#c4dcd6', brain: '#dcbcb6', brainFold: '#b98d8a', white: '#efe3d8', cord: '#ecdcae', tongue: '#b5484e', fibre: '#c8656b', mucosa: '#d4868a', enamel: '#f6f2e8', dentine: '#e8dcc0', hollow: '#3b1517', hair: '#80604a', strand: '#a8876b', zone: '#d3b88f'};
   function offsetIn(pts, d) { const out = []; for (let i = 0; i < pts.length; i++) { const a = pts[Math.max(0, i - 2)], b = pts[Math.min(pts.length - 1, i + 2)], tx = b.x - a.x, ty = b.y - a.y, l = Math.hypot(tx, ty) || 1; out.push({x: pts[i].x - (ty / l) * d, y: pts[i].y + (tx / l) * d}); } return out; }
   function smoothOpen(pts, per = 8) { const n = pts.length, out = []; if (n < 3) return pts; for (let i = 0; i + 1 < n; i++) { const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(n - 1, i + 2)]; for (let s = 0; s < per; s++) { const t = s / per, t2 = t * t, t3 = t2 * t; out.push({x: .5 * (2 * p1.x + (p2.x - p0.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (3 * p1.x - p0.x - 3 * p2.x + p3.x) * t3), y: .5 * (2 * p1.y + (p2.y - p0.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (3 * p1.y - p0.y - 3 * p2.y + p3.y) * t3)}); } } out.push(pts[n - 1]); return out; }
   function smoothClosed(pts, per = 6) { const n = pts.length, out = []; for (let i = 0; i < n; i++) { const p0 = pts[(i + n - 1) % n], p1 = pts[i], p2 = pts[(i + 1) % n], p3 = pts[(i + 2) % n]; for (let s = 0; s < per; s++) { const t = s / per, t2 = t * t, t3 = t2 * t; out.push({x: .5 * (2 * p1.x + (p2.x - p0.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (3 * p1.x - p0.x - 3 * p2.x + p3.x) * t3), y: .5 * (2 * p1.y + (p2.y - p0.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (3 * p1.y - p0.y - 3 * p2.y + p3.y) * t3)}); } } return out; }
@@ -542,11 +542,13 @@ function painterSource() {
     for (const dy of [.45, .3, .15, 0, ...Array.from({length: 14}, (_, q) => (depth * (q + 1)) / 14)]) { ahead.push(G(wall(dy, 1), dy)); behind.push(G(wall(dy, -1), dy)); }
     fill([...smoothOpen(ahead.slice().reverse(), 4), ...smoothOpen(behind, 4)], CUT.hollow);
     stroke(smoothOpen(behind.map(p => ({x: p.x - .62 * k, y: p.y})).slice(3)), CUT.hollow, .09 * k);
-    fill(smoothClosed([G(F0 + .55, 1.75), G(F0 + .95, 1.5), G(F0 + 1.22, .6), G(F0 + 1.14, -.35), G(F0 + .82, -.55), G(F0 + .84, .3), G(F0 + .72, 1.1)]), CUT.cartilage);
-    fill(smoothClosed([G(wall(-.75, 1) + .2, -.7), G(wall(-.85, 1) + .62, -.85), G(wall(-1.3, 1) + .6, -1.3), G(wall(-1.4, 1) + .24, -1.42), G(wall(-1.1, 1) + .1, -1.1)]), CUT.cartilage);
+    // (the cartilages are kept: the larynx's zone lights them)
+    const cart = [];
+    cart.push(smoothClosed([G(F0 + .55, 1.75), G(F0 + .95, 1.5), G(F0 + 1.22, .6), G(F0 + 1.14, -.35), G(F0 + .82, -.55), G(F0 + .84, .3), G(F0 + .72, 1.1)])); fill(cart.at(-1), CUT.cartilage);
+    cart.push(smoothClosed([G(wall(-.75, 1) + .2, -.7), G(wall(-.85, 1) + .62, -.85), G(wall(-1.3, 1) + .6, -1.3), G(wall(-1.4, 1) + .24, -1.42), G(wall(-1.1, 1) + .1, -1.1)])); fill(cart.at(-1), CUT.cartilage);
     const rear = (dy, dx) => G(wall(dy, -1) + dx, dy);
-    fill(smoothClosed([rear(.5, -.1), rear(.05, -.06), rear(-.6, -.06), rear(-1.25, -.08), rear(-1.55, -.3), rear(-1.45, -.62), rear(-.6, -.58), rear(.15, -.48)]), CUT.cartilage);
-    fill(smoothClosed([rear(.48, -.12), rear(.85, -.08), rear(1.2, -.2), rear(.9, -.4), rear(.5, -.42)]), CUT.cartilage);
+    cart.push(smoothClosed([rear(.5, -.1), rear(.05, -.06), rear(-.6, -.06), rear(-1.25, -.08), rear(-1.55, -.3), rear(-1.45, -.62), rear(-.6, -.58), rear(.15, -.48)])); fill(cart.at(-1), CUT.cartilage);
+    cart.push(smoothClosed([rear(.48, -.12), rear(.85, -.08), rear(1.2, -.2), rear(.9, -.4), rear(.5, -.42)])); fill(cart.at(-1), CUT.cartilage);
     for (let q = 0; q < 6; q++) { const dy = -1.95 - q * .95; if (g.y + (dy - .6) * k < bounds.y0) break; const c = G(wall(dy - .25, 1) + .26, dy - .25); ctx.beginPath(); ctx.ellipse(X(c.x), Y(c.y), .19 * k * S, .3 * k * S, 0, 0, Math.PI * 2); ctx.fillStyle = CUT.cartilage; ctx.fill(); }
     const tongue = outline('tongue');
     if (tongue.length > 2) {
@@ -573,6 +575,33 @@ function painterSource() {
       ctx.save(); path(ctx, poly); ctx.clip(); ctx.globalAlpha = .55;
       for (let q = 1; q < 6; q++) { const f = q / 6, mix = o.map((p, i) => { const r = inn[Math.round((i * (inn.length - 1)) / Math.max(1, o.length - 1))]; return {x: r.x + (p.x - r.x) * f, y: r.y + (p.y - r.y) * f}; }); stroke(smoothOpen(mix, 3), CUT.strand, .035 * k); }
       ctx.globalAlpha = 1; ctx.restore();
+    }
+    // The engaged zones (§4.3): a warm tint over the painted tissue, its strength the zone's level, and an outline, each
+    // over a fixed region (the jaw: the chin's bone and the floor of the mouth down to the hyoid; the tongue's body, with
+    // the part raised brighter; the soft palate; the larynx's cartilages). Painted before the air is taken out, so the
+    // airway stays clear, and before the folds, which stay on top.
+    if (d.zones && d.zones.length) {
+      const region = {
+        jaw: () => [smoothClosed([J(7.65, 6.7), J(7.7, 5.3), J(7.3, 4.45), J(6.3, 4.2), J(4.4, 4.1), {x: hy.x + .55 * k, y: hy.y - .35 * k}, {x: hy.x + .35 * k, y: hy.y + .4 * k}, J(4.6, 5.15), J(6.0, 5.45), J(6.35, 6.6)], 4)],
+        tongue: () => [outline('tongue')],
+        velum: () => [smoothClosed(outline('velum'), 3)],
+        larynx: () => cart,
+      };
+      const line = (d.zoneLine || 2) / S;   // the outline's width in cm (d.zoneLine: texture pixels)
+      for (const z of d.zones) {
+        for (const pts of region[z.id]?.() || []) {
+          if (!pts || pts.length < 3) continue;
+          // inside the region: the tint (z.a, its strength from the zone's level) as a soft rim along the edge over a
+          // lighter wash, so the tissue under it still reads
+          ctx.save(); path(ctx, pts); ctx.clip();
+          ctx.globalAlpha = .45 * z.a; ctx.fillStyle = CUT.zone; ctx.fillRect(0, 0, W, H);
+          for (const [cm, f] of [[.7, .35], [.4, .5], [.18, .7]]) { ctx.globalAlpha = f * z.a; stroke(pts, CUT.zone, cm * k, true); }
+          // the part of the tongue that is raised: brighter around the narrowing
+          if (z.hot) { const c = {x: X(z.hot.x), y: Y(z.hot.y)}, r = 1.6 * k * S, gr = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, r); gr.addColorStop(0, CUT.zone); gr.addColorStop(1, 'rgba(211,184,143,0)'); ctx.globalAlpha = Math.min(1, z.a + .2); ctx.fillStyle = gr; ctx.fillRect(c.x - r, c.y - r, 2 * r, 2 * r); }
+          ctx.restore();
+          ctx.globalAlpha = Math.min(1, .6 + z.a); stroke(pts, CUT.zone, line, true); ctx.globalAlpha = 1;
+        }
+      }
     }
     // the air, by the lamina's rule (the envelope, less the tissue, plus the pockets), taken out of the painting
     mctx.setTransform(1, 0, 0, 1, 0, 0); mctx.globalCompositeOperation = 'source-over'; mctx.clearRect(0, 0, W, H); mctx.fillStyle = '#fff';
@@ -621,10 +650,10 @@ const scaleIn = (f, w, h) => Math.min(h / (2 * f.hh * 1.05), w / (2 * f.across *
 const wholeScale = (w, h) => scaleIn(frameFit(WHOLE, 8), w, h);
 // The input of one painting, flat (it crosses to the worker as a few typed arrays): the blended posture's points, the
 // posed skin's midline, the hair's band; unpack() turns it into the polygons the painter draws.
-function paintInput(body, p, front, back, scale) {
+function paintInput(body, p, front, back, scale, zones, zoneLine) {
   const s = p.sc;
   return {k: body.k, ph: body.ph, bounds: sectionBounds(body.k), scale, staticKey: body.tag + '|' + scale.toFixed(4), seg: SEG, pts: p.pts.slice(), front, back, band: body.hair.band,
-    glottis: {x: s[SC.glottisX], y: s[SC.glottisY]}, pivot: body.pivot, angle: s[SC.jawAngle], larynx: s[SC.larynx]};
+    glottis: {x: s[SC.glottisX], y: s[SC.glottisY]}, pivot: body.pivot, angle: s[SC.jawAngle], larynx: s[SC.larynx], zones, zoneLine};
 }
 function unpack(inp) {
   const pick = key => { const [o, m] = inp.seg[key], out = new Array(m); for (let i = 0; i < m; i++) out[i] = {x: inp.pts[2 * (o + i)], y: inp.pts[2 * (o + i) + 1]}; return out; };
@@ -833,6 +862,96 @@ function along(path, u, o) {
   return o;
 }
 
+// ── what engages (docs/design/VOCAL_TRACT_3D.md §4.3) ─────────────────────────────────────────────────────────────────
+// Four zones, each with a level from 0 to 1 and a word, read from the posture due now: the jaw (its opening over the
+// largest Chimera allows), the tongue (the part raised: where the airway is narrowest, how far it narrows from rest), the
+// soft palate (raised, or lowered for a nasal) and the larynx (the folds' state; the level from the target's place in the
+// body's range and the sound's larynx height). The shapes are Chimera's model; which zone lights and what the hint says
+// is a teaching illustration, and the panel's words say so.
+// The range a high or a low note is judged by: Chimera's keyboard for each body, its lowest key and the 16 above it
+// (src/ui/components/Keys.tsx: BASES male 48, female 57), C3–E4 and A3–C♯5; a teaching default, never the singer's own.
+const RANGE = {male: [48, 64], female: [57, 73]};
+// the largest jaw opening at the incisors Chimera's articulators allow, cm (crates/chimera/src/control/articulators.rs)
+const JAW_MAX = 2.6;
+// the airway's 24 area samples run from the glottis (0) to the lips (23): the pharynx (4–11) narrows when the tongue's
+// root draws back, the velar part (12–14) under its back, the palatal part (15–20) under its front (/y/, /ʎ/ and /ɲ/
+// narrow at 15); the samples at the teeth (21) and the lips belong to the lips, except for a tip between or behind the
+// teeth, read over 17–21
+const TONGUE_SPAN = [4, 20], TIP_SPAN = [17, 21], ROOT_END = 11, BACK_END = 14;
+// a zone counts as engaged (tinted and labelled) from these levels
+const ENGAGED = {jaw: .25, tongue: .3, velum: .5, larynx: .65};
+const ZONES = ['velum', 'tongue', 'jaw', 'larynx'];   // top to bottom in the head
+const ZONE_NAME = {jaw: 'Щелепа', tongue: 'Язик', velum: 'М’яке піднебіння', larynx: 'Гортань'};
+const TONGUE_WORD = {tip: 'кінчик угору', front: 'передня частина вгору', back: 'спинка вгору', root: 'корінь назад'};
+const FOLDS_WORD = {voiced: 'складки звучать', apart: 'складки розведені', shut: 'складки зімкнені'};
+function engage(b, p, air, m) {
+  const s = p.sc, rest = b.posture('rest').ar;
+  const jaw = clamp(s[SC.jaw] / JAW_MAX, 0, 1);
+  // the tip (template cm): raised to the ridge or the teeth, and not drawn back behind the ridge (as for /ʃ/)
+  const tip = s[SC.ttY] >= 8 && s[SC.ttX] >= 6, [a0, a1] = tip ? TIP_SPAN : TONGUE_SPAN;
+  let at = a0; for (let j = a0 + 1; j <= a1; j++) if (p.ar[j] < p.ar[at]) at = j;
+  const tongue = clamp(1 - p.ar[at] / Math.max(.05, rest[at]), 0, 1);
+  const part = tip ? 'tip' : at <= ROOT_END ? 'root' : at <= BACK_END ? 'back' : 'front';
+  const lowered = clamp((s[SC.velum] + .15) / .6, 0, 1), velum = 1 - .8 * lowered;
+  const folds = s[SC.closure] >= .5 ? 'shut' : air === 'rest' || s[SC.abduction] >= .2 ? 'apart' : 'voiced';
+  const [lo, hi] = RANGE[b.tag], pos = Number.isFinite(m) ? (m - lo) / (hi - lo) : null;
+  const larynx = clamp(.3 + (pos === null ? 0 : .55 * clamp(pos, 0, 1)) + .15 * clamp(s[SC.larynx] / 1.15, 0, 1), 0, 1);
+  return {
+    jaw: {level: jaw, word: jaw >= .5 ? 'відкрита' : jaw >= .25 ? 'напіввідкрита' : 'майже закрита'},
+    tongue: {level: tongue, part, at, word: TONGUE_WORD[part]},
+    velum: {level: velum, word: lowered > .5 ? 'опущене' : 'підняте'},
+    larynx: {level: larynx, folds, word: FOLDS_WORD[folds], pos: pos === null ? null : +pos.toFixed(3), m: Number.isFinite(m) ? m : null},
+  };
+}
+// One hint at a time, in plain words (§4.3): during a consonant, what makes it (its zone, or the lips); during a vowel,
+// the larynx on a high or a low note, else a clamp to avoid where one applies, else the tongue's place. Each hint names
+// the zones it lights; the short form stands where the panel is small.
+const HINTS = [
+  [['m', 'n', 'ŋ', 'ɲ'], ['velum'], 'М’яке піднебіння опущене: повітря йде носом', 'Піднебіння опущене: повітря йде носом'],
+  [['p', 'b'], [], 'Губи зімкнені'],
+  [['f', 'v', 'ʋ'], [], 'Нижня губа біля верхніх зубів'],
+  [['w'], [], 'Губи округлені вперед'],
+  [['θ', 'ð'], ['tongue'], 'Кінчик язика між зубами'],
+  [['s', 'z', 'ts'], ['tongue'], 'Кінчик язика біля ясен: вузька щілина для повітря', 'Кінчик язика біля ясен'],
+  [['t', 'd', 'l', 'r'], ['tongue'], 'Кінчик язика торкається ясен за верхніми зубами', 'Кінчик язика на яснах'],
+  [['ɹ'], ['tongue'], 'Спинка язика піднята, кінчик теж угору', 'Спинка й кінчик язика вгору'],
+  [['ʃ', 'ʒ', 'tʃ', 'dʒ'], ['tongue'], 'Язик піднятий за ясна, губи трохи вперед', 'Язик за ясна, губи вперед'],
+  [['j', 'ç', 'ʎ'], ['tongue'], 'Середина язика піднята до піднебіння', 'Середина язика вгору'],
+  [['k', 'g', 'x'], ['tongue'], 'Спинка язика піднята до м’якого піднебіння', 'Спинка язика вгору'],
+  [['h'], ['larynx'], 'Складки розведені: тихий видих'],
+  [['ɦ'], ['larynx'], 'Складки звучать із видихом'],
+  [['ʔ'], ['larynx'], 'Складки зімкнені: повітря зупинене'],
+];
+const CONS_HINT = new Map(); for (const [syms, zones, text, short] of HINTS) for (const c of syms) CONS_HINT.set(c, {zones, text, short: short || text, kind: 'sound'});
+const hint = (zones, kind, text, short = text) => ({zones, kind, text, short});
+function hintOf(seg, z, s) {
+  if (!seg || seg.kind === 'rest') return null;
+  if (seg.kind !== 'vowel') return CONS_HINT.get(plain(seg.sym)) || null;
+  const pos = z.larynx.pos;
+  if (pos !== null && pos > .8) return hint(['larynx'], 'high', 'Висока нота: складки тонші й натягнуті. Гортань не тягни вгору', 'Висока нота: гортань не тягни вгору');
+  if (pos !== null && pos < .15) return hint(['larynx'], 'low', 'Низька нота: не тисни гортань униз');
+  // the clamps (затиск) a singer learns to avoid: the jaw on a closed vowel high in the range, the tongue's root on a
+  // back vowel low in it, tight lips on a rounded vowel (the larynx rising on a high note is the high note's hint)
+  if (pos !== null && pos > .6 && z.jaw.level < .25) return hint(['jaw'], 'clamp', 'Не затискай щелепу: на високій ноті дай їй трохи опуститися', 'Не затискай щелепу');
+  if (pos !== null && pos < .35 && (z.tongue.part === 'back' || z.tongue.part === 'root') && z.tongue.level >= ENGAGED.tongue) return hint(['tongue'], 'clamp', 'Не затискай корінь язика: не тягни його назад', 'Не затискай корінь язика');
+  if (s[SC.lipProt] > .45 && s[SC.lipWidth] < .45) return hint([], 'clamp', 'Не затискай губи: округли їх м’яко');
+  const t = z.tongue;
+  if (t.level >= ENGAGED.tongue) {
+    if (t.part === 'root') return z.jaw.level >= .5 ? hint(['jaw', 'tongue'], 'shape', 'Щелепа відкрита, язик лежить низько') : hint(['tongue'], 'shape', 'Корінь язика трохи назад');
+    if (t.part === 'back') return hint(['tongue'], 'shape', 'Спинка язика піднята');
+    return hint(['tongue'], 'shape', 'Передня частина язика піднята до піднебіння', 'Передня частина язика вгору');
+  }
+  return z.jaw.level >= ENGAGED.jaw ? hint(['jaw'], 'shape', 'Щелепа ' + z.jaw.word + ', язик спокійний') : hint([], 'shape', 'Язик і щелепа спокійні');
+}
+// what a sound engages, away from the song: one body's posture for one symbol at a MIDI note (tests and the dialog)
+const STUDY = {};
+function study(tag, sym, m = null) {
+  const b = STUDY[tag] ??= makeBody(tag), p = b.posture(sym), kind = sym === 'rest' ? 'rest' : KIND.get(plain(sym));
+  const ab = p.sc[SC.abduction], air = kind === 'rest' ? 'rest' : kind === 'vowel' ? 'voiced' : kind === 'nasal' ? 'nasal' : kind === 'stop' ? 'closed' : ab >= .2 ? 'voiceless' : 'voiced';
+  const z = engage(b, p, air, m), h = hintOf({sym, kind}, z, p.sc);
+  return {zones: z, hint: h};
+}
+
 // ── the panel ────────────────────────────────────────────────────────────────────────────────────────────────────────
 const LABEL = {male: 'Чоловік', female: 'Жінка'};
 function attach(host) {
@@ -997,6 +1116,11 @@ function attach(host) {
     if (q.seg) q.tIn = (t - q.seg.a) / Math.max(1e-6, q.seg.b - q.seg.a);
     const air = airState(q, p);
     st.cur = {q, p, air};
+    // what engages, and the one hint (§4.3); the zones lit are those whose name stands on screen
+    const z = engage(b, p, air, host.pitch ? host.pitch(t) : null), hn = hintOf(q.seg, z, p.sc);
+    st.cur.zones = z; st.cur.hint = hn;
+    showHint(hn);
+    const lit = labels(b, p, z, hn); st.lit = lit;
     const dt = st.lastT === null ? 0 : clamp(t - st.lastT, 0, .1); st.lastT = t;
     const lines = stepAir(b, p, air, st.moving ? dt : 0, reduced);   // floats in airBuf
     st.lines = lines;
@@ -1004,7 +1128,14 @@ function attach(host) {
     const G = ensureGL(b), dpr = G?.software ? 1 : host.dpr(), w = Math.max(1, Math.round(st.box.w * dpr)), h = Math.max(1, Math.round(st.box.h * dpr));
     const sb = sectionBounds(b.k), texH = clamp(Math.round(h * 1.15 / 64) * 64, 384, 1024), texW = Math.round(texH * (sb.x1 - sb.x0) / (sb.y1 - sb.y0));
     if (st.tex.w !== texW || st.tex.h !== texH || st.tex.body !== b.tag) { st.tex = {w: texW, h: texH, body: b.tag}; painter.size(texW, texH); st.painted = null; }
-    let moved = !st.painted || st.painted.body !== b.tag;
+    // the zones' tints: each lit zone at 0.15 + 0.45 × its level; the outline 2 CSS px wide on screen
+    const dprNow = G?.software ? 1 : host.dpr(), texPerCm = texH / (sb.y1 - sb.y0);
+    const cssPerCm = st.proj ? Math.hypot(st.proj(0, 10)[0] - st.proj(0, 0)[0], st.proj(0, 10)[1] - st.proj(0, 0)[1]) / 10 / dprNow : h / dprNow / 30;
+    const zoneLine = +(2 * texPerCm / Math.max(1, cssPerCm)).toFixed(1); st.zoneLine = zoneLine;
+    // (a zone the hint names shows at least as a middling one: a clamp tip names a zone because it should not engage)
+    const zones = lit.map(id => ({id, a: +Math.max(.15 + .45 * z[id].level, hn?.zones.includes(id) ? .42 : 0).toFixed(2), hot: id === 'tongue' ? {x: +p.cl[2 * z.tongue.at].toFixed(2), y: +p.cl[2 * z.tongue.at + 1].toFixed(2)} : null}));
+    const zsig = zones.map(q => q.id + q.a + (q.hot ? q.hot.x + ',' + q.hot.y : '')).join('|') + '|' + zoneLine;
+    let moved = !st.painted || st.painted.body !== b.tag || st.painted.zsig !== zsig;
     if (!moved) { const a = st.painted.pts, c = p.pts; for (let i = 0; i < c.length; i++) if (Math.abs(a[i] - c[i]) > .02) { moved = true; break; } }
     // (while a painting is under way the next waits: the frame after it ends asks again with the posture of that frame)
     if (moved && painter.busy) { moved = false; st.paintWaiting = true; }
@@ -1012,9 +1143,9 @@ function attach(host) {
     const ka = keyframe(b, G, q.a), kb = q.w > 0 && q.b !== q.a ? keyframe(b, G, q.b) : ka; st.cur.outline = ka.outline;
     if (moved) {
       const oa = ka.outline, ob = kb.outline, w2 = kb === ka ? 0 : q.w, mixP = (u, v) => { const o = new Float32Array(u.length); for (let i = 0; i < u.length; i++) o[i] = u[i] + (v[i] - u[i]) * w2; return o; };
-      painter.request(paintInput(b, p, w2 ? mixP(oa.front, ob.front) : oa.front.slice(), w2 ? mixP(oa.back, ob.back) : oa.back.slice(), texH / (sb.y1 - sb.y0)));
+      painter.request(paintInput(b, p, w2 ? mixP(oa.front, ob.front) : oa.front.slice(), w2 ? mixP(oa.back, ob.back) : oa.back.slice(), texH / (sb.y1 - sb.y0), zones, zoneLine));
       if (!st.painted || st.painted.body !== b.tag) st.painted = {body: b.tag, pts: new Float32Array(2 * NP)};
-      st.painted.pts.set(p.pts); st.paintWaiting = false;
+      st.painted.pts.set(p.pts); st.painted.zsig = zsig; st.paintWaiting = false;
     }
     if (G) {
       drawGL(G, b, q, p, lines, ka, kb, w, h);
@@ -1023,6 +1154,7 @@ function attach(host) {
       for (let j = from + 1; j <= from + 2 && j < T.segs.length; j++) if (j >= 0) ahead(b, G, T.segs[j].sym);
     } else draw2D(b, p, lines, w, h);
     placeMark(b);
+    leads(b, p);
     const cap = caption(q); if (cap !== st.caption) { st.caption = cap; sound.textContent = cap; }
     const ms = performance.now() - t0; st.workMs.push(ms); if (st.workMs.length > 120) st.workMs.shift();
   }
@@ -1130,6 +1262,102 @@ function attach(host) {
     return '«' + i.w + '»' + (i.approx ? ' приблизно' : '') + '\n' + sounds;
   }
 
+  // ── what engages, in words: the hint, the zones' labels and their leader lines ──────────────────────────────────────
+  // The hint (app.js places its element: beside or under the caption in a tall column and in the enlarged head, along the
+  // bottom of a short column, beside the phone's small overlay) takes its short form where the panel is small. The labels stand in a tall column and in the enlarged head only, stacked in the room in front of the neck under
+  // the chin (where neither the lips nor the breath reach in any sound), each with a line to its zone, as many as fit; a
+  // zone is lit only while its name stands on screen (in a label or in the hint), so no zone is told by its colour alone.
+  const hintEl = host.hintEl || null, SVGNS = 'http://www.w3.org/2000/svg';
+  const zoneBox = document.createElement('div'); zoneBox.className = 'tract-zones';
+  const svg = document.createElementNS(SVGNS, 'svg'); svg.setAttribute('class', 'tract-leads'); zoneBox.append(svg);
+  const tags = {}, leadLine = {}, leadDot = {};
+  for (const id of ZONES) {
+    const t = document.createElement('span'); t.className = 'tract-zone'; t.dataset.zone = id; t.hidden = true; zoneBox.append(t); tags[id] = t;
+    const l = document.createElementNS(SVGNS, 'line'), c = document.createElementNS(SVGNS, 'circle'); c.setAttribute('r', '2.5');
+    l.style.display = c.style.display = 'none'; svg.append(l, c); leadLine[id] = l; leadDot[id] = c;
+  }
+  view.insertBefore(zoneBox, view.querySelector('.tract-pick'));
+  const compact = () => !!st.box && (st.box.mode === 'overlay' ? !!st.box.crop : !!st.box.tight);
+  function showHint(h) {
+    if (!hintEl) return;
+    const text = !h ? '' : compact() ? h.short : h.text;
+    if (text !== st.hintText) { st.hintText = text; hintEl.textContent = text; hintEl.dataset.kind = h?.kind || ''; }
+  }
+  // The room in front of the neck under the chin, in the view's CSS pixels, anchored on the view's bottom right: of the
+  // rectangles whose top lies under the level the lips and the breath never reach (UNDER_LIPS) and whose left edge clears
+  // the skin's front below that top (at rest and with the jaw at its widest, /ɑ/, and a margin for the far half's skin),
+  // the largest.
+  function corner(b) {
+    const x = st.box; if (!st.proj || !x) return null;
+    const key = (st.G ? st.camKey : '2d|' + !!x.crop + !!x.tight) + '|' + x.w + '|' + x.h + '|' + b.tag;
+    if (st.cornerKey === key) return st.corner;
+    const k = b.k, dpr = st.G?.software ? 1 : host.dpr(), front = ['rest', 'ɑ'].map(id => keyframe(b, null, id).outline.front);
+    let best = null;
+    for (let top = UNDER_LIPS * k; top > b.bottom; top -= .25 * k) {
+      let xs = -Infinity; for (const f of front) for (let i = 0; i < f.length; i += 2) if (f[i + 1] <= top + .2 * k) xs = Math.max(xs, f[i]);
+      const a = st.proj(xs + .6 * k, top), c = {x0: +(a[0] / dpr + 6).toFixed(1), y0: +(a[1] / dpr + 4).toFixed(1), x1: +(x.w - 6).toFixed(1), y1: +(x.h - 6).toFixed(1)};
+      const area = Math.max(0, c.x1 - c.x0) * Math.max(0, c.y1 - c.y0); if (!best || area > best.area) best = {...c, area};
+    }
+    st.cornerKey = key; if (best) delete best.area;
+    return (st.corner = best);
+  }
+  const labelText = (id, z) => id === 'jaw' ? 'Щелепа ' + z.jaw.word : id === 'velum' ? ZONE_NAME.velum + ' ' + z.velum.word : ZONE_NAME[id] + ': ' + z[id].word;
+  // → the zones to light: the hint's, and those whose label stands
+  function labels(b, p, z, h) {
+    const named = h ? h.zones : [], c = !compact() && st.box ? corner(b) : null;
+    let want = c ? ZONES.filter(id => z[id].level >= ENGAGED[id] && !named.includes(id)) : [];
+    const key = want.map(id => id + ':' + labelText(id, z)).join('|') + '|' + (c ? [c.x0, c.y0, c.x1, c.y1].join() : '');
+    if (key !== st.labelKey) {
+      st.labelKey = key;
+      const room = c ? c.x1 - c.x0 : 0, gap = 4;
+      for (const id of ZONES) { const on = want.includes(id); tags[id].hidden = !on; if (on) { tags[id].textContent = labelText(id, z); tags[id].style.maxWidth = room + 'px'; } }
+      // measured once per change: as many as fit in the room, the least engaged left out first
+      const size = {}; for (const id of want) size[id] = {w: tags[id].offsetWidth, h: tags[id].offsetHeight};
+      const fits = () => want.reduce((s, id) => s + size[id].h, 0) + gap * Math.max(0, want.length - 1) <= c.y1 - c.y0 && want.every(id => size[id].w <= room + .5);
+      // (the soft palate raised, as for every sound but a nasal, tells the least: it counts half)
+      const rank = id => id === 'velum' && z.velum.word === 'підняте' ? z.velum.level / 2 : z[id].level;
+      while (want.length && !fits()) { let low = want[0]; for (const id of want) if (rank(id) < rank(low)) low = id; want = want.filter(id => id !== low); tags[low].hidden = true; }
+      // stacked from the room's bottom, in the order whose lines to their zones cross the fewest times (top to bottom in
+      // the head on a tie)
+      const stack = order => { let y = c ? c.y1 : 0; const out = {}; for (const id of order.slice().reverse()) { y -= size[id].h; out[id] = {x0: c.x1 - size[id].w, y0: y, x1: c.x1, y1: y + size[id].h}; y -= gap; } return out; };
+      let best = want, bestN = Infinity;
+      if (want.length > 1 && st.proj) {
+        const dpr = st.G?.software ? 1 : host.dpr(), at = {}; for (const id of want) { const q = st.proj(...anchor(b, p, id, z)); at[id] = [q[0] / dpr, q[1] / dpr]; }
+        const cross = (a, b2, c2, d2) => { const o = (p1, p2, p3) => Math.sign((p2[0] - p1[0]) * (p3[1] - p1[1]) - (p2[1] - p1[1]) * (p3[0] - p1[0])); return o(a, b2, c2) * o(a, b2, d2) < 0 && o(c2, d2, a) * o(c2, d2, b2) < 0; };
+        const perms = a => a.length <= 1 ? [a] : a.flatMap((x, i) => perms([...a.slice(0, i), ...a.slice(i + 1)]).map(r => [x, ...r]));
+        for (const order of perms(want)) { const pl = stack(order), seg = order.map(id => [at[id], [pl[id].x0 - 2, (pl[id].y0 + pl[id].y1) / 2]]); let n = 0;
+          for (let i = 0; i < seg.length; i++) for (let j = i + 1; j < seg.length; j++) if (cross(seg[i][0], seg[i][1], seg[j][0], seg[j][1])) n++;
+          if (n < bestN) { bestN = n; best = order; } }
+      }
+      st.placed = stack(best);
+      for (const id of best) { tags[id].style.top = st.placed[id].y0.toFixed(1) + 'px'; tags[id].style.left = st.placed[id].x0.toFixed(1) + 'px'; }
+      st.shownLabels = best;
+    }
+    const shown = st.shownLabels || [];
+    return ZONES.filter(id => named.includes(id) || shown.includes(id));
+  }
+  // where each labelled zone's line ends: the soft palate's middle, the part of the tongue raised, the chin's bone, the
+  // larynx at the folds
+  function anchor(b, p, id, z) {
+    const k = b.k, s = p.sc, pick = key => { const [o, m] = SEG[key], out = []; for (let i = 0; i < m; i++) out.push([p.pts[2 * (o + i)], p.pts[2 * (o + i) + 1]]); return out; };
+    if (id === 'velum') { const v = pick('outline:velum'); return [v.reduce((a, q) => a + q[0], 0) / v.length, v.reduce((a, q) => a + q[1], 0) / v.length]; }
+    if (id === 'tongue') { const cx = p.cl[2 * z.tongue.at], cy = p.cl[2 * z.tongue.at + 1]; let best = null, bd = Infinity; for (const q of pick('outline:tongue')) { const d = (q[0] - cx) ** 2 + (q[1] - cy) ** 2; if (d < bd) { bd = d; best = q; } } return best; }
+    if (id === 'jaw') { const tx = (.5 + (6.85 - .5) * .86) * k, ty = 5.4 * k, a = s[SC.jawAngle], dx = tx - b.pivot.x, dy = ty - b.pivot.y; return [b.pivot.x + dx * Math.cos(a) - dy * Math.sin(a), b.pivot.y + dx * Math.sin(a) + dy * Math.cos(a)]; }
+    return [s[SC.glottisX] + .35 * k, s[SC.glottisY] + .45 * k];
+  }
+  function leads(b, p) {
+    const shown = st.shownLabels || [], z = st.cur?.zones, dpr = st.G?.software ? 1 : host.dpr();
+    for (const id of ZONES) {
+      const on = shown.includes(id) && !tags[id].hidden && !!st.proj && !!z, l = leadLine[id], c = leadDot[id];
+      if (!on) { if (l.style.display !== 'none') l.style.display = c.style.display = 'none'; continue; }
+      const [ax, ay] = anchor(b, p, id, z), q = st.proj(ax, ay), x = +(q[0] / dpr).toFixed(1), y = +(q[1] / dpr).toFixed(1), r = st.placed[id];
+      const ex = r.x0 - 2, ey = +((r.y0 + r.y1) / 2).toFixed(1), sig = x + ',' + y + ',' + ex + ',' + ey;
+      if (l.dataset.sig === sig && l.style.display !== 'none') continue;
+      l.dataset.sig = sig; l.style.display = c.style.display = '';
+      l.setAttribute('x1', x); l.setAttribute('y1', y); l.setAttribute('x2', ex); l.setAttribute('y2', ey); c.setAttribute('cx', x); c.setAttribute('cy', y);
+    }
+  }
+
   // a press anywhere on the panel is the panel's: it never scrubs the roll under it
   el.addEventListener('pointerdown', e => e.stopPropagation());
   // turning the head: a drag while idle, up to 60° either way; a double click returns to the side view
@@ -1166,7 +1394,11 @@ function attach(host) {
         word: cur?.q.info?.w ?? null, approx: !!cur?.q.info?.approx, sound: sound.textContent, painted: st.paintN, paintMs: +st.paintMs.toFixed(2), worker: painter.worker,
         software: !!(st.software || st.G?.software), workMs: st.workMs.slice(), buildMs: st.buildMs ?? null, yaw: st.yaw, outline: b ? outlineSummary(b) : null, particles: st.parts ? st.parts.map(q => +q.u.toFixed(5)) : [],
         crop: !!st.box?.crop, samples: st.G ? (st.G.ms ? st.G.samples : 0) : null, airOut: st.airOut ?? 0, streaks: Array.from({length: (st.lines || 0) / 6}, (_, i) => [+airBuf[6 * i + 3].toFixed(2), +airBuf[6 * i + 4].toFixed(2)]),
-        skinKeys: st.G?.body ? [...st.G.body.keys.keys()] : [], segments: st.tl ? st.tl.segs.length : 0, tight: !!st.box?.tight, mouthPx: p ? mouthPx(p) : null, face: p ? faceMarks() : null};
+        skinKeys: st.G?.body ? [...st.G.body.keys.keys()] : [], segments: st.tl ? st.tl.segs.length : 0, tight: !!st.box?.tight, mouthPx: p ? mouthPx(p) : null, face: p ? faceMarks() : null,
+        // what engages: each zone's level and word, the hint, the zones lit, the labels standing and the room they stand in
+        zones: cur?.zones ? Object.fromEntries(ZONES.map(id => [id, {...cur.zones[id], level: +cur.zones[id].level.toFixed(3)}])) : null,
+        hint: cur?.hint ? {...cur.hint} : null, hintText: hintEl ? hintEl.textContent : null, lit: st.lit ? st.lit.slice() : [],
+        labels: (st.shownLabels || []).filter(id => !tags[id].hidden).map(id => ({zone: id, text: tags[id].textContent})), corner: st.corner ? {...st.corner} : null, zoneLine: st.zoneLine ?? null};
     },
     timeline() { const b = body(); return b ? tl(b) : null; },
     close() { painter.close(); },
@@ -1222,5 +1454,5 @@ function attach(host) {
   function outlineSummary(b) { let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity; for (let i = 0; i < b.rest.length; i += 3) { x0 = Math.min(x0, b.rest[i]); x1 = Math.max(x1, b.rest[i]); y0 = Math.min(y0, b.rest[i + 1]); y1 = Math.max(y1, b.rest[i + 1]); } return {x0: +x0.toFixed(2), x1: +x1.toFixed(2), y0: +y0.toFixed(2), y1: +y1.toFixed(2)}; }
 }
 
-window.LumaTract = {attach, key, letterRules, syllables, timeline, LABEL, wholeScale};
+window.LumaTract = {attach, key, letterRules, syllables, timeline, LABEL, wholeScale, study, RANGE};
 })();
