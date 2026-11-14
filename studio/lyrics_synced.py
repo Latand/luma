@@ -74,26 +74,52 @@ def parse_lrc(text: str) -> list[dict]:
 
 
 def clock_offset(rows: list[dict], words: list[dict]) -> dict:
-    """Check three-word prefixes against ASR, independently of corrected word seeds.
+    """Check phrase occurrences against ASR, independently of corrected word seeds.
 
     Ordinary ASR latency is retained. Large, consistent offsets are reported and
     compensated. Distributed disagreement refuses an offset or a different edit.
     Retain each line's evidence, including outliers, for every placement branch.
     """
     norms = [al.norm(w['w']) for w in words]
-    prefixes = [tuple(al.norm(w) for w in r['tokens'][:3]) for r in rows]
+    phrases = [tuple(al.norm(w) for w in r['tokens']) for r in rows]
+    prefixes = [p[:3] for p in phrases]
+
+    def occurrences(phrase):
+        return [i for i in range(len(words) - len(phrase) + 1)
+                if tuple(norms[i:i + len(phrase)]) == phrase]
+
+    def contains(phrase, text):
+        return any(text[i:i + len(phrase)] == phrase for i in range(len(text) - len(phrase) + 1))
+
     by_occurrence = {}
     line_evidence = []
-    for row, prefix in zip(rows, prefixes):
-        if len(prefix) < 3:
+    for row, phrase, prefix in zip(rows, phrases, prefixes):
+        if not prefix:
             continue
-        occurrences = [i for i in range(len(words) - 2) if tuple(norms[i:i + 3]) == prefix]
-        if occurrences:
-            index = min(occurrences, key=lambda i: (abs(words[i]['a'] - row['a']), i))
+        clock_occurrences = occurrences(prefix)
+        # Extend a shared prefix through the first distinguishing word. Exact
+        # repeats still retain every occurrence. A fragment inside another line
+        # also needs distinguishing words before it identifies this line.
+        length = len(prefix)
+        while length < len(phrase) and any(p != phrase and contains(phrase[:length], p) for p in phrases):
+            length += 1
+        matches = occurrences(phrase[:length]) if length > len(prefix) else clock_occurrences
+        if clock_occurrences:
+            index = min(matches or clock_occurrences, key=lambda i: (abs(words[i]['a'] - row['a']), i))
             line_evidence.append({'line': row['line'], 'synced_time_s': row['a'],
                                   'asr_time_s': words[index]['a'], 'asr_delta_s': words[index]['a'] - row['a'],
-                                  'unambiguous': len(occurrences) == 1 and prefixes.count(prefix) == 1})
-        candidates = [(i, words[i]['a'] - row['a']) for i in occurrences
+                                  'unambiguous': len(matches) == 1 and sum(contains(phrase[:length], p) for p in phrases) == 1,
+                                  '_indices': matches, '_phrase': phrase[:length],
+                                  'occurrences': [{'asr_time_s': words[i]['a'],
+                                                   'asr_delta_s': words[i]['a'] - row['a']} for i in matches]})
+            if length > len(prefix):
+                # Preserve broad observations even when they identify only a
+                # different phrase. They still contribute to the global clock.
+                line_evidence[-1]['prefix_occurrences_s'] = [words[i]['a'] for i in clock_occurrences]
+        # Short lines supply veto evidence, but cannot validate the global clock.
+        if len(prefix) < 3:
+            continue
+        candidates = [(i, words[i]['a'] - row['a']) for i in clock_occurrences
                       if abs(words[i]['a'] - row['a']) <= MAX_CLOCK_OFFSET]
         if candidates:
             index, delta = min(candidates, key=lambda pair: (abs(pair[1]), pair[0]))
@@ -127,8 +153,27 @@ def clock_offset(rows: list[dict], words: list[dict]) -> dict:
     # timed line in the denominator, including short lines and missed ASR lines.
     validated = (share >= .5 and len(coherent) >= .8 * len(evidence)
                  and spread <= 1.0 and group_spread <= .75 and span >= .5)
+    explained_spans = []
+    for index, (other, delta) in by_occurrence.items():
+        if abs(delta - median) <= CLOCK_TOLERANCE or abs(delta - offset) <= START_TOLERANCE:
+            end = index
+            for token in other['tokens']:
+                if end >= len(norms) or norms[end] != al.norm(token):
+                    break
+                end += 1
+            explained_spans.append((index, end, other['line']))
     for match in line_evidence:
         match['residual_s'] = round(match['asr_delta_s'] - median, 3)
+        phrase = match.pop('_phrase')
+        for occurrence, index in zip(match['occurrences'], match.pop('_indices')):
+            occurrence['residual_s'] = round(occurrence['asr_delta_s'] - median, 3)
+            for lo, hi, owner_line in explained_spans:
+                if owner_line != match['line'] and lo <= index and index + len(phrase) <= hi:
+                    # A missed repeat cannot consume evidence already explained
+                    # by another coherently timed row. Keep that observation and
+                    # its owner; it supplies no negative evidence for this row.
+                    occurrence['explained_by_line'] = owner_line
+                    break
     return {'offset_s': round(offset, 3), 'phrase_matches': len(evidence),
             'line_evidence': line_evidence,
             'coherent_matches': len(coherent), 'timed_lines': len(timed),
@@ -269,12 +314,19 @@ def seed_sections(tokens: list[str], words: list[dict], ctx: dict, lrc: str,
         # Check before any voice branch can discard or overwrite known times.
         # Allow ASR near the compensated timestamp or its normal latency; an
         # early ASR estimate within the onset tolerance is not a contradiction
-        # merely because the song-wide median is positive. Repeats are ambiguous.
+        # merely because the song-wide median is positive. Ambiguity alone cannot
+        # waive unexplained negative evidence for a repeated phrase.
+        # Short fragments also occur inside unrelated phrases. Their complete
+        # one-/two-word match identifies a line only when it is unique.
         match = row['clock_evidence']
-        if (match and match['unambiguous'] and abs(match['residual_s']) > CLOCK_TOLERANCE
-                and abs(match['asr_time_s'] - lo) > START_TOLERANCE):
-            fail(row, f"phrase evidence contradicts timestamp: unique ASR occurrence at "
-                 f"{match['asr_time_s']:.2f}s; clock residual {match['residual_s']:+.3f}s")
+        identified = match and (len(row['tokens']) >= 3 or match['unambiguous'])
+        known = [m for m in match['occurrences'] if 'explained_by_line' not in m] if identified else []
+        if known and all(abs(m['residual_s']) > CLOCK_TOLERANCE
+                         and abs(m['asr_time_s'] - lo) > START_TOLERANCE for m in match['occurrences']):
+            closest = min(known, key=lambda m: (abs(m['asr_time_s'] - lo), m['asr_time_s']))
+            fail(row, f"phrase evidence contradicts timestamp: closest ASR occurrence at "
+                 f"{closest['asr_time_s']:.2f}s; clock residual {closest['residual_s']:+.3f}s; "
+                 f"all {len(known)} known occurrences conflict")
         next_row = next((r for r in bounds if r['a'] > lo), None)
         hi = next_row['a'] if next_row else ctx['duration']
         end = sung[k + 1]['index'] if k + 1 < len(sung) else len(tokens)
