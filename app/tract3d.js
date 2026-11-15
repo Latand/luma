@@ -30,7 +30,7 @@
 // build time by studio/phonemes.py) or, for a word missing there, from letter rules here, marked «приблизно». The sounds
 // are laid on the target's notes and words, so the head shows the target only, never the microphone.
 //
-// LumaTract.attach(host) → panel. host: {el, song(), reduced(), dpr(), idle(), body(), setBody(tag), wake()}.
+// LumaTract.attach(host) → panel. host: {el, song(), noteEligible(note), octave(), reduced(), dpr(), idle(), body()}.
 //   panel.layout(box)      {mode: 'column' | 'overlay', w, h, crop}: the panel's size in CSS pixels
 //   panel.frame(t)         draw the head for song time t (the trainer's tick calls it while the panel shows)
 //   panel.song()           the song's words or notes changed
@@ -129,18 +129,19 @@ function syllables(str) {
 // docs/design/VOCAL_TRACT_3D.md §4.5 «Timing», after Chimera's sung rules (crates/chimera/src/phonetics/sing.rs): the
 // vowel lands on the note, onset consonants end at its start, codas end at the next onset (or with the note before a
 // rest); a word with fewer notes than syllables splits its span evenly; a diphthong holds its first vowel 80 % of the time.
-// After a rest (or at the start), an onset shorter than HOLD takes its closure up earlier, out of the silence before the
+// Words follow target notes beyond short recognition marks. With fewer notes than syllables, divide that
+// held span. After a rest (or at the start), an onset shorter than HOLD takes its closure up earlier, out of the silence before the
 // note, so it lasts long enough to be seen while the song plays: at Chimera's 55 ms an /m/ is three frames. The vowel
 // still lands on the note.
-const RAMP = {vowel: .06, cons: .03, rest: .15}, REST_GAP = .25, MIN_VOWEL = .4, HOLD = .18;
-function timeline(song, phones, dur) {
-  const notes = (song.notes || []).filter(n => !n.ignored).slice().sort((a, b) => a.a - b.a);
+const RAMP = {vowel: .15, cons: .025, rest: .3}, REST_GAP = .25, MIN_VOWEL = .4, HOLD = .18;
+function timeline(song, phones, dur, eligible = () => true) {
+  const notes = (song.notes || []).filter(n => !n.ignored && eligible(n)).slice().sort((a, b) => a.a - b.a);
   const words = [];
   for (const line of song.lyrics || []) for (const w of line.words || []) if (Number.isFinite(w.a) && Number.isFinite(w.b) && w.b > w.a) words.push(w);
   words.sort((a, b) => a.a - b.a);
   const segs = [], info = [];
   let reach = -Infinity;   // where the sounds laid so far end
-  const durOf = s => Math.max(.035, dur(plain(s)));
+  const durOf = s => Math.max(.07, dur(plain(s)));
   words.forEach((w, wi) => {
     const k = key(w.w);
     let str = phones && Object.prototype.hasOwnProperty.call(phones, k) ? phones[k] : null, approx = !str || (w.c ?? 1) < .5, silent = false;
@@ -150,16 +151,26 @@ function timeline(song, phones, dur) {
     if (!syl.length) { syl = [{onset: [], nucleus: ['ə'], coda: []}]; approx = true; silent = true; }
     info.push({w: w.w, key: k, approx, silent, phones: syl.map(s => [...s.onset, s.nucleus.join('+'), ...s.coda].join(' ')).join(' · ')});
     const next = words[wi + 1];
-    const own = notes.filter(n => n.a < w.b && n.b > w.a);
+    // Recognition marks locate a word's start. Own the following target notes until the next word.
+    const limit = next ? next.a : Infinity;
+    const own = [];
+    let end = w.a;
+    for (const n of notes) {
+      if (n.b <= w.a) continue;
+      if (n.a >= limit) break;
+      own.push(n); end = Math.min(n.b, limit);
+    }
+    if (!own.length) return; // target silence, including ignored notes and excluded wordless chains
+    const heldStart = Math.max(w.a, own[0].a), heldEnd = end;
     let spans;
     if (own.length >= syl.length) {
-      spans = syl.map((_, i) => [Math.max(own[i].a, w.a - .15), i === syl.length - 1 ? own.at(-1).b : own[i].b]);
+      spans = syl.map((_, i) => [Math.max(own[i].a, w.a), i === syl.length - 1 ? own.at(-1).b : own[i].b]);
     } else {
-      const L = (w.b - w.a) / syl.length; spans = syl.map((_, i) => [w.a + i * L, w.a + (i + 1) * L]);
+      const L = (heldEnd - heldStart) / syl.length; spans = syl.map((_, i) => [heldStart + i * L, heldStart + (i + 1) * L]);
     }
     if (next) for (const sp of spans) sp[1] = Math.min(sp[1], next.a);
     syl.forEach((s, si) => {
-      let [sa, sb] = spans[si]; if (sb <= sa) sb = sa + .05;
+      const [sa, sb] = spans[si]; if (sb <= sa) return;
       const base = {word: wi, approx};
       // onset: backwards from the note's start, never into the previous vowel's first 40 %
       const prevV = segs.findLast(g => g.kind === 'vowel');
@@ -179,6 +190,9 @@ function timeline(song, phones, dur) {
         for (const g of codas) { const d = (g.b - g.a) * f; g.a = start; g.b = start + d; start = g.b; }
         if (vow && codas.length) vow.b = Math.min(vow.b, codas[0].a);
       }
+      // Trim before splitting on target silences: otherwise a sliver of the previous vowel can reappear inside
+      // this onset after a gap, shortening the consonant and briefly restoring the old word's caption.
+      if (prevV && prevV.b > t) prevV.b = Math.max(prevV.a, t);
       for (const c of s.onset) { const d = durOf(c) * scale; segs.push({sym: c, a: t, b: t + d, kind: KIND.get(plain(c)), ...base}); t += d; }
       // the nucleus to the end of the syllable, its coda at the end of the note
       const coda = s.coda.reduce((q, c) => q + durOf(c), 0), vEnd = Math.max(sa + MIN_VOWEL * (sb - sa), sb - coda);
@@ -191,10 +205,20 @@ function timeline(song, phones, dur) {
       reach = Math.max(reach, ct, vEnd);
     });
   });
-  // gaps: a short one holds the last sound, a long one relaxes to rest
-  segs.sort((p, q) => p.a - q.a);
+  // Keep real silences inside a melisma. Anticipated consonants keep their lead-in before a note.
+  const gaps = notes.slice(1).flatMap((n, i) => n.a - notes[i].b > .04 ? [{a: notes[i].b, b: n.a}] : []);
+  const voiced = segs.flatMap(g => {
+    if (g.kind !== 'vowel') return [g];
+    let pieces = [g];
+    for (const gap of gaps) if (gap.a < g.b && gap.b > g.a) pieces = pieces.flatMap(p =>
+      gap.a >= p.b || gap.b <= p.a ? [p] : [
+        ...(gap.a > p.a ? [{...p, b: gap.a}] : []), ...(gap.b < p.b ? [{...p, a: gap.b}] : [])]);
+    return pieces;
+  });
+  // Silence relaxes to rest; the final sound gets the same release as an interior gap.
+  voiced.sort((p, q) => p.a - q.a);
   const out = [];
-  for (const g of segs) {
+  for (const g of voiced) {
     if (g.b <= g.a) continue;
     const prev = out.at(-1);
     if (prev) {
@@ -204,7 +228,9 @@ function timeline(song, phones, dur) {
     }
     out.push(g);
   }
-  return {segs: out, words: info};
+  const last = out.at(-1);
+  if (last) out.push({sym: 'rest', a: last.b, b: last.b + RAMP.rest, kind: 'rest', word: -1});
+  return {segs: out, words: info, notes};
 }
 function segAt(segs, t) { let lo = 0, hi = segs.length; while (lo < hi) { const m = (lo + hi) >> 1; if (segs[m].a <= t) lo = m + 1; else hi = m; } return lo - 1; }
 
@@ -395,7 +421,7 @@ function makeBody(tag) {
   // the skin's midline for the cut (front: neck → chin → lower lip; back: upper lip → crown → neck), from a posed buffer
   const outline = buf => { const flat = ids => { const o = new Float32Array(2 * ids.length); ids.forEach((i, j) => { o[2 * j] = buf[6 * i]; o[2 * j + 1] = buf[6 * i + 1]; }); return o; }; return {front: flat(sh.midFront), back: flat(sh.midBack)}; };
   let bottom = Infinity; for (let i = 1; i < rest.length; i += 3) bottom = Math.min(bottom, rest[i]);
-  return {tag, k, ph: B.pharynx, pivot: {x: B.pivot[0], y: B.pivot[1]}, jawRest: B.jawRest, n, rest, bottom, far: Uint32Array.from(far), colors, posture, pose, outline, dur: scale,
+  return {tag, k, ph: B.pharynx, pivot: {x: B.pivot[0], y: B.pivot[1]}, jawRest: B.jawRest, jawWeights: jaw, outlineWeights: {front: Float32Array.from(sh.midFront, i => jaw[i]), back: Float32Array.from(sh.midBack, i => jaw[i])}, n, rest, bottom, far: Uint32Array.from(far), colors, posture, pose, outline, dur: scale,
     hair: {pos: hpos, nrm: hnrm, tan: htan, far: Uint32Array.from(hfar), n: hn, band}, still, nose,
     // the air comes up from the trachea where the neck is cut
     neck: Math.max(rest[3 * sh.midFront[0] + 1], rest[3 * sh.midBack[sh.midBack.length - 1] + 1]) + .2 * k};
@@ -542,11 +568,14 @@ function painterSource() {
     for (const dy of [.45, .3, .15, 0, ...Array.from({length: 14}, (_, q) => (depth * (q + 1)) / 14)]) { ahead.push(G(wall(dy, 1), dy)); behind.push(G(wall(dy, -1), dy)); }
     fill([...smoothOpen(ahead.slice().reverse(), 4), ...smoothOpen(behind, 4)], CUT.hollow);
     stroke(smoothOpen(behind.map(p => ({x: p.x - .62 * k, y: p.y})).slice(3)), CUT.hollow, .09 * k);
-    fill(smoothClosed([G(F0 + .55, 1.75), G(F0 + .95, 1.5), G(F0 + 1.22, .6), G(F0 + 1.14, -.35), G(F0 + .82, -.55), G(F0 + .84, .3), G(F0 + .72, 1.1)]), CUT.cartilage);
-    fill(smoothClosed([G(wall(-.75, 1) + .2, -.7), G(wall(-.85, 1) + .62, -.85), G(wall(-1.3, 1) + .6, -1.3), G(wall(-1.4, 1) + .24, -1.42), G(wall(-1.1, 1) + .1, -1.1)]), CUT.cartilage);
-    const rear = (dy, dx) => G(wall(dy, -1) + dx, dy);
-    fill(smoothClosed([rear(.5, -.1), rear(.05, -.06), rear(-.6, -.06), rear(-1.25, -.08), rear(-1.55, -.3), rear(-1.45, -.62), rear(-.6, -.58), rear(.15, -.48)]), CUT.cartilage);
-    fill(smoothClosed([rear(.48, -.12), rear(.85, -.08), rear(1.2, -.2), rear(.9, -.4), rear(.5, -.42)]), CUT.cartilage);
+    // Keep this section visible over the skin's thick cut edge and the airway mask below.
+    const larynxSection = () => {
+      fill(smoothClosed([G(F0 + .55, 1.75), G(F0 + .95, 1.5), G(F0 + 1.22, .6), G(F0 + 1.14, -.35), G(F0 + .82, -.55), G(F0 + .84, .3), G(F0 + .72, 1.1)]), CUT.cartilage);
+      fill(smoothClosed([G(wall(-.75, 1) + .2, -.7), G(wall(-.85, 1) + .62, -.85), G(wall(-1.3, 1) + .6, -1.3), G(wall(-1.4, 1) + .24, -1.42), G(wall(-1.1, 1) + .1, -1.1)]), CUT.cartilage);
+      const rear = (dy, dx) => G(wall(dy, -1) + dx, dy);
+      fill(smoothClosed([rear(.5, -.1), rear(.05, -.06), rear(-.6, -.06), rear(-1.25, -.08), rear(-1.55, -.3), rear(-1.45, -.62), rear(-.6, -.58), rear(.15, -.48)]), CUT.cartilage);
+      fill(smoothClosed([rear(.48, -.12), rear(.85, -.08), rear(1.2, -.2), rear(.9, -.4), rear(.5, -.42)]), CUT.cartilage);
+    };
     for (let q = 0; q < 6; q++) { const dy = -1.95 - q * .95; if (g.y + (dy - .6) * k < bounds.y0) break; const c = G(wall(dy - .25, 1) + .26, dy - .25); ctx.beginPath(); ctx.ellipse(X(c.x), Y(c.y), .19 * k * S, .3 * k * S, 0, 0, Math.PI * 2); ctx.fillStyle = CUT.cartilage; ctx.fill(); }
     const tongue = outline('tongue');
     if (tongue.length > 2) {
@@ -589,13 +618,14 @@ function painterSource() {
     const fade = mctx.createLinearGradient(0, low, 0, full + 1e-3); fade.addColorStop(0, 'rgba(0,0,0,0)'); fade.addColorStop(1, '#000');
     mctx.globalCompositeOperation = 'destination-out'; mctx.fillStyle = fade; mctx.fillRect(0, low, W, H - low); mctx.globalCompositeOperation = 'source-over';
     ctx.globalCompositeOperation = 'destination-out'; ctx.drawImage(mctx.canvas, 0, 0); ctx.globalCompositeOperation = 'source-over';
+    ctx.save(); path(ctx, head); ctx.clip(); larynxSection(); ctx.restore();
     // The folds, seen on the far wall of the cut larynx: a pale band across the airway at the glottis between the thyroid
     // in front and the arytenoid behind, and the ventricular fold above it, the ventricle a dark slit between them.
     const band = (dy, top, bottom, inset) => { const up = [], down = [];
-      for (let q = 0; q <= 8; q++) { const u = q / 8, x = (B0 + inset) + (F0 - inset - (B0 + inset)) * u, bulge = Math.sin(Math.PI * u) ** .6; up.push(G(x, dy + top * (.6 + .4 * bulge))); down.push(G(x, dy - bottom * (.6 + .4 * bulge))); }
+      for (let q = 0; q <= 8; q++) { const u = q / 8, mid = (B0 + F0) / 2, x = mid + ((B0 + inset) + (F0 - inset - (B0 + inset)) * u - mid) * (d.foldLength || 1), bulge = Math.sin(Math.PI * u) ** .6; up.push(G(x, dy + top * (.6 + .4 * bulge))); down.push(G(x, dy - bottom * (.6 + .4 * bulge))); }
       return smoothClosed([...up, ...down.reverse()], 3); };
     fill(band(.6, .08, .07, .02), CUT.mucosa);
-    fill(band(.04, .15, .12, -.01), CUT.white);
+    fill(band(.04, .15 * (d.foldThickness || 1), .12 * (d.foldThickness || 1), -.01), CUT.white);
   }
   return {paint, CUT};
 }
@@ -623,8 +653,14 @@ const wholeScale = (w, h) => scaleIn(frameFit(WHOLE, 8), w, h);
 // posed skin's midline, the hair's band; unpack() turns it into the polygons the painter draws.
 function paintInput(body, p, front, back, scale) {
   const s = p.sc;
+  for (const [points, weights] of [[front, body.outlineWeights.front], [back, body.outlineWeights.back]]) {
+    for (let i = 0; i < weights.length; i++) {
+      const angle = p.jawPitch * weights[i], c = Math.cos(angle), sn = Math.sin(angle), x = points[2 * i] - body.pivot.x, y = points[2 * i + 1] - body.pivot.y;
+      points[2 * i] = body.pivot.x + x * c - y * sn; points[2 * i + 1] = body.pivot.y + x * sn + y * c;
+    }
+  }
   return {k: body.k, ph: body.ph, bounds: sectionBounds(body.k), scale, staticKey: body.tag + '|' + scale.toFixed(4), seg: SEG, pts: p.pts.slice(), front, back, band: body.hair.band,
-    glottis: {x: s[SC.glottisX], y: s[SC.glottisY]}, pivot: body.pivot, angle: s[SC.jawAngle], larynx: s[SC.larynx]};
+    glottis: {x: s[SC.glottisX], y: s[SC.glottisY]}, pivot: body.pivot, angle: s[SC.jawAngle], larynx: s[SC.larynx], foldLength: p.foldLength, foldThickness: p.foldThickness};
 }
 function unpack(inp) {
   const pick = key => { const [o, m] = inp.seg[key], out = new Array(m); for (let i = 0; i < m; i++) out[i] = {x: inp.pts[2 * (o + i)], y: inp.pts[2 * (o + i) + 1]}; return out; };
@@ -769,9 +805,10 @@ function target(G, w, h) {
 // what one body needs on the GPU: the skin's colours and far-half triangles, the hair, the parts behind the cut
 function uploadBody(G, body) {
   const {gl, buf} = G;
+  if (G.body) gl.deleteBuffer(G.body.skinJaw);
   const interleave = (pos, nrm, n) => { const b = new Float32Array(6 * n); for (let i = 0; i < n; i++) { b.set(pos.subarray(3 * i, 3 * i + 3), 6 * i); b.set(nrm.subarray(3 * i, 3 * i + 3), 6 * i + 3); } return b; };
   const h = body.hair, hc = new Float32Array(3 * h.n); for (let i = 0; i < h.n; i++) hc.set(HAIR, 3 * i);
-  G.body = {tag: body.tag, skinCol: buf(body.colors), skinIdx: buf(body.far, gl.ELEMENT_ARRAY_BUFFER), skinCount: body.far.length,
+  G.body = {tag: body.tag, skinCol: buf(body.colors), skinJaw: buf(body.jawWeights), skinIdx: buf(body.far, gl.ELEMENT_ARRAY_BUFFER), skinCount: body.far.length,
     hair: buf(interleave(h.pos, h.nrm, h.n)), hairTan: buf(h.tan), hairCol: buf(hc), hairIdx: buf(h.far, gl.ELEMENT_ARRAY_BUFFER), hairCount: h.far.length,
     still: buf(interleave(body.still.pos, body.still.nrm, body.still.pos.length / 3)), stillCol: buf(body.still.col), stillJaw: buf(body.still.jaw), stillIdx: buf(body.still.idx, gl.ELEMENT_ARRAY_BUFFER), stillCount: body.still.idx.length,
     keys: new Map()};
@@ -880,9 +917,9 @@ function attach(host) {
   function tl(b) {
     const song = host.song(), sig = b.tag + '|' + (song.lyrics?.length || 0) + '|' + (song.notes?.length || 0) + '|' + (song.notes?.[0]?.a ?? '') + '|' + st.songRev;
     if (st.tl && st.tlKey === sig) return st.tl;
-    st.tl = timeline(song, window.LUMA_PHONES?.words || null, s => b.posture(s).sc[SC.dur]); st.tlKey = sig; return st.tl;
+    st.tl = timeline(song, window.LUMA_PHONES?.words || null, s => b.posture(s).sc[SC.dur], host.noteEligible); st.tlKey = sig; return st.tl;
   }
-  // the posture due at t: the current sound, cross-faded in from the one before (a raised cosine)
+  // The posture due at t: ease in from the preceding sound, completing before the next sound starts.
   function postureAt(b, t) {
     const T = tl(b), i = segAt(T.segs, t), g = i >= 0 && t < T.segs[i].b ? T.segs[i] : null;
     if (!g) return {a: 'rest', b: 'rest', w: 0, seg: null, info: null};
@@ -911,9 +948,46 @@ function attach(host) {
   const mixed = {pts: new Float32Array(2 * NP), sc: new Float32Array(NS), cl: new Float32Array(2 * NC), ar: new Float32Array(NC)};
   function blended(b, q) {
     const A = b.posture(q.a), Bp = b.posture(q.b), w = q.a === q.b ? 0 : q.w;
-    if (!w) return A;
     for (const key of ['pts', 'sc', 'cl', 'ar']) { const x = A[key], y = Bp[key], o = mixed[key]; for (let i = 0; i < o.length; i++) o[i] = x[i] + (y[i] - x[i]) * w; }
     return mixed;
+  }
+  // A playhead-time envelope, independent of draw order, pauses and frame rate. Notes are indexed once with tl().
+  function pitchAt(b, t) {
+    const notes = tl(b).notes, i = segAt(notes, t), n = notes[i];
+    if (!n) return .5;
+    const lo = b.tag === 'female' ? 57 : 48, norm = m => clamp((m + (host.octave?.() || 0) - lo) / 16, 0, 1);
+    const released = (note, time) => .5 + (norm(note.m) - .5) * (1 - smooth((time - note.b) / RAMP.rest));
+    if (t >= n.b) return notes[i + 1] && notes[i + 1].a - n.b <= .04 ? norm(n.m) : released(n, t);
+    const prev = notes[i - 1], f = smooth((t - n.a) / Math.min(.15, n.b - n.a));
+    const from = prev ? (n.a - prev.b <= .04 ? norm(prev.m) : released(prev, n.a)) : .5;
+    return from + (norm(n.m) - from) * f;
+  }
+  function tune(b, p, q, t) {
+    // Release pitch through silence independently of the sound: an anticipated consonant can begin in that silence.
+    const pitch = pitchAt(b, t);
+    const lift = (pitch - .5) * 1.4 * b.k;
+    const gy = p.sc[SC.glottisY];
+    // Move the glottis and neighbouring tube/tissue continuously, tapering to the stationary upper pharynx.
+    for (const key of ['pts', 'cl']) for (let i = 1; i < p[key].length; i += 2) {
+      const y = p[key][i], weight = clamp(1 - Math.abs(y - gy) / (5 * b.k), 0, 1);
+      p[key][i] += lift * weight;
+    }
+    p.sc[SC.glottisY] += lift;
+    p.sc[SC.larynx] += lift / (.6 * b.k);
+    const vowel = (VOWELS.has(plain(q.a)) ? 1 - q.w : 0) + (VOWELS.has(plain(q.b)) ? q.w : 0);
+    p.jawPitch = -.035 * pitch * vowel;
+    p.sc[SC.jaw] += .08 * pitch * vowel; p.sc[SC.jawAngle] += p.jawPitch;
+    // The lower mouth follows the extra jaw angle, on the cut as well as on the skin's existing jaw rig.
+    const c = Math.cos(p.jawPitch), sn = Math.sin(p.jawPitch);
+    for (const key of ['lips:lower', 'tissue:lowerLip', 'outline:lowerTeeth', 'outline:jawBone']) {
+      const [offset, count] = SEG[key];
+      for (let i = offset; i < offset + count; i++) { const dx = p.pts[2 * i] - b.pivot.x, dy = p.pts[2 * i + 1] - b.pivot.y;
+        p.pts[2 * i] = b.pivot.x + dx * c - dy * sn; p.pts[2 * i + 1] = b.pivot.y + dx * sn + dy * c; }
+    }
+    const tx = p.sc[SC.lowTeethX] - b.pivot.x, ty = p.sc[SC.lowTeethY] - b.pivot.y;
+    p.sc[SC.lowTeethX] = b.pivot.x + tx * c - ty * sn; p.sc[SC.lowTeethY] = b.pivot.y + tx * sn + ty * c;
+    p.pitch = pitch; p.foldLength = 1 + .25 * (pitch - .5); p.foldThickness = 1 - .5 * (pitch - .5);
+    return p;
   }
   function airState(q, p) {
     const g = q.seg; if (!g || g.kind === 'rest') return 'rest';
@@ -993,7 +1067,7 @@ function attach(host) {
     const b = body();
     if (!b || !st.shown || !st.box || document.hidden) return;
     st.frames++;
-    const t0 = performance.now(), q = postureAt(b, t), p = blended(b, q), reduced = host.reduced();
+    const t0 = performance.now(), q = postureAt(b, t), p = tune(b, blended(b, q), q, t), reduced = host.reduced();
     if (q.seg) q.tIn = (t - q.seg.a) / Math.max(1e-6, q.seg.b - q.seg.a);
     const air = airState(q, p);
     st.cur = {q, p, air};
@@ -1004,17 +1078,18 @@ function attach(host) {
     const G = ensureGL(b), dpr = G?.software ? 1 : host.dpr(), w = Math.max(1, Math.round(st.box.w * dpr)), h = Math.max(1, Math.round(st.box.h * dpr));
     const sb = sectionBounds(b.k), texH = clamp(Math.round(h * 1.15 / 64) * 64, 384, 1024), texW = Math.round(texH * (sb.x1 - sb.x0) / (sb.y1 - sb.y0));
     if (st.tex.w !== texW || st.tex.h !== texH || st.tex.body !== b.tag) { st.tex = {w: texW, h: texH, body: b.tag}; painter.size(texW, texH); st.painted = null; }
-    let moved = !st.painted || st.painted.body !== b.tag;
+    let moved = !st.painted || st.painted.body !== b.tag || Math.abs((st.painted.pitch ?? .5) - p.pitch) > .01;
     if (!moved) { const a = st.painted.pts, c = p.pts; for (let i = 0; i < c.length; i++) if (Math.abs(a[i] - c[i]) > .02) { moved = true; break; } }
     // (while a painting is under way the next waits: the frame after it ends asks again with the posture of that frame)
-    if (moved && painter.busy) { moved = false; st.paintWaiting = true; }
+    st.paintWaiting = moved && painter.busy;
+    if (st.paintWaiting) moved = false;
     // the skin: each keyframe posed once (its buffer on the GPU, eight at most; its midline kept here) and blended
     const ka = keyframe(b, G, q.a), kb = q.w > 0 && q.b !== q.a ? keyframe(b, G, q.b) : ka; st.cur.outline = ka.outline;
     if (moved) {
       const oa = ka.outline, ob = kb.outline, w2 = kb === ka ? 0 : q.w, mixP = (u, v) => { const o = new Float32Array(u.length); for (let i = 0; i < u.length; i++) o[i] = u[i] + (v[i] - u[i]) * w2; return o; };
       painter.request(paintInput(b, p, w2 ? mixP(oa.front, ob.front) : oa.front.slice(), w2 ? mixP(oa.back, ob.back) : oa.back.slice(), texH / (sb.y1 - sb.y0)));
       if (!st.painted || st.painted.body !== b.tag) st.painted = {body: b.tag, pts: new Float32Array(2 * NP)};
-      st.painted.pts.set(p.pts); st.paintWaiting = false;
+      st.painted.pts.set(p.pts); st.painted.pitch = p.pitch; st.paintWaiting = false;
     }
     if (G) {
       drawGL(G, b, q, p, lines, ka, kb, w, h);
@@ -1046,10 +1121,11 @@ function attach(host) {
     // skin: two posed keyframes, mixed
     const A = ka.e, Bk = kb.e;
     bind(0, A.buf, 3, 24, 0); bind(1, A.buf, 3, 24, 12); bind(2, Bk.buf, 3, 24, 0); bind(3, Bk.buf, 3, 24, 12); bind(4, Bd.skinCol, 3, 12, 0);
-    gl.disableVertexAttribArray(5); gl.vertexAttrib1f(5, 0);
-    gl.uniform1f(M.u.uMix, Bk === A ? 0 : q.w); gl.uniform3f(M.u.uJaw, 0, 0, 0); gl.uniform1i(M.u.uKind, 0);
+    bind(5, Bd.skinJaw, 1, 4, 0);
+    gl.uniform1f(M.u.uMix, Bk === A ? 0 : q.w); gl.uniform3f(M.u.uJaw, b.pivot.x, b.pivot.y, p.jawPitch); gl.uniform1i(M.u.uKind, 0);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, Bd.skinIdx); gl.drawElements(gl.TRIANGLES, Bd.skinCount, gl.UNSIGNED_INT, 0);
     // hair
+    gl.disableVertexAttribArray(5); gl.vertexAttrib1f(5, 0); gl.uniform3f(M.u.uJaw, 0, 0, 0);
     bind(0, Bd.hair, 3, 24, 0); bind(1, Bd.hair, 3, 24, 12); bind(2, Bd.hair, 3, 24, 0); bind(3, Bd.hairTan, 3, 12, 0); bind(4, Bd.hairCol, 3, 12, 0);
     gl.uniform1f(M.u.uMix, 0); gl.uniform1i(M.u.uKind, 1);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, Bd.hairIdx); gl.drawElements(gl.TRIANGLES, Bd.hairCount, gl.UNSIGNED_INT, 0);
@@ -1156,14 +1232,17 @@ function attach(host) {
       st.drawnAt = wall; render(t); adapt(); return true;
     },
     yaw(v) { st.yaw = clamp(+v || 0, -60, 60); render(); },
-    state() {
+    state(measure = false) {
       const b = st.shown ? body() : null, cur = st.cur, p = cur?.p, s = p?.sc;
       const lipAp = s ? s[SC.lipAp] : null, prot = s ? s[SC.lipProt] : null, width = s ? s[SC.lipWidth] : null;
-      return {shown: st.shown, body: b?.tag || null, scale: b?.k ?? null, renderer: !b ? null : st.G ? 'webgl2' : '2d', frames: st.frames, hz: st.hz,
+      return {posture: measure && p ? {points: Array.from(p.pts), scalars: Array.from(p.sc)} : undefined,
+        shown: st.shown, body: b?.tag || null, scale: b?.k ?? null, renderer: !b ? null : st.G ? 'webgl2' : '2d', frames: st.frames, hz: st.hz,
         phoneme: cur?.q.seg?.sym ?? null, from: cur?.q.a ?? null, mix: cur?.q.w ?? 0, kind: cur?.q.seg?.kind ?? null, air: cur ? cur.air : null,
         lips: s ? (lipAp <= 0 ? 'closed' : s[SC.labiodental] > .5 ? 'teeth' : prot > .45 && width < .45 ? 'rounded' : 'open') : null,
         velum: s ? (s[SC.port] > .05 || s[SC.velum] > .2 ? 'lowered' : 'raised') : null, jaw: s ? +s[SC.jaw].toFixed(3) : null,
-        word: cur?.q.info?.w ?? null, approx: !!cur?.q.info?.approx, sound: sound.textContent, painted: st.paintN, paintMs: +st.paintMs.toFixed(2), worker: painter.worker,
+        larynxPx: s && st.proj ? st.proj(s[SC.glottisX], s[SC.glottisY]).map(v => +(v / (st.G?.software ? 1 : host.dpr())).toFixed(2)) : null,
+        larynxY: s ? +s[SC.glottisY].toFixed(4) : null, pitch: p?.pitch ?? null, foldLength: p?.foldLength ?? null, foldThickness: p?.foldThickness ?? null,
+        word: cur?.q.info?.w ?? null, approx: !!cur?.q.info?.approx, sound: sound.textContent, painted: st.paintN, painting: painter.busy || st.paintWaiting, paintMs: +st.paintMs.toFixed(2), worker: painter.worker,
         software: !!(st.software || st.G?.software), workMs: st.workMs.slice(), buildMs: st.buildMs ?? null, yaw: st.yaw, outline: b ? outlineSummary(b) : null, particles: st.parts ? st.parts.map(q => +q.u.toFixed(5)) : [],
         crop: !!st.box?.crop, samples: st.G ? (st.G.ms ? st.G.samples : 0) : null, airOut: st.airOut ?? 0, streaks: Array.from({length: (st.lines || 0) / 6}, (_, i) => [+airBuf[6 * i + 3].toFixed(2), +airBuf[6 * i + 4].toFixed(2)]),
         skinKeys: st.G?.body ? [...st.G.body.keys.keys()] : [], segments: st.tl ? st.tl.segs.length : 0, tight: !!st.box?.tight, mouthPx: p ? mouthPx(p) : null, face: p ? faceMarks() : null};
