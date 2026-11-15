@@ -26,11 +26,13 @@ of your voice, no server after the file is built.
   second tap or Esc returns it). Drag it to turn the head up to 60° (a double click turns it back).
   «Голова» in the stage rail hides it. Without WebGL2, or where WebGL runs on the processor alone (no graphics
   processor), the cut face is drawn flat. Everything is baked into the trainer: no network, nothing extra to install ([docs/design/VOCAL_TRACT_3D.md](docs/design/VOCAL_TRACT_3D.md)).
-  The vowel and its caption follow the target notes beyond a short lyric timing mark, up to the next word.
+  The vowel and its caption follow active target notes beyond a short lyric timing mark, up to the next word. Excluded
+  wordless chains keep the head at rest with an empty caption.
   Longer silences between notes release to rest before the vowel resumes; brief gaps keep the posture.
   Vowels ease in over 150 ms, consonants stay visible for at least about 70 ms where timing allows, and silence releases
   the head over 300 ms. Pitch moves the larynx, stretches and thins the folds and opens the jaw slightly toward the top
-  of the chosen body's range. Pausing or scrubbing holds that moment's posture.
+  of the chosen body's range. Pausing or scrubbing holds that moment's posture. Sustain and pitch following use the
+  shared timeline at every width; the phone layout is unchanged.
 - **Live match score.** Hits ÷ frames with a target, counted once per 20 ms. Silence under a note is a miss; frames with no
   target are excluded; draft notes count and are labelled as draft. In a song with lyrics, notes that come nowhere near
   a word (stem bleed in a break, wordless singing) are drawn dimmed and never scored: «Без слів — не рахується». Hit notes turn mint with ✓, misses hatched red with ×,
@@ -225,7 +227,8 @@ checks the alignment through Opus, the eviction order, the render deadline, the 
 falls inside a sung segment, without a browser.
 Run one browser suite with `tests/e2e/run.sh tests/e2e/tract3d.mjs` (the runner accepts explicit suite paths).
 `tract3d.mjs` also checks short lyric marks against a held note and a rising/falling scale: open-vowel coverage of at
-least 90 %, 150 ms eased vowel blends, visible consonants, a 300 ms release, next-word boundaries, ignored notes,
+least 90 %, 150 ms eased vowel blends, visible consonants, a 300 ms release, next-word boundaries, ignored and excluded
+wordless notes, target-eligibility changes,
 pitch-driven larynx/folds/jaw in both bodies and the flat fallback, and repeatable scrubbing. Set
 `LUMA_TRACT_EVIDENCE` to a retained evidence directory to capture 1440 × 900 frames at 50 ms song intervals and playback
 observations for each animation frame.

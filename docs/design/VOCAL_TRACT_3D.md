@@ -482,12 +482,14 @@ to the nearest vowel posture and consonant letters to their plain consonant; Cyr
 panel then marks the word «приблизно». A word with no letters or no vowel sings /ə/ on its note, with the hint
 «Слово без вимови: показую нейтральний голосний».
 
-**Timing**, ported from Chimera's sung rules (`sing.rs:1`–`10`):
+**Timing**, ported from Chimera's sung rules (`sing.rs:1`–`10`). Sustain and pitch following apply at every width
+through the shared timeline; the phone layout is unchanged.
 
 1. Syllables come from the vowel nuclei; onsets take the longest legal cluster.
 2. A word starts at its lyric mark and follows the target's voiced notes, including notes after the
    recognition mark ends, until the last note ends or the next word starts. A silence of at least 250 ms within a melisma gets
-   rest before the vowel resumes. Ignored notes supply no voice. With at least as many
+   rest before the vowel resumes. Ignored notes and chains excluded by the trainer's existing wordless-target mask
+   supply neither voice nor pitch. Target edits invalidate both the mask and the head timeline. With at least as many
    notes as syllables, each syllable takes one note in order and the last takes the remaining notes (a melisma).
    With fewer notes, divide the held span evenly among the syllables. Without a target note, show rest.
 3. Within a syllable, the vowel starts on the note. Onset consonants end at the note's start; codas end at the next

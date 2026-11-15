@@ -30,7 +30,7 @@
 // build time by studio/phonemes.py) or, for a word missing there, from letter rules here, marked «приблизно». The sounds
 // are laid on the target's notes and words, so the head shows the target only, never the microphone.
 //
-// LumaTract.attach(host) → panel. host: {el, song(), reduced(), dpr(), idle(), body(), setBody(tag), wake()}.
+// LumaTract.attach(host) → panel. host: {el, song(), noteEligible(note), octave(), reduced(), dpr(), idle(), body()}.
 //   panel.layout(box)      {mode: 'column' | 'overlay', w, h, crop}: the panel's size in CSS pixels
 //   panel.frame(t)         draw the head for song time t (the trainer's tick calls it while the panel shows)
 //   panel.song()           the song's words or notes changed
@@ -134,8 +134,8 @@ function syllables(str) {
 // note, so it lasts long enough to be seen while the song plays: at Chimera's 55 ms an /m/ is three frames. The vowel
 // still lands on the note.
 const RAMP = {vowel: .15, cons: .025, rest: .3}, REST_GAP = .25, MIN_VOWEL = .4, HOLD = .18;
-function timeline(song, phones, dur) {
-  const notes = (song.notes || []).filter(n => !n.ignored).slice().sort((a, b) => a.a - b.a);
+function timeline(song, phones, dur, eligible = () => true) {
+  const notes = (song.notes || []).filter(n => !n.ignored && eligible(n)).slice().sort((a, b) => a.a - b.a);
   const words = [];
   for (const line of song.lyrics || []) for (const w of line.words || []) if (Number.isFinite(w.a) && Number.isFinite(w.b) && w.b > w.a) words.push(w);
   words.sort((a, b) => a.a - b.a);
@@ -160,7 +160,7 @@ function timeline(song, phones, dur) {
       if (n.a >= limit) break;
       own.push(n); end = Math.min(n.b, limit);
     }
-    if (!own.length) return; // target silence, including ignored notes
+    if (!own.length) return; // target silence, including ignored notes and excluded wordless chains
     const heldStart = Math.max(w.a, own[0].a), heldEnd = end;
     let spans;
     if (own.length >= syl.length) {
@@ -917,7 +917,7 @@ function attach(host) {
   function tl(b) {
     const song = host.song(), sig = b.tag + '|' + (song.lyrics?.length || 0) + '|' + (song.notes?.length || 0) + '|' + (song.notes?.[0]?.a ?? '') + '|' + st.songRev;
     if (st.tl && st.tlKey === sig) return st.tl;
-    st.tl = timeline(song, window.LUMA_PHONES?.words || null, s => b.posture(s).sc[SC.dur]); st.tlKey = sig; return st.tl;
+    st.tl = timeline(song, window.LUMA_PHONES?.words || null, s => b.posture(s).sc[SC.dur], host.noteEligible); st.tlKey = sig; return st.tl;
   }
   // The posture due at t: ease in from the preceding sound, completing before the next sound starts.
   function postureAt(b, t) {

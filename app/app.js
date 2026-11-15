@@ -2128,7 +2128,7 @@ window.Luma={diagnostics:()=>({mode:s.mode,busy:s.busy,pending:s.awaitFinish,tim
   wordless:()=>{const w=scoredSpans();return {on:w.on,spans:w.spans.map(x=>[...x]),last:w.last,raw:t=>targetAt(t,effective(),true)};},
   history:historyHooks}};
 if(RENDER)window.Luma.render={load:renderLoad,frame:async u=>{const info=await renderFrame(u);window.LumaRender?.overlay(g,info);return info;}};
-if(!RENDER&&window.LumaTract)tract=window.LumaTract.attach({el:$('tract'),song:()=>song,octave:()=>effective().octave,now:()=>now(),reduced:()=>reduced.matches,dpr:()=>Math.min(window.devicePixelRatio||1,2),idle:()=>s.mode==='idle'&&!s.busy,
+if(!RENDER&&window.LumaTract)tract=window.LumaTract.attach({el:$('tract'),song:()=>song,noteEligible:n=>!wordlessNote(n),octave:()=>effective().octave,now:()=>now(),reduced:()=>reduced.matches,dpr:()=>Math.min(window.devicePixelRatio||1,2),idle:()=>s.mode==='idle'&&!s.busy,
  body:()=>prefs.tractBody,enlarge:()=>{if(s.mode!=='idle'||!s.tractOn||$('tract').dataset.mode!=='overlay')return;bigTract(!s.tractBig);}});
 populateSong();fitStage();resize();setRangeScale();updateReadout(s.pos);if(!RENDER)loadHistory();
 // The record line («Рекорд») gave way to the dust of past takes, which has no switch: a saved `shadow` is dropped, never

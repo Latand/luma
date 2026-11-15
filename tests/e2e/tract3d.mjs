@@ -195,6 +195,48 @@ execFileSync(py, ['studio/build_html.py', shortPkg, '-o', shortHtml], {encoding:
   }
   await done(o, 'short recognition marks');
 }
+// A target chain excluded by the trainer must supply neither sound nor pitch to the computer head.
+const wordlessPkg = join(scratch, 'Wordless'); cpSync(demoPkg, wordlessPkg, {recursive: true});
+const wordlessSong = JSON.parse(readFileSync(join(wordlessPkg, 'target.json'), 'utf8'));
+wordlessSong.notes = [{id: 1, a: 2, b: 5, m: 48, ok: true}, {id: 2, a: 12, b: 13, m: 64, ok: true}];
+wordlessSong.lyrics = [{a: 2, b: 2.1, words: [{a: 2, b: 2.1, w: 'a', c: 1}]}];
+wordlessSong.points = wordlessSong.points.map(p => [p[0], wordlessSong.notes.find(n => n.a <= p[0] && p[0] < n.b)?.m ?? null, 1, 1]);
+writeFileSync(join(wordlessPkg, 'target.json'), JSON.stringify(wordlessSong));
+const wordlessHtml = join(scratch, 'Luma_Wordless.html');
+execFileSync(py, ['studio/build_html.py', wordlessPkg, '-o', wordlessHtml], {encoding: 'utf8'});
+for (const width of [1440, 900]) {
+  const o = await page(fileUrl(wordlessHtml), {viewport: {width, height: 900}, dpr: 1, settings: seeded('male')}); await ready(o.p);
+  const held = await at(o.p, 4.5), excluded = await at(o.p, 12.5);
+  const target = await o.p.evaluate(() => ({active: window.Luma.targetAt(4.5), excluded: window.Luma.targetAt(12.5), notes: window.Luma.test.tractTimeline().notes}));
+  assert(target.active && !target.excluded && target.notes.length === 1 && held.kind === 'vowel' && held.word === 'a', width + ' px: eligible short mark sustains; excluded chain is absent from sound and pitch timeline');
+  assert(excluded.from === 'rest' && excluded.word === null && excluded.sound === '' && excluded.air === 'rest' && excluded.airOut === 0 && excluded.pitch === .5,
+    width + ' px: excluded wordless target keeps rest, neutral pitch and an empty caption');
+  // Import through the real application path, retaining note counts and starts, to exercise cache invalidation.
+  const included = structuredClone(wordlessSong); included.lyrics[0].b = 13;
+  for (const [song, expected] of [[included, true], [wordlessSong, false]]) {
+    await o.p.locator('#importFile').setInputFiles({name: 'target.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(song))});
+    await o.p.waitForFunction(expected => !!window.Luma.targetAt(12.5) === expected, expected);
+    const state = await at(o.p, 12.5), notes = await o.p.evaluate(() => window.Luma.test.tractTimeline().notes.length);
+    assert(expected ? state.word === 'a' && state.kind === 'vowel' && state.pitch === 1 && notes === 2 : state.word === null && state.air === 'rest' && state.pitch === .5 && notes === 1,
+      width + ' px: changed target eligibility rebuilds the cached sound and pitch timeline (' + expected + ')');
+  }
+  if (process.env.LUMA_TRACT_EVIDENCE && width === 1440) {
+    const visual = await page(fileUrl(wordlessHtml), {dpr: 1, settings: seeded('male'), init: () => { window.__lumaTractGL = 'force'; }}); await ready(visual.p);
+    const directory = join(process.env.LUMA_TRACT_EVIDENCE, 'wordless'), records = []; mkdirSync(directory, {recursive: true});
+    for (const [name, start, count] of [['active', 1.8, 72], ['excluded', 11.8, 32]]) {
+      const dir = join(directory, name); mkdirSync(dir, {recursive: true});
+      for (let i = 0; i < count; i++) {
+        const t = +(start + i * .05).toFixed(2); await at(visual.p, t);
+        await visual.p.waitForFunction(() => !window.Luma.test.tract().painting);
+        records.push({sequence: name, i, t, state: await visual.p.evaluate(() => window.Luma.test.tract())});
+        await visual.p.screenshot({path: join(dir, String(i).padStart(3, '0') + '.png')});
+      }
+    }
+    writeFileSync(join(directory, 'frames.json'), JSON.stringify(records));
+    await done(visual, 'wordless 1440x900 frame sequences');
+  }
+  await done(o, width + ' px wordless head');
+}
 if (process.env.LUMA_TRACT_FOCUSED) { await browser.close(); rmSync(scratch, {recursive: true, force: true}); process.exit(process.exitCode || 0); }
 
 // The lessons and demo retain a word through the target note, with bounded vowel ramps and visible consonants.
