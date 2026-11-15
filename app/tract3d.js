@@ -1081,7 +1081,8 @@ function attach(host) {
     let moved = !st.painted || st.painted.body !== b.tag || Math.abs((st.painted.pitch ?? .5) - p.pitch) > .01;
     if (!moved) { const a = st.painted.pts, c = p.pts; for (let i = 0; i < c.length; i++) if (Math.abs(a[i] - c[i]) > .02) { moved = true; break; } }
     // (while a painting is under way the next waits: the frame after it ends asks again with the posture of that frame)
-    if (moved && painter.busy) { moved = false; st.paintWaiting = true; }
+    st.paintWaiting = moved && painter.busy;
+    if (st.paintWaiting) moved = false;
     // the skin: each keyframe posed once (its buffer on the GPU, eight at most; its midline kept here) and blended
     const ka = keyframe(b, G, q.a), kb = q.w > 0 && q.b !== q.a ? keyframe(b, G, q.b) : ka; st.cur.outline = ka.outline;
     if (moved) {

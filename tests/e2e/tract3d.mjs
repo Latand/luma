@@ -83,6 +83,43 @@ shortSong.lyrics = [{a: 2, b: 10.5, words: [{a: 2, b: 2.1, w: 'mama', c: 1}, {a:
 writeFileSync(join(shortPkg, 'target.json'), JSON.stringify(shortSong));
 const shortHtml = join(scratch, 'Luma_Short.html');
 execFileSync(py, ['studio/build_html.py', shortPkg, '-o', shortHtml], {encoding: 'utf8'});
+// A worker reply cannot run between these synchronous draws. Returning to its requested posture cancels
+// the pending change; staying at the other posture must still request its own painting after the reply.
+for (const width of [1440, 1170]) for (const cancel of [true, false]) {
+  const o = await page(fileUrl(shortHtml), {viewport: {width, height: 900}, dpr: 1, settings: seeded('male')}); await ready(o.p);
+  await at(o.p, 3);
+  await o.p.waitForFunction(() => !window.Luma.test.tract().painting);
+  const start = await o.p.evaluate(cancel => {
+    const T = window.Luma.test, before = T.tract();
+    T.seek(8.35); T.tractFrame(8.35, false); T.tractFrame(6.35, false);
+    const changed = T.tract();
+    if (cancel) T.tractFrame(8.35, false);
+    else { T.seek(6.35); T.tractFrame(6.35, false); }
+    const final = T.tract();
+    return {painted: before.painted, worker: final.worker, painting: final.painting,
+      unchanged: final.painted === before.painted, changedPitch: changed.pitch, pitch: final.pitch};
+  }, cancel);
+  assert(start.worker && start.painting && start.unchanged && start.changedPitch === 0 && start.pitch === (cancel ? 1 : 0),
+    width + ' px: rapid seek changes posture during one worker job (' + (cancel ? 'cancel' : 'keep') + ')');
+  // The same idle predicate used by both evidence-capture loops, with no further seek or draw to unstick it.
+  const settled = await o.p.waitForFunction(() => !window.Luma.test.tract().painting, null, {timeout: 5000}).then(() => true, () => false);
+  await frames(o.p, 6);
+  const end = await o.p.evaluate(() => window.Luma.test.tract());
+  assert(settled && !end.painting && end.painted - start.painted === (cancel ? 1 : 2) && end.pitch === start.pitch && end.word === 'a',
+    width + ' px: worker settles at held final posture with ' + (cancel ? 'one painting after cancellation' : 'the pending painting completed'));
+  if (process.env.LUMA_TRACT_EVIDENCE) {
+    const dir = join(process.env.LUMA_TRACT_EVIDENCE, 'rapid-' + width + '-' + (cancel ? 'cancel' : 'keep'));
+    mkdirSync(dir, {recursive: true});
+    const records = [];
+    for (let i = 0; i < 7; i++) {
+      await frames(o.p, 3);
+      records.push({i, state: await o.p.evaluate(() => window.Luma.test.tract())});
+      await o.p.screenshot({path: join(dir, String(i).padStart(3, '0') + '.png')});
+    }
+    writeFileSync(join(dir, 'frames.json'), JSON.stringify({start, settled, records}));
+  }
+  await done(o, width + ' px rapid-seek ' + (cancel ? 'cancellation' : 'pending change'));
+}
 {
   const o = await page(fileUrl(shortHtml), {settings: seeded('male')}); await ready(o.p);
   const result = await o.p.evaluate(() => {
