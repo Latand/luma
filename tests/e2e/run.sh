@@ -20,6 +20,10 @@ export LUMA_STUDIO_URL="http://127.0.0.1:$STUDIO_PORT/"
 export LUMA_TEST_LIBRARY="$TEST_LIBRARY"   # lessons.mjs generates the built-in lessons into this empty library
 RUN=${LUMA_JS:-bun}; command -v "$RUN" >/dev/null || RUN=node
 status=0
+if [ "$#" -gt 0 ]; then
+  for t in "$@"; do LUMA_SHOT="tests/e2e/shot_$(basename "$t" .mjs).png" "$RUN" "$t" || status=1; done
+  exit "$status"
+fi
 for t in scoring audio ux studio scale lessons finish history progress lives activity session wordless autopick latency cloud video xr tract3d; do echo "== $t"; LUMA_SHOT="tests/e2e/shot_$t.png" "$RUN" "tests/e2e/$t.mjs" || status=1; done
 "$PY" tests/studio_test.py || status=1
 "$PY" tests/separation_test.py || status=1

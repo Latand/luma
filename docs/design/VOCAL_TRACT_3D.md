@@ -485,19 +485,33 @@ panel then marks the word «приблизно». A word with no letters or no v
 **Timing**, ported from Chimera's sung rules (`sing.rs:1`–`10`):
 
 1. Syllables come from the vowel nuclei; onsets take the longest legal cluster.
-2. A word's notes are the notes not ignored that overlap `[w.a, w.b]`. With at least as many notes as syllables, each
-   syllable takes one note in order and the last syllable takes the rest (a melisma). With fewer notes or none (a gap
-   in the note map, notes marked ignored), the word's span is split evenly.
+2. A word starts at its lyric mark and follows the target's voiced notes, including notes after the
+   recognition mark ends, until the last note ends or the next word starts. A silence of at least 250 ms within a melisma gets
+   rest before the vowel resumes. Ignored notes supply no voice. With at least as many
+   notes as syllables, each syllable takes one note in order and the last takes the remaining notes (a melisma).
+   With fewer notes, divide the held span evenly among the syllables. Without a target note, show rest.
 3. Within a syllable, the vowel starts on the note. Onset consonants end at the note's start; codas end at the next
-   onset. Consonant durations are Chimera's phoneme durations × 0.8. A diphthong holds its first vowel for 80 %.
+   onset. Consonant durations are Chimera's phoneme durations × 0.8, with a 70 ms minimum where the span allows.
+   A diphthong holds its first vowel for 80 %.
    After a rest of 0.25 s or more, or at the start, an onset shorter than 180 ms takes its closure up earlier, out of
    the silence, so it lasts 180 ms (added in the build: at 55 ms the /m/ of lesson 1 was three frames while playing and
    could not be seen); inside a phrase onsets keep their length.
-4. Transitions are a raised-cosine cross-fade of 30 ms into a consonant and 60 ms into a vowel, in line with the ramps
-   of Chimera's planner (probe /əmə/: 0.03 s into /m/, 0.06–0.07 s into /ə/).
-5. A gap of 0.25 s or more between words relaxes the head toward rest over 150 ms; a gap of 0.5 s or more before a
-   scored word starts the breath in (§4.4).
+4. A raised-cosine blend takes 150 ms into a vowel and 25 ms into a consonant, capped at the sound's duration so it
+   completes before the next sound starts. Consonant closures remain visible for their held duration.
+5. Target silence of at least 250 ms relaxes the head toward rest over 300 ms, including after the final note.
+   The blend completes before the next sound. Briefer gaps keep the last posture, as before, so a tiny break in the
+   note map cannot squeeze a whole release into a few frames. The final note always gets a 300 ms release.
+   The current word and sounds stay in the caption throughout the held span. Pitch bridges note gaps up to 40 ms.
 6. A word with confidence `c < 0.5` is marked «приблизно» too.
+7. The target pitch, with the chosen vocal octave, is normalised to the body's default range (§4.1). At each note
+   change, smoothstep reaches the new pitch in 150 ms (clipped to the note). This envelope uses playhead time, so
+   pausing, seeking and drawing the same time again give the same posture. Pitch returns to neutral over 300 ms in
+   silence; a note starting during that release eases from its current value. Across the full range the glottis moves
+   1.4 template cm (scaled by body size); neighbouring tract points move with it, tapering over 5 cm. The baked larynx
+   offset stays underneath this pitch motion. The fold length factor runs from 0.875 to 1.125 and thickness from
+   1.25 to 0.75 across the range; the jaw opens a little more during a vowel through the skin's existing jaw weights and the cut's lower lip and teeth.
+   The cartilage section is painted over the thick cut edge so its pitch motion remains visible. These are teaching
+   illustrations. The microphone drives none of them.
 
 ## 5. Where it sits in the trainer
 
@@ -537,8 +551,8 @@ measurement asks for it.
 - the skin: each keyframe is rigged once on first use and cached (eight at most, oldest out). The target's timeline is
   known in advance, so the next keyframes are rigged ahead of time. A frame then only blends two cached position arrays
   (18,109 vertices) and uploads one buffer;
-- the cut face is painted again only when the blend has moved some point by more than 0.2 mm or a zone changed, and it
-  goes up without mipmaps (the `xr.js` lesson);
+- the cut face is painted again only when the blend has moved some point by more than 0.2 mm or the pitch envelope
+  changes by 0.01, and it goes up without mipmaps (the `xr.js` lesson);
 - the particles: one small buffer.
 
 **Acceptance.**

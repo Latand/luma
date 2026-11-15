@@ -30,7 +30,7 @@
 //  12  reduced motion: two frames 200 ms apart show the same particles
 // Every page must keep a clean console; SwiftShader's own notes on reading a canvas back are the driver's, not the page's.
 import {execFileSync} from 'node:child_process';
-import {cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {cpSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
@@ -73,6 +73,153 @@ cpSync(demoPkg, odd, {recursive: true});
 { const t = JSON.parse(readFileSync(join(odd, 'target.json'), 'utf8')); t.lyrics[0].words[1].w = MADE_UP; writeFileSync(join(odd, 'target.json'), JSON.stringify(t)); }
 const oddHtml = join(scratch, 'Luma_Odd.html');
 execFileSync(py, ['studio/build_html.py', odd, '-o', oddHtml], {encoding: 'utf8'});
+
+// Short recognition marks: two syllables on a held note, then one vowel across a scale.
+const shortPkg = join(scratch, 'Short'); cpSync(demoPkg, shortPkg, {recursive: true});
+const shortSong = JSON.parse(readFileSync(join(shortPkg, 'target.json'), 'utf8'));
+shortSong.notes = [{id: 'hold', a: 2, b: 5, m: 56, ok: true},
+  ...[48, 52, 56, 60, 64, 60, 56, 52, 48].map((m, i) => ({id: 'scale-' + i, a: 6 + i * .5, b: 6.5 + i * .5, m, ok: true}))];
+shortSong.lyrics = [{a: 2, b: 10.5, words: [{a: 2, b: 2.1, w: 'mama', c: 1}, {a: 6, b: 6.1, w: 'a', c: 1}]}];
+writeFileSync(join(shortPkg, 'target.json'), JSON.stringify(shortSong));
+const shortHtml = join(scratch, 'Luma_Short.html');
+execFileSync(py, ['studio/build_html.py', shortPkg, '-o', shortHtml], {encoding: 'utf8'});
+{
+  const o = await page(fileUrl(shortHtml), {settings: seeded('male')}); await ready(o.p);
+  const result = await o.p.evaluate(() => {
+    const T = window.Luma.test, tl = T.tractTimeline(), samples = [];
+    for (let i = 0; i < 300; i++) { const t = 2 + (i + .5) / 100; T.tractFrame(t, false); const s = T.tract(); samples.push(s); }
+    return {coverage: samples.filter(s => s.kind === 'vowel' && s.lips === 'open').length / samples.length,
+      caption: samples.every(s => s.word === 'mama'), tl};
+  });
+  assert(result.coverage >= .9 && result.caption, `short marks, held note: open vowel coverage ${(result.coverage * 100).toFixed(1)}%, caption held throughout`);
+  const scale = [];
+  for (let i = 0; i < 9; i++) scale.push(await at(o.p, 6.35 + i * .5));
+  assert(scale.every(s => s.kind === 'vowel' && s.word === 'a' && s.lips === 'open'), 'the short word mark holds its vowel and caption across every scale note');
+  assert(scale.slice(1, 5).every((s, i) => s.larynxY > scale[i].larynxY) && scale.slice(5).every((s, i) => s.larynxY < scale[i + 4].larynxY),
+    'short marks, rising and falling scale: larynx follows pitch ' + JSON.stringify(scale.map(s => s.larynxY)));
+  assert(scale[4].foldLength > scale[0].foldLength && scale[4].foldThickness < scale[0].foldThickness && scale[4].jaw > scale[0].jaw,
+    'high pitch stretches and thins the folds and opens the jaw');
+  const tail = await at(o.p, 5.15), rest = await at(o.p, 5.31);
+  assert(tail.from !== 'rest' && tail.mix > 0 && tail.mix < 1 && rest.from === 'rest', 'end of held note eases to rest over 300 ms');
+  const late = await at(o.p, 9.8), again = await at(o.p, 3), lateAgain = await at(o.p, 9.8);
+  assert(late.word === 'a' && again.word === 'mama' && late.larynxY === lateAgain.larynxY && late.jaw === lateAgain.jaw, 'scrubbing backwards and forwards holds the exact target posture');
+  const edge = await o.p.evaluate(() => {
+    const make = (notes, words) => window.LumaTract.timeline({notes, lyrics: [{words}]}, {a: 'a', mam: 'm a m', la: 'l a'}, () => .055);
+    const note = {a: 2, b: 5, m: 56}, word = {a: 2, b: 2.1, w: 'mam'};
+    const coda = make([note], [word]).segs;
+    const next = make([note], [word, {a: 3, b: 3.1, w: 'a'}]).segs;
+    const silent = make([{...note, ignored: true}], [word]).segs;
+    const gap = make([{a: 2, b: 3, m: 56}, {a: 4, b: 5, m: 56}], [{a: 2, b: 2.1, w: 'a'}, {a: 4, b: 4.1, w: 'a'}]).segs;
+    const melisma = make([{a: 2, b: 3, m: 56}, {a: 4, b: 5, m: 60}], [{a: 2, b: 2.1, w: 'a'}]).segs;
+    const pickup = make([{a: 2, b: 2.58, m: 56}, {a: 2.645, b: 4, m: 60}], [{a: 2, b: 2.1, w: 'a'}, {a: 2.65, b: 2.75, w: 'la'}]).segs;
+    const coincident = make([{a: 1.8, b: 5, m: 56}], [{a: 2, b: 2.1, w: 'a'}, {a: 2, b: 2.1, w: 'la'}]).segs;
+    const late = make([{a: 2.3, b: 5, m: 56}], [{a: 2, b: 2.1, w: 'a'}]).segs;
+    const brief = make([{a: 2, b: 3, m: 56}, {a: 3.1, b: 5, m: 60}], [{a: 2, b: 2.1, w: 'a'}]).segs;
+    return {coda, next, silent, gap, melisma, pickup, coincident, late, brief};
+  });
+  assert(edge.coda.some(g => g.coda && Math.abs(g.b - 5) < 1e-6 && g.b - g.a >= .069), 'final consonant sits at the end of the held note for at least 70 ms');
+  assert(edge.next.filter(g => g.word === 0).every(g => g.b <= 3 + 1e-6) && edge.next.some(g => g.word === 1 && g.b === 5), 'next word limits the held span, including a note crossing the boundary');
+  assert(!edge.silent.length && edge.gap.some(g => g.kind === 'rest' && g.a === 3 && g.b === 4), 'ignored notes and actual target silence give rest');
+  assert(edge.melisma.some(g => g.kind === 'rest' && g.a === 3 && g.b === 4) && edge.melisma.some(g => g.kind === 'vowel' && g.a === 4 && g.b === 5), 'a melisma rests during target silence and resumes on the next voiced note');
+  assert(edge.pickup.filter(g => g.word === 0).every(g => g.b <= 2.58 + 1e-6) && edge.pickup.some(g => g.sym === 'l' && g.b - g.a >= .069), 'an anticipated consonant owns the pickup across a target gap; the old vowel and caption stay ended');
+  assert(edge.coincident.every(g => g.word !== 0), 'coincident word starts leave no fabricated span past the next word');
+  assert(edge.late.some(g => g.kind === 'vowel' && g.a === 2.3 && g.b === 5), 'a target note starting after the short lyric mark still belongs to that word');
+  assert(!edge.brief.some(g => g.kind === 'rest' && g.a < 5), 'brief target gaps keep the posture instead of compressing a rest release into a few frames');
+  const motion = await o.p.evaluate(() => {
+    const T = window.Luma.test, tl = T.tractTimeline(), transitions = []; let worst = 0;
+    for (const g of tl.segs) {
+      const ramp = Math.min(g.b - g.a, g.kind === 'rest' ? .3 : g.kind === 'vowel' ? .15 : .025);
+      T.tractFrame(g.a, false); const first = T.tract(true).posture?.points;
+      T.tractFrame(g.a + ramp - 1e-8, false); const end = T.tract(true).posture?.points;
+      if (!first || !end) continue;
+      const amplitude = Math.max(...first.map((v, i) => Math.abs(v - end[i])));
+      let prev = first;
+      for (let k = 1; k <= 20; k++) {
+        T.tractFrame(g.a + ramp * k / 20 - 1e-8, false); const state = T.tract(true), curr = state.posture.points;
+        const jump = Math.max(...curr.map((v, i) => Math.abs(v - prev[i])));
+        const bound = Math.PI / 2 * amplitude / 20 + 14 * ramp / 20 + .001;
+        worst = Math.max(worst, jump / bound); prev = curr;
+      }
+      T.tractFrame(g.a + ramp / 4, false); const quarter = T.tract();
+      transitions.push({kind: g.kind, ramp, eased: Math.abs(quarter.mix - (.5 - .5 * Math.cos(Math.PI / 4))) < 1e-6});
+    }
+    let boundaryJump = 0;
+    for (const t of [...tl.segs.map(g => g.a), ...tl.notes.flatMap(n => [n.a, n.b])]) {
+      T.tractFrame(t - 1e-6, false); const before = T.tract(true).posture?.points;
+      T.tractFrame(t + 1e-6, false); const after = T.tract(true).posture?.points;
+      if (before && after) boundaryJump = Math.max(boundaryJump, ...before.map((v, i) => Math.abs(v - after[i])));
+    }
+    return {transitions, worst, boundaryJump};
+  });
+  assert(motion.transitions.length > 4 && motion.transitions.every(g => g.eased) && motion.worst <= 1 && motion.boundaryJump < .001,
+    'every transition eases without a larger frame jump than its ramp permits ' + JSON.stringify(motion));
+  assert(motion.transitions.filter(g => g.kind === 'vowel').every(g => Math.abs(g.ramp - .15) < 1e-6), 'fixture vowel transitions take 150 ms');
+  // Both body ranges, octave shifts and the flat fallback use the same target-driven geometry.
+  const other = await page(fileUrl(shortHtml), {settings: seeded('female'), init: () => { const get = HTMLCanvasElement.prototype.getContext; HTMLCanvasElement.prototype.getContext = function(k, o) { return k === 'webgl2' ? null : get.call(this, k, o); }; }}); await ready(other.p);
+  const female = await other.p.evaluate(() => { const T = window.Luma.test, out = []; for (const t of [6.35, 8.35, 10.35]) { T.tractFrame(t, false); out.push(T.tract()); } return out; });
+  assert(female.every(s => s.renderer === '2d') && female[0].pitch === 0 && Math.abs(female[1].pitch - 7 / 16) < 1e-6 && female[1].larynxY > female[0].larynxY && female[2].larynxY === female[0].larynxY, 'female body in 2D: pitch rises and returns within its own range');
+  await other.p.evaluate(() => { const e = document.getElementById('octave'); e.value = '12'; e.dispatchEvent(new Event('change')); });
+  const shifted = await at(other.p, 6.35);
+  assert(shifted.larynxY > female[0].larynxY, 'vocal octave shifts the pitch followed by the head');
+  await other.p.evaluate(() => { const e = document.getElementById('octave'); e.value = '0'; e.dispatchEvent(new Event('change')); });
+  assert((await at(other.p, 6.35)).larynxY === female[0].larynxY, 'restoring vocal octave restores the same posture');
+  await done(other, 'pitch in flat fallback');
+  console.log('MEASURE sustain ' + JSON.stringify({coverage: result.coverage, larynxTravel: scale[4].larynxY - scale[0].larynxY, motion}));
+  if (process.env.LUMA_TRACT_EVIDENCE) {
+    const directory = process.env.LUMA_TRACT_EVIDENCE; mkdirSync(directory, {recursive: true});
+    writeFileSync(join(directory, 'measurements.json'), JSON.stringify({coverage: result.coverage, scale: scale.map(s => ({larynxY: s.larynxY, jaw: s.jaw, foldLength: s.foldLength, foldThickness: s.foldThickness})), motion}, null, 2));
+    // Force the WebGL head on this isolated browser as well as the normal 2D fallback above.
+    const visual = await page(fileUrl(shortHtml), {dpr: 1, settings: seeded('male'), init: () => { window.__lumaTractGL = 'force'; }}); await ready(visual.p);
+    const records = [];
+    for (const [name, start, count] of [['held', 1.8, 72], ['scale', 5.8, 102]]) {
+      const dir = join(directory, name); mkdirSync(dir, {recursive: true});
+      for (let i = 0; i < count; i++) {
+        const time = start + i * .05;
+        await visual.p.evaluate(t => window.Luma.test.seek(t), time); await frames(visual.p, 3);
+        // Let the asynchronous cut painter finish this exact playhead moment.
+        await visual.p.waitForFunction(() => !window.Luma.test.tract().painting);
+        await visual.p.evaluate(t => window.Luma.test.tractFrame(t, false), time); await frames(visual.p, 2);
+        records.push({sequence: name, i, time, state: await visual.p.evaluate(() => window.Luma.test.tract())});
+        await visual.p.screenshot({path: join(dir, String(i).padStart(3, '0') + '.png')});
+      }
+    }
+    writeFileSync(join(directory, 'frames.json'), JSON.stringify(records));
+    // Playback observations at each actual animation frame; fixed song steps avoid wall-clock test verdicts.
+    const playback = await visual.p.evaluate(async () => {
+      const T = window.Luma.test, out = []; T.fakeSing({a: 1.8, b: 11});
+      for (let i = 0; i < 550; i++) { await new Promise(r => requestAnimationFrame(r)); const t = T.fakeTick(i / 60); T.tractFrame(t, true); const s = T.tract(); out.push({wall: performance.now(), t, phoneme: s.phoneme, word: s.word, jaw: s.jaw, larynxY: s.larynxY}); }
+      T.fakeFinish(); return out;
+    });
+    writeFileSync(join(directory, 'playback.json'), JSON.stringify(playback));
+    await done(visual, '1440x900 frame sequences');
+  }
+  await done(o, 'short recognition marks');
+}
+if (process.env.LUMA_TRACT_FOCUSED) { await browser.close(); rmSync(scratch, {recursive: true, force: true}); process.exit(process.exitCode || 0); }
+
+// The lessons and demo retain a word through the target note, with bounded vowel ramps and visible consonants.
+for (const target of [url, ...readdirSync(library).filter(f => f.startsWith('Luma_Lesson_') && f.endsWith('.html')).sort().map(f => fileUrl(join(library, f)))]) {
+  const o = await page(target, {settings: seeded('male')}); await ready(o.p);
+  const checks = await o.p.evaluate(() => {
+    const T = window.Luma.test, tl = T.tractTimeline(), vowels = tl.segs.filter(g => g.kind === 'vowel');
+    let held = 0, bad = 0, eased = 0, pitchError = 0, boundaryJump = 0;
+    for (const g of vowels) {
+      const t = g.b - .002; T.tractFrame(t, false); const s = T.tract();
+      if (s.word !== tl.words[g.word].w || s.kind !== 'vowel') bad++; else held++;
+      if (g.b - g.a >= .15) { T.tractFrame(g.a + .075, false); if (Math.abs(T.tract().mix - .5) < 1e-6) eased++; else bad++; }
+      const note = window.LUMA_SONG.notes.find(n => !n.ignored && n.a + .15 <= t && n.b > t);
+      if (note) pitchError = Math.max(pitchError, Math.abs(s.pitch - Math.max(0, Math.min(1, (note.m - 48) / 16))));
+    }
+    for (const t of [...tl.segs.map(g => g.a), ...tl.notes.flatMap(n => [n.a, n.b])]) {
+      T.tractFrame(t - 1e-6, false); const a = T.tract(true).posture.points;
+      T.tractFrame(t + 1e-6, false); const b = T.tract(true).posture.points;
+      boundaryJump = Math.max(boundaryJump, ...a.map((v, i) => Math.abs(v - b[i])));
+    }
+    return {held, bad, eased, pitchError, boundaryJump, consonants: tl.segs.filter(g => g.kind !== 'vowel' && g.kind !== 'rest').map(g => g.b - g.a)};
+  });
+  assert(checks.held > 0 && checks.eased > 0 && !checks.bad && checks.pitchError < 1e-6 && checks.boundaryJump < .001 && checks.consonants.every(d => d >= .069), 'lessons/demo: vowel and caption held to every segment end, consonants at least 70 ms ' + JSON.stringify({held: checks.held, bad: checks.bad, eased: checks.eased, pitchError: checks.pitchError, boundaryJump: checks.boundaryJump, minConsonant: Math.min(...checks.consonants)}));
+  await done(o, 'lessons/demo sustain');
+}
 
 // ── 7 · the build writes the sounds of the words beside the song's data, and a rebuild keeps the data ────────────────
 {
@@ -506,6 +653,13 @@ for (const [width, height, rate] of [[1440, 900, 1], [390, 844, 4]]) {
     `${width} px, the 3D head forced onto a renderer without a graphics processor: drawn on WebGL2 (${ink.n} of ${ink.of} pixels warm), at most 30 a second (closest frames ${r.minGap} ms apart)`);
   if (rate === 1) assert(r.headMed <= 2 && r.headP95 <= 4, `${width} px, ${rate}× CPU, the 3D head: its own work, median ${r.headMed} ms ≤ 2, p95 ${r.headP95} ms ≤ 4`);
   else assert(r.headP95 <= 8, `${width} px, ${rate}× CPU, the 3D head: its own work, p95 ${r.headP95} ms ≤ 8`);
+  if (width === 1440) {
+    for (const body of ['female', 'male', 'female', 'male']) {
+      await o.p.click(body === 'female' ? '#tractFemale' : '#tractMale');
+      await o.p.waitForFunction(body => window.Luma.test.tract().body === body, body); await frames(o.p, 3);
+      assert((await o.p.evaluate(() => window.Luma.test.tract())).renderer === 'webgl2', '3D body change keeps the jaw rig valid: ' + body);
+    }
+  }
   await done(o, width + ' px 3D head');
 }
 // on a graphics processor the head is drawn into a multisampled framebuffer of its own and copied onto the canvas (drawn

@@ -2100,7 +2100,7 @@ window.Luma={diagnostics:()=>({mode:s.mode,busy:s.busy,pending:s.awaitFinish,tim
   // every note's bar as the roll draws it at the moment shown (chart coordinates), with its times
   noteRects:()=>{const t=now(),b=bounds(),v=view(t),o=effective().octave,rowH=(b.bottom-b.top)/(s.rangeHi-s.rangeLo),barH=clamp(rowH*.74,7,26),x=a=>b.left+(a-v.a)/v.span*(b.right-b.left),y=m=>b.bottom-(m-s.rangeLo)/(s.rangeHi-s.rangeLo)*(b.bottom-b.top);
    return song.notes.filter(n=>n.b>=v.a&&n.a<=v.b).map(n=>({id:n.id,a:n.a,b:n.b,x0:Math.max(b.left,x(n.a)),x1:Math.min(b.right,Math.max(x(n.a)+2,x(n.b))),y0:y(n.m+o)-barH/2,y1:y(n.m+o)+barH/2}));},
-  tract:()=>{const el=$('tract'),r=el.getBoundingClientRect(),c=$('chartWrap').getBoundingClientRect();return {...(tract?tract.state():{}),pref:prefs.tract,pref_body:prefs.tractBody,hidden:el.hidden,mode:el.dataset.mode||null,shape:el.dataset.shape||null,spot:el.dataset.spot||null,small:el.dataset.small==='1',big:!!s.tractBig,box:{x0:r.left-c.left,y0:r.top-c.top,x1:r.right-c.left,y1:r.bottom-c.top},overlay:s.tractBox?{...s.tractBox}:null};},
+  tract:(measure=false)=>{const el=$('tract'),r=el.getBoundingClientRect(),c=$('chartWrap').getBoundingClientRect();return {...(tract?tract.state(measure):{}),pref:prefs.tract,pref_body:prefs.tractBody,hidden:el.hidden,mode:el.dataset.mode||null,shape:el.dataset.shape||null,spot:el.dataset.spot||null,small:el.dataset.small==='1',big:!!s.tractBig,box:{x0:r.left-c.left,y0:r.top-c.top,x1:r.right-c.left,y1:r.bottom-c.top},overlay:s.tractBox?{...s.tractBox}:null};},
   // one frame of the head alone at song time t (as the trainer's tick draws it), and its own time
   tractFrame:(t,moving=true)=>{if(!s.tractOn)return null;const t0=performance.now();const drew=tract.frame(t,moving);return {ms:performance.now()-t0,drew};},
   tractYaw:v=>tract?.yaw(v),tractTimeline:()=>tract?.timeline(),
@@ -2128,7 +2128,7 @@ window.Luma={diagnostics:()=>({mode:s.mode,busy:s.busy,pending:s.awaitFinish,tim
   wordless:()=>{const w=scoredSpans();return {on:w.on,spans:w.spans.map(x=>[...x]),last:w.last,raw:t=>targetAt(t,effective(),true)};},
   history:historyHooks}};
 if(RENDER)window.Luma.render={load:renderLoad,frame:async u=>{const info=await renderFrame(u);window.LumaRender?.overlay(g,info);return info;}};
-if(!RENDER&&window.LumaTract)tract=window.LumaTract.attach({el:$('tract'),song:()=>song,now:()=>now(),reduced:()=>reduced.matches,dpr:()=>Math.min(window.devicePixelRatio||1,2),idle:()=>s.mode==='idle'&&!s.busy,
+if(!RENDER&&window.LumaTract)tract=window.LumaTract.attach({el:$('tract'),song:()=>song,octave:()=>effective().octave,now:()=>now(),reduced:()=>reduced.matches,dpr:()=>Math.min(window.devicePixelRatio||1,2),idle:()=>s.mode==='idle'&&!s.busy,
  body:()=>prefs.tractBody,enlarge:()=>{if(s.mode!=='idle'||!s.tractOn||$('tract').dataset.mode!=='overlay')return;bigTract(!s.tractBig);}});
 populateSong();fitStage();resize();setRangeScale();updateReadout(s.pos);if(!RENDER)loadHistory();
 // The record line («Рекорд») gave way to the dust of past takes, which has no switch: a saved `shadow` is dropped, never
