@@ -1,7 +1,9 @@
 # Song auto-placement: offline command and measured model choice
 
 Choose **MMS for word proposals** and retain **pYIN + CREPE for melody**. The
-placement path stays opt-in: neither alternative pitch configuration
+placement path stays opt-in. The measured boundary refinement also stays opt-in
+(`--word-refinement boundary`): its pooled median and 200 ms accuracy regress.
+Neither alternative pitch configuration
 beats the saved baseline on the required combination of pitch and unpitched
 metrics.
 
@@ -21,7 +23,9 @@ edited by a smaller model and contains many words with reference confidence
 pooled results give both A–D and A–E. Filtering word confidence leaves pitch
 metrics unchanged: word confidence supplies no frame-level pitch annotation.
 
-These are five selected, difficult recordings, with no independent holdout.
+These are five selected, difficult recordings. Model selection had no independent
+holdout. The later fixed-rule refinement audit excludes each song in turn without
+fitting parameters on the other four; it supplies no new independent recordings.
 Unchanged reference contour frames retain the old algorithm's decisions. This
 favours the saved pitch baseline, so small differences cannot establish absolute
 pitch accuracy. An absent `unpitched` annotation supplies no scream/noise labels
@@ -373,6 +377,7 @@ active Python environment. Provision weights once while online:
 "$PY" -m tools.song_auto.run "$PKG" --scratch "$S" --model-cache "$MODELS"
 # Optional: --device cpu (auto chooses CUDA when available).
 # Optional: --seed-target "$BEFORE/target.json" for independent coarse clocks.
+# Experimental: --word-refinement boundary (or boundary-baseline).
 ```
 
 Inference denies socket connections, including implicit downloads on cache miss.
@@ -437,6 +442,11 @@ For newly prepared songs, add `--auto-place` to `studio/prepare_song.py`; set
 `TORCH_HOME="$MODELS"` to the provisioned cache. It uses the freshly recognized
 text and freshly computed melody, runs MMS plus end checks and builds the final
 trainer normally. Its QA report is in `manifest.json` under `steps.auto_place`.
+Add `--word-refinement boundary` or `boundary-baseline` with `--auto-place` to
+try the measured experimental refinement. Preparation refuses a refinement option
+without `--auto-place`, before creating a package. The fallback uses only the
+pre-alignment target (in preparation, the freshly recognized and onset-snapped
+words); it never uses a corrected evaluation target.
 This option does not change preparation's optional Soniox recognition or Demucs
 download behaviour. The existing-package command itself uses no paid service.
 Preparation remains opt-in because superiority on both required components
@@ -539,17 +549,257 @@ Fresh melody agrees within 50 cents on 97.5% of voiced reference frames against
 97.6% for the saved baseline; false unpitched contour is 10.4% against 10.1%.
 Held-note gaps and octave errors remain; the command lists their numeric
 candidates for review. These small pitch differences cannot establish absolute
-accuracy on the visual reference. Word ordering is valid by construction; its acoustic limitations remain visible in the errors and QA flags. Fresh baseline-model inference is measured here independently of saved baseline replay. The retained melody component does not establish superiority on both required jobs. There is no automatic listening verification, independent holdout, reference-library apply, browser test, full-song CPU benchmark or fresh paid transcription/separation evaluation in this campaign. Generic noise annotation is conservative and supplies no scream-identification accuracy claim.
+accuracy on the visual reference. Word ordering is valid by construction; its acoustic limitations remain visible in the errors and QA flags. Fresh baseline-model inference is measured here independently of saved baseline replay. The retained melody component does not establish superiority on both required jobs. There is no automatic listening verification, independent recording holdout, reference-library apply, browser test, full-song CPU benchmark or fresh paid transcription/separation evaluation in this campaign. Generic noise annotation is conservative and supplies no scream-identification accuracy claim.
+
+## Boundary refinement: fixed rules and held-out audit
+
+**Keep refinement opt-in. It does not close the autonomous-placement gap.**
+Across A–E, raw MMS has 126.6 ms median error, 41.6% within 80 ms and 56.6%
+within 200 ms. Boundary refinement gives 145.5 ms, 43.0% and 54.6%; the
+per-word baseline fallback gives 145.5 ms, 43.3% and 54.1%. Zero crossings
+come from retaining the existing order guard. The ordered-only command gives
+138.5 ms, 41.4% and 56.0%. Both refinements fail the requested condition of
+improving raw alignment without a clearly worse song.
+
+The command defaults to `--word-refinement none`. Try the experimental step
+with `--word-refinement boundary`; `boundary-baseline` adds the measured
+per-word fallback. `studio/prepare_song.py --auto-place` remains opt-in under
+the specification's rule: neither refinement establishes a reliable word win
+on every song, and melody superiority over today's baseline is still unproven
+(97.5% versus 97.6% within 50 cents; 10.4% versus 10.1% false unpitched contour).
+
+The implementation in `tools/song_auto/refine.py` consumes the fresh contour,
+shared QA features, aligned words and, for the fallback only, the saved before
+words. It never reads corrected evaluation starts, contour or unpitched spans.
+It reuses `placement.Evidence`; the scorer and placement screen are unchanged.
+The following constants were fixed from the written procedure before scoring:
+
+- Search at most 250 ms from an order-repaired aligner start. This is half
+  the QA held-note exclusion window and limits a correction to local evidence;
+  it supplies no claim that the nearest sign belongs to the right syllable.
+- Reuse actual contour transitions, pitch steps of at least 0.8 semitone
+  within 150 ms, and onsets at least 0.25 times the full envelope's 99.5th
+  percentile. Absent contour supplies no edge. Retained baseline times also
+  need a qualified sign within 60 ms, displacement at most 250 ms, and order.
+- Reject candidates inside QA's level-note window: finite contour for 250 ms
+  each side, within 0.5 semitone of its median. Check the stored millisecond
+  time after rounding. A strong burst within that window cannot override it.
+- A step additionally needs 80 ms plateaus on both sides, each spanning at
+  most 0.5 semitone, and no return to the preceding pitch in the following
+  150 ms. This rejects returning vibrato and leaves ambiguous bends unresolved.
+- Count syllables from the bundled CMU dictionary's first pronunciation,
+  summing compound components. Unknown spellings get no invented count.
+  Count phrase segments after gaps of at least 40 ms or qualified steps.
+  With a unique exact syllable/segment count and every word assignment in
+  reach, use cumulative syllable counts to select each word's first segment.
+  This places a multi-syllable word before its last long note and retains a
+  compound through the last aligned subword's end. Excess segments, missing
+  segments and unknown counts remain in the audit; unresolved multi-syllable
+  words and syllable shortfalls are doubtful. Melisma, vowel/formant changes
+  and voice identity cannot be established by this count alone.
+- Select candidates jointly in lyric order with at least 40 ms between starts,
+  first minimizing unsupported starts, then preserving feasible exact-count
+  assignments (or the explicit baseline fallback), then minimizing movement.
+  Ties select earlier starts. Word ends retain their aligned span, capped at
+  the next word. No subsequent projection can shift a selected sign inside
+  a level note. If no usable sign is reachable, keep the order-repaired
+  aligner start and mark it doubtful; order conflicts also remain doubtful.
+
+`checks.json` contains per-word old/new starts, decisions, doubtful reasons,
+word/phrase syllable counts, contour-segment counts and exact-assignment status.
+The baseline fallback uses maximum ordered token matches without reference
+word times; unmatched baseline text provides no fallback. A boundary alone
+never raises acoustic confidence or removes another QA doubt.
+
+Measurement replays the previous stage's native MMS proposals and fresh
+pYIN + CREPE output on all five songs, isolating the refinement from neural
+variation. Shared features were recomputed serially from the read-only stems.
+The full scratch CLI and trainer build were replayed with cached neural output
+for each song; generated lyrics equal the measured target, and the unchanged
+scoring CLI reads those outputs back. This is a cached-output replay, with no
+new neural inference runtime or speedup claim. The earlier full GPU timings
+remain above. All audited input hashes and modification times stay unchanged.
+
+The visual reference was set by eye and never checked by ear. E was corrected
+by a smaller model and has many c <= 0.4 words. Every comparison below reports
+all / reference c > 0.4 and pooled A–D / A–E. Historical text differences,
+missing-token penalties and pickup-proxy limits remain as described above.
+
+The radius, QA thresholds, plateau rule and syllable policy use no fitted
+parameters. The held-out audit rotates through A to E: each excluded song's
+prediction is reproduced with the same fixed configuration; the other four
+songs are unused. Pooled held-out predictions therefore equal the pooled
+fixed-rule results. This is the reasoning-fixed alternative to tuning on four
+songs; it does not create an independent model-selection or listening test.
+
+### Fixed-rule word starts
+
+All / reference c > 0.4. In the count column each pair is reference / matched. Raw includes unrepaired crossings; boundary and hybrid include the existing order repair. The ordered-only path is reported in the end-to-end tables above.
+Crossings cover all predicted starts, including confidence/pickup subsets.
+Here `hybrid` means `boundary-baseline`.
+
+| Song / set | Path | Reference / matched | Median ms | Within 80 ms % | Within 200 ms % | Crossings |
+|---|---|---:|---:|---:|---:|---:|
+| A | baseline | 167 / 84 / 156 / 81 | 1654.0 / 1440.0 | 12.0 / 12.8 | 13.8 / 14.7 | 0 |
+| A | raw | 167 / 167 / 156 / 156 | 234.7 / 250.4 | 35.3 / 35.9 | 46.7 / 45.5 | 6 |
+| A | boundary | 167 / 167 / 156 / 156 | 278.0 / 279.0 | 34.7 / 34.6 | 44.3 / 43.6 | 0 |
+| A | hybrid | 167 / 167 / 156 / 156 | 273.0 / 275.5 | 35.3 / 35.3 | 44.9 / 44.2 | 0 |
+| B | baseline | 166 / 143 / 164 / 141 | 575.5 / 583.5 | 2.4 / 2.4 | 10.2 / 9.8 | 0 |
+| B | raw | 166 / 166 / 164 / 164 | 85.9 / 85.9 | 48.2 / 48.2 | 69.3 / 69.5 | 4 |
+| B | boundary | 166 / 166 / 164 / 164 | 81.0 / 81.0 | 48.8 / 48.8 | 63.9 / 64.0 | 0 |
+| B | hybrid | 166 / 166 / 164 / 164 | 92.5 / 92.5 | 47.0 / 47.0 | 61.4 / 61.6 | 0 |
+| C | baseline | 203 / 158 / 183 / 142 | 401.0 / 412.0 | 31.0 / 31.1 | 37.4 / 36.6 | 0 |
+| C | raw | 203 / 203 / 183 / 183 | 286.1 / 259.1 | 33.0 / 33.9 | 42.9 / 44.8 | 4 |
+| C | boundary | 203 / 203 / 183 / 183 | 267.0 / 260.0 | 30.0 / 31.7 | 41.9 / 44.3 | 0 |
+| C | hybrid | 203 / 203 / 183 / 183 | 267.0 / 255.0 | 32.0 / 33.9 | 42.4 / 44.8 | 0 |
+| D | baseline | 270 / 270 / 233 / 233 | 40.5 / 29.0 | 52.6 / 60.1 | 61.1 / 67.0 | 0 |
+| D | raw | 270 / 270 / 233 / 233 | 197.7 / 201.0 | 35.9 / 34.3 | 50.0 / 49.8 | 8 |
+| D | boundary | 270 / 270 / 233 / 233 | 209.0 / 208.0 | 38.5 / 39.1 | 49.3 / 49.8 | 0 |
+| D | hybrid | 270 / 270 / 233 / 233 | 204.0 / 170.0 | 40.0 / 41.6 | 50.0 / 51.1 | 0 |
+| E | baseline | 280 / 278 / 171 / 169 | 595.0 / 478.0 | 7.9 / 9.9 | 11.1 / 12.9 | 0 |
+| E | raw | 280 / 280 / 171 / 171 | 69.5 / 46.2 | 53.2 / 65.5 | 71.4 / 83.0 | 6 |
+| E | boundary | 280 / 280 / 171 / 171 | 40.5 / 17.0 | 58.2 / 71.3 | 69.6 / 80.7 | 0 |
+| E | hybrid | 280 / 280 / 171 / 171 | 40.5 / 21.0 | 57.1 / 70.2 | 67.5 / 77.2 | 0 |
+| A–D | baseline | 806 / 655 / 736 / 597 | 422.5 / 416.5 | 28.4 / 30.0 | 34.9 / 35.6 | 0 |
+| A–D | raw | 806 / 806 / 736 / 736 | 188.2 / 182.8 | 37.6 / 37.6 | 51.5 / 52.0 | 22 |
+| A–D | boundary | 806 / 806 / 736 / 736 | 208.5 / 198.0 | 37.7 / 38.5 | 49.4 / 50.3 | 0 |
+| A–D | hybrid | 806 / 806 / 736 / 736 | 208.5 / 197.5 | 38.5 / 39.5 | 49.4 / 50.4 | 0 |
+| A–E | baseline | 1086 / 933 / 907 / 766 | 470.0 / 432.0 | 23.1 / 26.2 | 28.7 / 31.3 | 0 |
+| A–E | raw | 1086 / 1086 / 907 / 907 | 126.6 / 119.8 | 41.6 / 42.9 | 56.6 / 57.9 | 28 |
+| A–E | boundary | 1086 / 1086 / 907 / 907 | 145.5 / 122.0 | 43.0 / 44.7 | 54.6 / 56.0 | 0 |
+| A–E | hybrid | 1086 / 1086 / 907 / 907 | 145.5 / 122.0 | 43.3 / 45.3 | 54.1 / 55.5 | 0 |
+
+### Fixed-rule pickup proxy
+
+Same scorer and small reference-defined proxy subset; all / reference c > 0.4.
+
+| Song / set | Path | Reference / matched | Median ms | Within 80 ms % | Within 200 ms % | Crossings |
+|---|---|---:|---:|---:|---:|---:|
+| A | baseline | 2 / 1 / 2 / 1 | N/A / N/A | 50.0 / 50.0 | 50.0 / 50.0 | 0 |
+| A | raw | 2 / 2 / 2 / 2 | 350.4 / 350.4 | 0.0 / 0.0 | 0.0 / 0.0 | 6 |
+| A | boundary | 2 / 2 / 2 / 2 | 364.5 / 364.5 | 0.0 / 0.0 | 0.0 / 0.0 | 0 |
+| A | hybrid | 2 / 2 / 2 / 2 | 364.5 / 364.5 | 0.0 / 0.0 | 0.0 / 0.0 | 0 |
+| B | baseline | 9 / 9 / 9 / 9 | 267.0 / 267.0 | 0.0 / 0.0 | 11.1 / 11.1 | 0 |
+| B | raw | 9 / 9 / 9 / 9 | 23.0 / 23.0 | 66.7 / 66.7 | 88.9 / 88.9 | 4 |
+| B | boundary | 9 / 9 / 9 / 9 | 0.0 / 0.0 | 88.9 / 88.9 | 88.9 / 88.9 | 0 |
+| B | hybrid | 9 / 9 / 9 / 9 | 0.0 / 0.0 | 88.9 / 88.9 | 88.9 / 88.9 | 0 |
+| C | baseline | 5 / 4 / 5 / 4 | 209.0 / 209.0 | 40.0 / 40.0 | 40.0 / 40.0 | 0 |
+| C | raw | 5 / 5 / 5 / 5 | 558.1 / 558.1 | 40.0 / 40.0 | 40.0 / 40.0 | 4 |
+| C | boundary | 5 / 5 / 5 / 5 | 534.0 / 534.0 | 40.0 / 40.0 | 40.0 / 40.0 | 0 |
+| C | hybrid | 5 / 5 / 5 / 5 | 534.0 / 534.0 | 20.0 / 20.0 | 20.0 / 20.0 | 0 |
+| D | baseline | 14 / 14 / 10 / 10 | 130.0 / 125.5 | 28.6 / 40.0 | 64.3 / 70.0 | 0 |
+| D | raw | 14 / 14 / 10 / 10 | 24.5 / 22.7 | 71.4 / 60.0 | 78.6 / 70.0 | 8 |
+| D | boundary | 14 / 14 / 10 / 10 | 9.0 / 9.0 | 85.7 / 80.0 | 92.9 / 90.0 | 0 |
+| D | hybrid | 14 / 14 / 10 / 10 | 42.0 / 42.0 | 64.3 / 60.0 | 85.7 / 80.0 | 0 |
+| E | baseline | 2 / 2 / 2 / 2 | 80.5 / 80.5 | 50.0 / 50.0 | 100.0 / 100.0 | 0 |
+| E | raw | 2 / 2 / 2 / 2 | 194.5 / 194.5 | 50.0 / 50.0 | 50.0 / 50.0 | 6 |
+| E | boundary | 2 / 2 / 2 / 2 | 197.5 / 197.5 | 50.0 / 50.0 | 50.0 / 50.0 | 0 |
+| E | hybrid | 2 / 2 / 2 / 2 | 110.5 / 110.5 | 50.0 / 50.0 | 100.0 / 100.0 | 0 |
+| A–D | baseline | 30 / 28 / 26 / 24 | 237.0 / 237.0 | 23.3 / 26.9 | 43.3 / 42.3 | 0 |
+| A–D | raw | 30 / 30 / 26 / 26 | 26.5 / 37.4 | 60.0 / 53.8 | 70.0 / 65.4 | 22 |
+| A–D | boundary | 30 / 30 / 26 / 26 | 10.0 / 10.0 | 73.3 / 69.2 | 76.7 / 73.1 | 0 |
+| A–D | hybrid | 30 / 30 / 26 / 26 | 40.5 / 40.5 | 60.0 / 57.7 | 70.0 / 65.4 | 0 |
+| A–E | baseline | 32 / 30 / 28 / 26 | 216.5 / 216.5 | 25.0 / 28.6 | 46.9 / 46.4 | 0 |
+| A–E | raw | 32 / 32 / 28 / 28 | 33.0 / 45.1 | 59.4 / 53.6 | 68.8 / 64.3 | 28 |
+| A–E | boundary | 32 / 32 / 28 / 28 | 12.0 / 12.0 | 71.9 / 67.9 | 75.0 / 71.4 | 0 |
+| A–E | hybrid | 32 / 32 / 28 / 28 | 42.5 / 42.5 | 59.4 / 57.1 | 71.9 / 67.9 | 0 |
+
+### Placement screen and doubtful words
+
+The screen uses each path’s own contour. Counts and percentages use actual predicted starts, so missing reference words do not enter this denominator. Confident subsets contain only exact matched predictions with reference c > 0.4. All / confident. Baseline doubtful counts apply the same end checks to the historical target; its stored original confidence alone is not the count shown.
+
+| Song / set | Path | Predicted starts | No boundary % | Inside level count | Doubtful count |
+|---|---|---:|---:|---:|---:|
+| A | baseline | 157 / 81 | 32.5 / 27.2 | 14 / 11 | 151 / 76 |
+| A | raw | 167 / 156 | 24.6 / 25.0 | 17 / 16 | 167 / 156 |
+| A | ordered | 167 / 156 | 27.5 / 26.3 | 16 / 15 | 167 / 156 |
+| A | boundary | 167 / 156 | 9.6 / 9.0 | 14 / 13 | 167 / 156 |
+| A | hybrid | 167 / 156 | 9.6 / 9.0 | 14 / 13 | 167 / 156 |
+| B | baseline | 165 / 141 | 26.1 / 24.8 | 45 / 38 | 147 / 125 |
+| B | raw | 166 / 164 | 9.0 / 9.1 | 11 / 11 | 166 / 164 |
+| B | ordered | 166 / 164 | 10.2 / 10.4 | 11 / 11 | 166 / 164 |
+| B | boundary | 166 / 164 | 3.0 / 3.0 | 7 / 7 | 166 / 164 |
+| B | hybrid | 166 / 164 | 3.0 / 3.0 | 7 / 7 | 166 / 164 |
+| C | baseline | 208 / 142 | 21.6 / 22.5 | 25 / 19 | 194 / 131 |
+| C | raw | 203 / 183 | 21.2 / 21.3 | 27 / 25 | 203 / 183 |
+| C | ordered | 203 / 183 | 21.7 / 21.3 | 27 / 25 | 203 / 183 |
+| C | boundary | 203 / 183 | 6.9 / 6.6 | 16 / 16 | 203 / 183 |
+| C | hybrid | 203 / 183 | 6.4 / 6.0 | 16 / 16 | 203 / 183 |
+| D | baseline | 282 / 233 | 23.8 / 20.2 | 28 / 20 | 281 / 232 |
+| D | raw | 270 / 233 | 15.2 / 15.0 | 13 / 12 | 270 / 233 |
+| D | ordered | 270 / 233 | 17.4 / 17.6 | 13 / 12 | 270 / 233 |
+| D | boundary | 270 / 233 | 5.9 / 6.9 | 11 / 11 | 270 / 233 |
+| D | hybrid | 270 / 233 | 5.9 / 6.9 | 10 / 10 | 270 / 233 |
+| E | baseline | 280 / 169 | 18.2 / 16.0 | 30 / 16 | 269 / 162 |
+| E | raw | 280 / 171 | 17.5 / 14.0 | 11 / 3 | 280 / 171 |
+| E | ordered | 280 / 171 | 17.1 / 14.0 | 11 / 3 | 280 / 171 |
+| E | boundary | 280 / 171 | 2.9 / 0.0 | 10 / 2 | 280 / 171 |
+| E | hybrid | 280 / 171 | 2.9 / 0.0 | 10 / 2 | 280 / 171 |
+| A–D | baseline | 812 / 597 | 25.4 / 22.8 | 112 / 88 | 773 / 564 |
+| A–D | raw | 806 / 736 | 17.4 / 17.4 | 68 / 64 | 806 / 736 |
+| A–D | ordered | 806 / 736 | 19.1 / 18.8 | 67 / 63 | 806 / 736 |
+| A–D | boundary | 806 / 736 | 6.3 / 6.4 | 48 / 47 | 806 / 736 |
+| A–D | hybrid | 806 / 736 | 6.2 / 6.2 | 47 / 46 | 806 / 736 |
+| A–E | baseline | 1092 / 766 | 23.5 / 21.3 | 142 / 104 | 1042 / 726 |
+| A–E | raw | 1086 / 907 | 17.4 / 16.8 | 79 / 67 | 1086 / 907 |
+| A–E | ordered | 1086 / 907 | 18.6 / 17.9 | 78 / 66 | 1086 / 907 |
+| A–E | boundary | 1086 / 907 | 5.4 / 5.2 | 58 / 49 | 1086 / 907 |
+| A–E | hybrid | 1086 / 907 | 5.3 / 5.1 | 57 / 48 | 1086 / 907 |
+
+### Fixed-rule held-out audit
+
+Each row reproduces one excluded song with identical fixed parameters. The other four songs supply no tuning inputs. Each result cell is median ms; within 80%; within 200%, all / reference c > 0.4. The pooled out-of-fold predictions equal the pooled boundary/hybrid rows above. This tests fixed-rule stability; model choice and the visual reference still come from the original five-song study.
+
+| Held out | Other four (unused) | Raw | Boundary | Hybrid |
+|---|---|---|---|---|
+| A | B, C, D, E | 234.7 / 250.4; 35.3 / 35.9; 46.7 / 45.5 | 278.0 / 279.0; 34.7 / 34.6; 44.3 / 43.6 | 273.0 / 275.5; 35.3 / 35.3; 44.9 / 44.2 |
+| B | A, C, D, E | 85.9 / 85.9; 48.2 / 48.2; 69.3 / 69.5 | 81.0 / 81.0; 48.8 / 48.8; 63.9 / 64.0 | 92.5 / 92.5; 47.0 / 47.0; 61.4 / 61.6 |
+| C | A, B, D, E | 286.1 / 259.1; 33.0 / 33.9; 42.9 / 44.8 | 267.0 / 260.0; 30.0 / 31.7; 41.9 / 44.3 | 267.0 / 255.0; 32.0 / 33.9; 42.4 / 44.8 |
+| D | A, B, C, E | 197.7 / 201.0; 35.9 / 34.3; 50.0 / 49.8 | 209.0 / 208.0; 38.5 / 39.1; 49.3 / 49.8 | 204.0 / 170.0; 40.0 / 41.6; 50.0 / 51.1 |
+| E | A, B, C, D | 69.5 / 46.2; 53.2 / 65.5; 71.4 / 83.0 | 40.5 / 17.0; 58.2 / 71.3; 69.6 / 80.7 | 40.5 / 21.0; 57.1 / 70.2; 67.5 / 77.2 |
+
+### Where the refinement helps and hurts
+
+A's median worsens from 234.7 to 278.0 ms and its 200 ms hit rate falls from
+46.7% to 44.3%. B improves median (85.9 to 81.0 ms) while losing 5.4 percentage
+points within 200 ms. C improves median (286.1 to 267.0 ms) while losing both
+80 ms and 200 ms accuracy. D worsens median (197.7 to 209.0 ms) and remains far
+behind today's 40.5 ms baseline. E improves median (69.5 to 40.5 ms) and 80 ms
+accuracy, while its 200 ms accuracy falls from 71.4% to 69.6%. The baseline
+fallback retains 112 supported baseline starts (A–E: 6, 6, 10, 62, 28). It
+does not repair these tradeoffs; B's median becomes 92.5 ms and its
+200 ms hit rate falls to 61.4%. These observations also hold as the individual
+fixed-rule held-out results, with no song-specific thresholds.
+
+Pickup proxies improve pooled: median 33.0 to 12.0 ms, within 80 ms 59.4% to
+71.9%, within 200 ms 68.8% to 75.0%. The tiny individual subsets remain mixed.
+The screen also improves: no-boundary starts fall from 189/1086 (17.4%) raw
+to 59/1086 (5.4%); level-note starts fall from 79 to 58. Those 58 were retained
+unsupported aligner starts. Selected new boundaries never enter a level note.
+Fewer screen flags do not establish closer agreement with the visual reference.
+
+The share over 140 ms grows from 49.1% raw to 50.2% refined (50.3% with the
+baseline fallback). Over 200 ms grows from 43.4% to 45.4% (45.9% fallback).
+**All 1086/1086 generated words remain marked doubtful after final QA.** The
+existing c < 0.6 acoustic gate saturates on these MMS scores, and no calibrated
+confidence or listening verification was added. The confidence and QA rules certify no review-free word subset. The doubtful
+mark supplies a review signal without a calibrated error probability. By its
+current review contract, 100% would still receive a human or agent look.
+Even a threshold that ignored those confidence flags would leave about half
+of starts over 140 ms from the eye-set reference. The requested unattended
+placement outcome remains unmet; the experimental flags preserve the measured
+result without changing the default.
 
 ## Verification
 
-All **422 Python tests across 17 files passed** in an isolated scratch export,
+All **435 Python tests across 18 files passed** in an isolated scratch export,
 with explicit file paths, one process at a time under the heavy-command gate.
-This includes 26 benchmark tests and 21 command tests. Browser suites were
+This includes 26 benchmark tests, 21 command tests and 13 refinement tests. Browser suites were
 outside scope. No test downloads model weights.
 
-Run `python tests/song_auto_bench_test.py` and `python tests/song_auto_test.py`,
-and each other Python test file under `tests/`, using the project’s gate and
+Run `python tests/song_auto_bench_test.py`, `python tests/song_auto_test.py`,
+`python tests/song_auto_refine_test.py`, and each other Python test file under
+`tests/`, using the project’s gate and
 an isolated HOME, XDG configuration/data/cache directories and TMPDIR. The
 full run used the existing project Python and read-only dependencies; candidate
 and command probes used a separate scratch environment. No production dependency
@@ -565,6 +815,13 @@ build and embedded-target equality, failures after each write, missing prior
 records, backup failure, stale targets and concurrent writers. Preparation tests
 cover the default, opt-in reuse of fresh pitch, manifest/HTML consistency and
 cache failure before target publication. One-time provisioning is stubbed.
+
+The refinement tests cover contour edges, inclusive search radius, strong-onset
+thresholds, pitch steps, returning vibrato, held-note and rounding exclusions,
+compound spans, first syllables, unavailable counts, collision fallback, order
+keeping, baseline ownership, doubtful marking, CLI restarts and preparation
+option propagation/refusal. Real synthetic audio uses stubbed aligner output
+and synthetic pitch fixtures; no inference model is downloaded.
 
 The prior benchmark tests cover common-text matching and missing-word penalties,
 confidence/pickup subsets, numeric pitch/unpitched/held-gap metrics, pooling,

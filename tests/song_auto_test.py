@@ -271,7 +271,7 @@ class Process(unittest.TestCase):
             for _ in range(2):
                 env={**os.environ,'TMPDIR':str(root)}
                 result=subprocess.run([sys.executable,str(runner),str(pkg),'--device','cpu',
-                    '--model-cache',str(root/'models')],env=env,capture_output=True,text=True,timeout=60)
+                    '--model-cache',str(root/'models'),'--word-refinement','boundary'],env=env,capture_output=True,text=True,timeout=60)
                 self.assertEqual(result.returncode,0,result.stderr)
                 response=json.loads(result.stdout.splitlines()[-1]); output=Path(response['output'])
                 outputs.append(output)
@@ -279,6 +279,7 @@ class Process(unittest.TestCase):
                 self.assertEqual(score.score(target(),neutral)['words']['all']['within80'],1.)
                 self.assertTrue((output.parent/'trainer.html').exists())
                 self.assertIn('QA:',result.stdout)
+                self.assertEqual(run.bench.read(output.parent/'checks.json')['refinement'],'boundary')
             self.assertNotEqual(outputs[0],outputs[1])
             self.assertEqual(run.bench.read(outputs[0])['pitch'],run.bench.read(outputs[1])['pitch'])
             self.assertEqual({p:(p.read_bytes(),p.stat().st_mtime_ns) for p in before},before)
@@ -300,19 +301,21 @@ class Preparation(unittest.TestCase):
     def test_option_default_reuses_fresh_pitch_and_propagates_failure(self):
         sys.path.insert(0,str(ROOT/'studio'))
         import prepare_song as prepare
-        for mode in ('default','auto','failure'):
+        for mode in ('default','auto','refined','failure'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as d:
                 root=Path(d); src=root/'input.wav'
                 sf.write(src,np.zeros((88200,2)),44100)
                 args=['prepare_song.py',str(src),'--title','Synthetic','--out',str(root/'songs'),'--device','cpu']
                 if mode!='default': args.append('--auto-place')
+                if mode=='refined': args.extend(['--word-refinement','boundary'])
                 raw=[dict(text=' ab-cd',start_ms=200,end_ms=500,confidence=.9),
                      dict(text=' ef',start_ms=600,end_ms=1200,confidence=.9)]
                 seen=[]
-                def placement(pkg,base,seed,device,pitch_song=None):
+                def placement(pkg,base,seed,device,pitch_song=None,refinement='none'):
                     seen.append(pitch_song)
                     self.assertIs(pitch_song,base)
                     self.assertIs(seed,base)
+                    self.assertEqual(refinement,'boundary' if mode=='refined' else 'none')
                     if mode=='failure': raise RuntimeError('offline cache miss')
                     song=copy.deepcopy(base); song['id']='abcdef01234567890123'
                     return song,dict(flags=[],review_required=False)
@@ -340,8 +343,8 @@ class Preparation(unittest.TestCase):
                 else:
                     manifest=run.bench.read(pkg/'manifest.json')
                     song=run.bench.read(pkg/'target.json')
-                    self.assertEqual('auto_place' in manifest['steps'],mode=='auto')
-                    self.assertEqual(song['id'],'abcdef01234567890123' if mode=='auto' else target()['id'])
+                    self.assertEqual('auto_place' in manifest['steps'],mode!='default')
+                    self.assertEqual(song['id'],'abcdef01234567890123' if mode!='default' else target()['id'])
                     self.assertEqual(manifest['map']['id'],song['id'])
                     from build_html import embedded_song
                     self.assertEqual(json.loads(embedded_song(root/'songs/Luma_Synthetic.html')),song)

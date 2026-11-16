@@ -143,7 +143,7 @@ def pitch_target(package, base, device):
                      base.get('title', ''), base.get('artist', ''), 'pYIN + CREPE')
 
 
-def place(package, base, seed, device, pitch_song=None):
+def place(package, base, seed, device, pitch_song=None, refinement='none'):
     """Shared entry for existing packages and preparation's opt-in path."""
     proposals, _ = bench.align(package, base.get('lyrics', []), seed, 'mms', device) if base.get('lyrics') else ([], {})
     # The acoustic model is local to align(); collect it before pitch inference.
@@ -159,6 +159,29 @@ def place(package, base, seed, device, pitch_song=None):
     F = compute(package)
     unpitched(song, F)
     song['notes'], song['phrases'], song['metrics'], song['initialTime'], _ = derive(song['points'], song['duration'], [])
+    if refinement not in ('none', 'boundary', 'boundary-baseline'):
+        raise ValueError('unknown word refinement')
+    refinement_audit = []
+    if refinement != 'none':
+        from .refine import refine
+        song, refinement_audit = refine(song, F, seed if refinement == 'boundary-baseline' else None)
+        flags += [f for f in refinement_audit if f['doubtful']]
+    report = end_checks(song, F, flags)
+    report.update(refinement=refinement, refinement_audit=refinement_audit)
+    song.update(status='unverified_draft', createdBy='song_auto: MMS + pYIN + CREPE; deterministic QA; listening required',
+                lyricsSource='Known package text; offline MMS forced alignment',
+                method='MMS word placement + pYIN + CREPE melody')
+    # A changed map gets a new edit namespace; identical outputs keep their id.
+    content = {k: song[k] for k in ('points', 'lyrics', 'unpitched')}
+    song['id'] = hashlib.sha256((str(base.get('sourceId', '')) + json.dumps(content, sort_keys=True)).encode()).hexdigest()[:20]
+    if validate(song):
+        raise ValueError('generated target fails schema validation')
+    return song, report
+
+
+def end_checks(song, F, flags=()):
+    """Shared final screen and confidence marking, also used for cached replays."""
+    flags = list(flags)
     placement = screen(song, F)
     candidates = detect(song, {k[3:]: v for k, v in F.items() if k.startswith('qa_')})
     flags += placement['flags'] + candidates
@@ -173,16 +196,8 @@ def place(package, base, seed, device, pitch_song=None):
     flags += [dict(type='word_confidence', word=i, a=w['a'], b=w['b'])
               for i, w in enumerate(words) if w['c'] <= .4]
     flags.sort(key=lambda f: (f['a'], f['type'], f.get('word', -1)))
-    song.update(status='unverified_draft', createdBy='song_auto: MMS + pYIN + CREPE; deterministic QA; listening required',
-                lyricsSource='Known package text; offline MMS forced alignment',
-                method='MMS word placement + pYIN + CREPE melody')
-    # A changed map gets a new edit namespace; identical outputs keep their id.
-    content = {k: song[k] for k in ('points', 'lyrics', 'unpitched')}
-    song['id'] = hashlib.sha256((str(base.get('sourceId', '')) + json.dumps(content, sort_keys=True)).encode()).hexdigest()[:20]
-    if validate(song):
-        raise ValueError('generated target fails schema validation')
-    return song, dict(flags=flags, review_required=bool(flags), placement=placement,
-                      models=dict(words='MMS_FA', melody='pYIN + CREPE full'))
+    return dict(flags=flags, review_required=bool(flags), placement=placement,
+                models=dict(words='MMS_FA', melody='pYIN + CREPE full'))
 
 
 def trainer_path(package, explicit=None):
@@ -282,6 +297,8 @@ def main(argv=None):
     ap.add_argument('--scratch', type=Path, default=Path(tempfile.gettempdir())/'luma-song-auto')
     ap.add_argument('--seed-target', type=Path, help='optional coarse timing source; defaults to package target')
     ap.add_argument('--device', choices=('auto', 'cpu', 'cuda'), default='auto')
+    ap.add_argument('--word-refinement', choices=('none', 'boundary', 'boundary-baseline'), default='none',
+                    help='experimental boundary snapping; default none (see measured limits)')
     ap.add_argument('--apply', action='store_true')
     ap.add_argument('--trainer', type=Path, help='existing trainer to back up and replace with --apply')
     ap.add_argument('--download-models', action='store_true', help='one-time MMS download; checks CREPE installation')
@@ -322,7 +339,7 @@ def main(argv=None):
         torch.manual_seed(0)
         torch.set_num_threads(2)
         device = ('cuda' if torch.cuda.is_available() else 'cpu') if args.device == 'auto' else args.device
-        song, report = place(package, base, bench.read(seed), device)
+        song, report = place(package, base, bench.read(seed), device, refinement=args.word_refinement)
         html = full_build(package, song, destination)
     if any(bench.digest(p) != h for p, h in inputs.items()):
         raise ValueError('input changed during run')

@@ -246,7 +246,10 @@ def main():
     ap.add_argument('--no-lyrics', action='store_true'); ap.add_argument('--lang', default='en'); ap.add_argument('--out-html')
     ap.add_argument('--lyrics-from', default='vocal', choices=['vocal', 'mix'], help='audio sent to Soniox: the separated vocal stem (default) or the full mix')
     ap.add_argument('--auto-place', action='store_true', help='opt-in offline MMS placement and deterministic QA after transcription; requires cached weights')
+    ap.add_argument('--word-refinement', choices=['none', 'boundary', 'boundary-baseline'], default='none', help='experimental word boundary refinement with --auto-place')
     a = ap.parse_args(); src = Path(a.audio).expanduser().resolve()
+    if a.word_refinement != 'none' and not a.auto_place:
+        ap.error('--word-refinement requires --auto-place')
     if not src.is_file(): ap.error('audio file not found')
     slug = slugify(a.title); pkg = Path(a.out).expanduser().resolve() / slug; work = pkg / 'work'; pkg.mkdir(parents=True, exist_ok=True); work.mkdir(exist_ok=True)
     out_html = Path(a.out_html).expanduser().resolve() if a.out_html else pkg.parent / f'Luma_{slug}.html'
@@ -316,7 +319,7 @@ def main():
         from tools.song_auto.run import place, offline, print_checks
         os.environ.setdefault('TORCH_HOME', str(Path.home()/'.cache/luma-song-auto/torch'))
         with offline():
-            song, report = place(pkg, song, song, device, pitch_song=song)
+            song, report = place(pkg, song, song, device, pitch_song=song, refinement=a.word_refinement)
         manifest['steps']['auto_place'] = report
         print_checks(report)
         manifest['map'] = {'id': song['id'], 'metrics': song['metrics'], 'notes': len(song['notes']),
