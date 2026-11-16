@@ -1,0 +1,9 @@
+# Optional upstream SOFA adapter; install alongside the project and bench requirements.
+# Source and checkpoint are supplied explicitly, never installed into the repository.
+lightning==2.6.6
+textgrid==1.6.1
+chardet==7.7.0
+pandas==3.1.1
+h5py==3.16.0
+PyYAML==6.0.3
+tensorboardX==2.6.5
