@@ -183,7 +183,7 @@ def apply_melody(pkg: Path, points, ops):
             raise ValueError('octave shift must be -12 or 12')
         if 'kind' in op and ('lo' in op or 'hi' in op):
             raise ValueError('unpitched clear must remove the whole pitch range')
-        if op.get('kind'): a = math.floor((a + 1e-9) / HOP) * HOP
+        if op.get('kind'): a = round(math.floor((a + 1e-9) / HOP) * HOP, 9)
         i0, i1 = np.searchsorted([p[0] for p in points], [a, b]); i0, i1 = int(i0), int(i1)
         lo, hi = op.get('lo', -1e9), op.get('hi', 1e9); n = 0
         if kind == 'fill':
@@ -257,7 +257,7 @@ def update_unpitched(song, ops):
         # replace annotations. Octave shifts and ordinary clears keep them.
         if op['op'] != 'fill' and not op.get('kind'): continue
         a, b = max(0, op['a']), min(song['duration'], op['b'])
-        if op.get('kind'): a = math.floor((a + 1e-9) / HOP) * HOP
+        if op.get('kind'): a = round(math.floor((a + 1e-9) / HOP) * HOP, 9)
         times = [p[0] for p in song['points']]
         i0, i1 = np.searchsorted(times, [a, b])
         if i0 == i1: continue

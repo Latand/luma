@@ -1,14 +1,16 @@
-# Song auto-placement: measured model choice (step 1)
+# Song auto-placement: offline command and measured model choice
 
 Choose **MMS for word proposals** and retain **pYIN + CREPE for melody**. The
-future placement path stays opt-in: neither alternative pitch configuration
+placement path stays opt-in: neither alternative pitch configuration
 beats the saved baseline on the required combination of pitch and unpitched
 metrics.
 
-This page covers the model benchmark for the future one-command placement tool.
-The benchmark entry point is `python -m tools.song_auto.bench.run`. Preparation,
-application, backups and trainer rebuilding are the subsequent implementation
-steps. The existing preparation path is unchanged by this step.
+Run `python -m tools.song_auto.run PACKAGE` to align the package's known text,
+track melody, build a trainer in scratch and list doubtful places in seconds.
+MMS supplies word proposals; the shared preparation tracker supplies fresh
+pYIN + CREPE melody. The model comparison entry point remains
+`python -m tools.song_auto.bench.run`. Preparation gains `--auto-place`; its
+existing default remains in place.
 
 ## Reference and measurement limits
 
@@ -319,13 +321,13 @@ error is 188.2 ms against the baseline's 422.5 ms; the confident common-text
 subset gives 148.9 against 279.0 ms. The pickup proxy also improves in aggregate.
 wav2vec2 is quicker in these runs, with weaker alignment and many more crossings.
 SOFA is worse on A–D and cannot cover all five songs with its supplied dictionary.
-MMS therefore supplies the word proposal engine for the next implementation step.
+MMS therefore supplies the command’s word proposal engine.
 
 **MMS is insufficient for an unconditional replacement.** It has 28 crossing
 starts across A–E. Song D's overall median regresses from 40.5 to 197.7 ms, and
-some individual pickup subsets regress too. The subsequent command must report
-and handle invalid order and doubtful spans, and its guarded output must be
-measured again. The measurements here cover raw proposals, with no repaired
+some individual pickup subsets regress too. The command reports
+invalid order and doubtful spans. Its guarded output is measured separately
+below. The measurements here cover raw proposals, with no repaired
 crossings or unmeasured hybrid result presented as a winner.
 
 **Keep the existing pYIN + CREPE melody component.** On A–E, agreement within
@@ -351,33 +353,225 @@ probe with networking disabled and `--device cpu`. This checks execution and
 device support; it supplies no CPU accuracy or full-song performance claim.
 GPU runs were serial, and one model process exited before the next started.
 
-Steps 2–4 still need the production entry command, target/notes/unpitched output,
-confidence assignment, deterministic QA list, apply backups and full trainer
-build, and preparation integration. The existing preparation default stays in
-place because the required improvement on both jobs has not been demonstrated.
-Tests for this step cover the neutral benchmark and scorer; apply/backup tests
-belong with that subsequent writer.
+## Run the command
+
+Use Python 3.11 and install `requirements.txt` into an external environment.
+The command adds no production dependencies: the existing pinned PyTorch,
+torchaudio, torchcrepe and librosa versions and bounded NumPy, SciPy and
+soundfile versions cover it. Candidate-only dependencies remain in the benchmark
+requirements files. Model weights are external; the MMS checkpoint retains its
+CC-BY-NC 4.0 restriction. The source, licence and download sizes are in the
+candidate table above (MMS 1262.05 MB; CREPE full 88.99 MB).
+
+Set `PY` to that environment's Python, `PKG` to a song package, `S` to an external
+scratch directory and `MODELS` to an external Torch cache. Neither output nor
+cache may overlap the package, its coarse timing source, the repository or the
+active Python environment. Provision weights once while online:
+
+```sh
+"$PY" -m tools.song_auto.run --download-models --model-cache "$MODELS"
+"$PY" -m tools.song_auto.run "$PKG" --scratch "$S" --model-cache "$MODELS"
+# Optional: --device cpu (auto chooses CUDA when available).
+# Optional: --seed-target "$BEFORE/target.json" for independent coarse clocks.
+```
+
+Inference denies socket connections, including implicit downloads on cache miss.
+It needs the package's `target.json`, `vocals_44k.flac` and four playback MP3s.
+Known text and row grouping come from `target.json`; coarse clocks default to
+that same file. Supplying `--seed-target` changes only coarse clocks. It does not
+supply reference melody or unpitched labels. Unsupported tokens, empty rows and
+coarse windows over 30 seconds refuse. CREPE decoding has a fixed NumPy seed in both entry paths.
+A full command run on two seconds of synthetic audio passed with real models
+and `--device cpu`, offline. This verifies execution; full-song CPU runtime
+was not benchmarked. GPU and CPU results are not asserted identical.
+
+Each run creates a fresh `song-auto-*` directory. It contains `target.json`,
+`trainer.html`, the scorer-compatible `output.json`, full `checks.json` and
+private input-hash provenance. The last stdout line is a JSON object with output
+paths and runtime. The preceding short list gives up to 20 doubtful intervals;
+all flags remain in `checks.json`. These artifacts contain private text and
+must stay outside the repository. A nonzero exit means the command failed;
+QA flags by themselves leave a successful, unverified draft.
+
+Word ownership uses `studio/lyric_tokens.py` through the shared forced-aligner
+helpers. Across-row overlaps are repaired with a deterministic least-squares
+isotonic projection, retaining lyric order and at least 40 ms between starts.
+Word ends are capped before the next word. Every repaired word and every word
+with acoustic confidence below 0.6 has confidence at most 0.4. Word-start placement
+flags and repeat disagreements also lower affected word confidence to 0.4.
+Projection supplies a valid draft; it establishes no acoustic accuracy. Stored
+confidence is a review signal and has no calibrated probability interpretation.
+
+The command shares preparation's pYIN + CREPE inference and QA's feature
+extraction, placement screen, octave/broken-note/repeat candidates, note
+rederivation and schema validator. It keeps the better measured melody component.
+Octave and gap hypotheses remain review items. Generic `noise` spans require
+at least 120 ms of audible, weakly harmonic, aperiodic stem energy with no
+surviving pitch estimate. Silence and missing pitch alone create no annotation.
+This conservative rule never erases a surviving pitch frame and does not infer
+`scream` identity; scream-specific classification still requires review. The
+output always includes `unpitched`, including an empty list. New contour and
+words derive a new edit id; old trainer edits cannot silently apply to the draft.
+
+To apply a reviewed run configuration explicitly:
+
+```sh
+"$PY" -m tools.song_auto.run "$PKG" --scratch "$S" --model-cache "$MODELS" --apply
+# Add --trainer "$HTML" if the manifest does not identify the intended trainer.
+```
+
+Apply reruns inference. It locks auto writers, checks the input hash, copies the
+previous target, trainer and manifest into
+`backups/song-auto-<UTC timestamp>/<package>/` beside the song packages, and
+records recovery locations in `restore.json`. Only after backup does it replace
+the target and run `studio/build_html.py` with the actual package path. It checks
+that the newly built trainer embeds the generated target, replaces the trainer
+atomically and updates the manifest. Exceptions restore the previous records;
+backups survive. Process termination or power loss may require restoring the
+three files using `restore.json`; multi-file replacement is not transactional
+across a system crash. A persistent `.song-auto.lock` serializes auto writers.
+Do not run unrelated song editors concurrently. Trainer paths must be inside
+or beside the package. No apply run on the reference library was made here.
+
+For newly prepared songs, add `--auto-place` to `studio/prepare_song.py`; set
+`TORCH_HOME="$MODELS"` to the provisioned cache. It uses the freshly recognized
+text and freshly computed melody, runs MMS plus end checks and builds the final
+trainer normally. Its QA report is in `manifest.json` under `steps.auto_place`.
+This option does not change preparation's optional Soniox recognition or Demucs
+download behaviour. The existing-package command itself uses no paid service.
+Preparation remains opt-in because superiority on both required components
+has not been demonstrated.
+
+## End-to-end command measurements
+
+GPU campaign: 2026-11-16 19:02:15–19:17:09 UTC, RTX 3060 (12 GB), PyTorch/torchaudio 2.10.0+cu128, two CPU threads, cached weights. One fresh command process per song, sequentially. Each command computed MMS words, fresh pYIN + CREPE pitch, features, QA and a full scratch trainer build. All five actual output files passed the step 1 scoring CLI. Both hashes and modification times of the audited package files stayed unchanged.
+
+The visual reference was not checked by ear. E has many reference words with c <= 0.4; pairs below are **all / reference c > 0.4**. A–D and A–E are both reported. The reference retains baseline contour frames and favours the saved tracker. The command received corrected text and row grouping, with coarse clocks only from the saved before target. The baseline retains its historical text differences. See common-text sensitivity below. These limits apply to every table in this section.
+
+### Final word starts
+
+| Song / set | Path | Reference words | Matched | Median ms | Within 80 ms % | Within 200 ms % | Crossings |
+|---|---|---:|---:|---:|---:|---:|---:|
+| A | baseline | 167 / 156 | 84 / 81 | 1654.0 / 1440.0 | 12.0 / 12.8 | 13.8 / 14.7 | 0 |
+| A | command | 167 / 156 | 167 / 156 | 272.0 / 272.0 | 32.9 / 33.3 | 43.1 / 42.3 | 0 |
+| B | baseline | 166 / 164 | 143 / 141 | 575.5 / 583.5 | 2.4 / 2.4 | 10.2 / 9.8 | 0 |
+| B | command | 166 / 164 | 166 / 164 | 88.5 / 88.5 | 48.2 / 48.2 | 68.1 / 68.3 | 0 |
+| C | baseline | 203 / 183 | 158 / 142 | 401.0 / 412.0 | 31.0 / 31.1 | 37.4 / 36.6 | 0 |
+| C | command | 203 / 183 | 203 / 183 | 273.0 / 253.0 | 33.0 / 34.4 | 43.8 / 45.9 | 0 |
+| D | baseline | 270 / 233 | 270 / 233 | 40.5 / 29.0 | 52.6 / 60.1 | 61.1 / 67.0 | 0 |
+| D | command | 270 / 233 | 270 / 233 | 193.5 / 194.0 | 36.7 / 35.2 | 50.4 / 50.2 | 0 |
+| E | baseline | 280 / 171 | 278 / 169 | 595.0 / 478.0 | 7.9 / 9.9 | 11.1 / 12.9 | 0 |
+| E | command | 280 / 171 | 280 / 171 | 69.5 / 46.0 | 53.2 / 65.5 | 70.7 / 81.9 | 0 |
+| A–D | baseline | 806 / 736 | 655 / 597 | 422.5 / 416.5 | 28.4 / 30.0 | 34.9 / 35.6 | 0 |
+| A–D | command | 806 / 736 | 806 / 736 | 192.5 / 187.5 | 37.3 / 37.5 | 50.9 / 51.5 | 0 |
+| A–E | baseline | 1086 / 907 | 933 / 766 | 470.0 / 432.0 | 23.1 / 26.2 | 28.7 / 31.3 | 0 |
+| A–E | command | 1086 / 907 | 1086 / 907 | 138.5 / 123.0 | 41.4 / 42.8 | 56.0 / 57.2 | 0 |
+
+### Final pickup proxy
+
+Short words before a long reference note; the small proxy subsets establish no syllable-level or listening accuracy. All / c > 0.4.
+
+| Song / set | Path | Reference words | Matched | Median ms | Within 80 ms % | Within 200 ms % | Crossings |
+|---|---|---:|---:|---:|---:|---:|---:|
+| A | baseline | 2 / 2 | 1 / 1 | N/A / N/A | 50.0 / 50.0 | 50.0 / 50.0 | 0 |
+| A | command | 2 / 2 | 2 / 2 | 350.5 / 350.5 | 0.0 / 0.0 | 0.0 / 0.0 | 0 |
+| B | baseline | 9 / 9 | 9 / 9 | 267.0 / 267.0 | 0.0 / 0.0 | 11.1 / 11.1 | 0 |
+| B | command | 9 / 9 | 9 / 9 | 23.0 / 23.0 | 66.7 / 66.7 | 88.9 / 88.9 | 0 |
+| C | baseline | 5 / 5 | 4 / 4 | 209.0 / 209.0 | 40.0 / 40.0 | 40.0 / 40.0 | 0 |
+| C | command | 5 / 5 | 5 / 5 | 558.0 / 558.0 | 40.0 / 40.0 | 40.0 / 40.0 | 0 |
+| D | baseline | 14 / 10 | 14 / 10 | 130.0 / 125.5 | 28.6 / 40.0 | 64.3 / 70.0 | 0 |
+| D | command | 14 / 10 | 14 / 10 | 24.5 / 22.5 | 71.4 / 60.0 | 85.7 / 80.0 | 0 |
+| E | baseline | 2 / 2 | 2 / 2 | 80.5 / 80.5 | 50.0 / 50.0 | 100.0 / 100.0 | 0 |
+| E | command | 2 / 2 | 2 / 2 | 194.5 / 194.5 | 50.0 / 50.0 | 50.0 / 50.0 | 0 |
+| A–D | baseline | 30 / 26 | 28 / 24 | 237.0 / 237.0 | 23.3 / 26.9 | 43.3 / 42.3 | 0 |
+| A–D | command | 30 / 26 | 30 / 26 | 26.5 / 37.0 | 60.0 / 53.8 | 73.3 / 69.2 | 0 |
+| A–E | baseline | 32 / 28 | 30 / 26 | 216.5 / 216.5 | 25.0 / 28.6 | 46.9 / 46.4 | 0 |
+| A–E | command | 32 / 28 | 32 / 28 | 33.0 / 45.0 | 59.4 / 53.6 | 71.9 / 67.9 | 0 |
+
+### Final common-text sensitivity
+
+Only tokens also present in the saved baseline, all / c > 0.4.
+
+| Set | Path | Common words | Matched | Median ms | Within 80 ms % | Within 200 ms % | Crossings |
+|---|---|---:|---:|---:|---:|---:|---:|
+| A–D | baseline | 655 / 597 | 655 / 597 | 290.0 / 279.0 | 35.0 / 37.0 | 42.9 / 43.9 | 0 |
+| A–D | command | 655 / 597 | 655 / 597 | 161.0 / 153.0 | 40.2 / 40.4 | 54.2 / 54.9 | 0 |
+| A–E | baseline | 933 / 766 | 933 / 766 | 392.0 / 349.5 | 26.9 / 31.1 | 33.4 / 37.1 | 0 |
+| A–E | command | 933 / 766 | 933 / 766 | 112.0 / 100.0 | 44.2 / 46.1 | 59.3 / 61.1 | 0 |
+
+### Final melody
+
+All voiced reference frames, including missed predictions. Word-confidence filtering leaves these frame metrics unchanged. E has no reference unpitched annotation.
+
+| Song / set | Path | Within 50 cents % | Octave errors % | False unpitched % | Voiced recall % | Broken / held notes | Internal gaps | Missed held |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| A | baseline | 92.0 | 2.2 | 6.9 | 94.6 | 4 / 42 | 10 | 0 |
+| A | command | 92.0 | 2.2 | 7.6 | 94.6 | 4 / 42 | 10 | 0 |
+| B | baseline | 96.3 | 1.8 | 4.4 | 98.4 | 1 / 69 | 1 | 0 |
+| B | command | 96.2 | 1.8 | 4.4 | 98.4 | 1 / 69 | 1 | 0 |
+| C | baseline | 99.0 | 0.8 | 15.4 | 100.0 | 1 / 54 | 2 | 0 |
+| C | command | 98.8 | 0.8 | 15.4 | 99.8 | 1 / 54 | 2 | 0 |
+| D | baseline | 99.2 | 0.0 | 12.6 | 99.2 | 4 / 62 | 10 | 0 |
+| D | command | 99.0 | 0.0 | 12.6 | 99.0 | 4 / 62 | 10 | 0 |
+| E | baseline | 98.9 | 0.3 | N/A | 99.1 | 5 / 98 | 10 | 0 |
+| E | command | 98.9 | 0.3 | N/A | 99.2 | 5 / 98 | 10 | 0 |
+| A–D | baseline | 97.0 | 1.1 | 10.1 | 98.3 | 10 / 227 | 23 | 0 |
+| A–D | command | 96.9 | 1.1 | 10.4 | 98.2 | 10 / 227 | 23 | 0 |
+| A–E | baseline | 97.6 | 0.8 | 10.1 | 98.6 | 15 / 325 | 33 | 0 |
+| A–E | command | 97.5 | 0.8 | 10.4 | 98.5 | 15 / 325 | 33 | 0 |
+
+### Final command runtime
+
+Single measured wall time per song, including process startup, model inference, hashes, feature extraction, checks and the full scratch trainer build. The scorer is excluded. Internal runtime starts after module imports and scratch setup. There are no repeated full-song timings or speedup claims against the historical baseline. The historical and replay baseline times above have different scope.
+
+| Song | Wall seconds | Internal seconds | QA flags |
+|---|---:|---:|---:|
+| A | 140.46 | 137.39 | 759 |
+| B | 149.60 | 147.11 | 949 |
+| C | 156.49 | 153.15 | 880 |
+| D | 158.24 | 155.47 | 1271 |
+| E | 284.78 | 280.10 | 1679 |
+
+The final path remains opt-in. Across A–E, final word median error is 138.5 ms
+against 470.0 ms, with zero crossing starts. D regresses from 40.5 to 193.5 ms.
+The pickup proxy improves in aggregate, with regressions on individual songs.
+Fresh melody agrees within 50 cents on 97.5% of voiced reference frames against
+97.6% for the saved baseline; false unpitched contour is 10.4% against 10.1%.
+Held-note gaps and octave errors remain; the command lists their numeric
+candidates for review. These small pitch differences cannot establish absolute
+accuracy on the visual reference. Word ordering is valid by construction; its acoustic limitations remain visible in the errors and QA flags. Fresh baseline-model inference is measured here independently of saved baseline replay. The retained melody component does not establish superiority on both required jobs. There is no automatic listening verification, independent holdout, reference-library apply, browser test, full-song CPU benchmark or fresh paid transcription/separation evaluation in this campaign. Generic noise annotation is conservative and supplies no scream-identification accuracy claim.
 
 ## Verification
 
-All **401 Python tests across 16 files passed**, including 26 new benchmark
-tests. The existing 105-CLI lyric regression case was run separately with a
-longer timeout after both branch and base hit the same 240 s wrapper limit;
-that case and the remaining lyric cases passed. Browser suites were outside
-this step's scope.
+All **422 Python tests across 17 files passed** in an isolated scratch export,
+with explicit file paths, one process at a time under the heavy-command gate.
+This includes 26 benchmark tests and 21 command tests. Browser suites were
+outside scope. No test downloads model weights.
 
-Run each Python test file explicitly in an isolated scratch export using the
-project's heavy-command wrapper. The new suite is
-`python tests/song_auto_bench_test.py`; it uses synthetic audio and stubbed
-acoustic/pitch outputs and downloads no model. It covers ordered compound-token
-ownership, optimal repeated-text matching, missing-word penalties, confidence
-subsets, pickup subsets, numeric thresholds, octave and unpitched metrics,
-single-frame held-note gaps, empty/reference-absent cases, weighted pooling,
-chunk seams, output validation and real-process scratch guards across restarts.
-The baseline writer's output is read back through the real scoring CLI; input
-bytes and modification times are checked across repeated processes.
-An injected source change also verifies that the harness refuses to publish
-output from inputs that changed during a run.
+Run `python tests/song_auto_bench_test.py` and `python tests/song_auto_test.py`,
+and each other Python test file under `tests/`, using the project’s gate and
+an isolated HOME, XDG configuration/data/cache directories and TMPDIR. The
+full run used the existing project Python and read-only dependencies; candidate
+and command probes used a separate scratch environment. No production dependency
+was added and the project environment was not installed into or upgraded.
+
+The command tests cover shared compound-token ownership, missing/extra/wrong
+subwords, malformed times/confidence, crossing repair, confidence assignment,
+audible unpitched spans versus silence and harmonic gaps, exact frame endpoints,
+placement/octave/broken/repeat checks and scorer read-back. Real subprocesses
+exercise scratch defaults, unique runs, input bytes/mtime and hostile symlink
+paths across restarts. Apply tests verify backup before mutation, full package
+build and embedded-target equality, failures after each write, missing prior
+records, backup failure, stale targets and concurrent writers. Preparation tests
+cover the default, opt-in reuse of fresh pitch, manifest/HTML consistency and
+cache failure before target publication. One-time provisioning is stubbed.
+
+The prior benchmark tests cover common-text matching and missing-word penalties,
+confidence/pickup subsets, numeric pitch/unpitched/held-gap metrics, pooling,
+chunk seams, output validation, input changes and read-only scratch guards.
+A separate real-model CPU probe completed the full command on synthetic audio.
+The five GPU command runs built real scratch trainers and scored their generated
+targets; applying to the reference library and listening remain unverified.
 
 Exact commands, dependency versions, model/input hashes, native outputs,
 rescoring records and check logs stay in private evidence. No song mapping,

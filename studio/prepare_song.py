@@ -145,6 +145,33 @@ def build_map(ct, f0, pd, P, mix22, duration, title, artist, method):
     song['id'] = hashlib.sha256((title + artist + str(duration) + method).encode()).hexdigest()[:20]
     return song
 
+def track_pitch(vocal, sr, duration, device, gain=1.):
+    """Shared pYIN + CREPE inference; callers release other models first."""
+    timings = {}
+    t2 = time.time()
+    sr2 = 22050; y = librosa.resample(vocal.T, orig_sr=sr, target_sr=sr2).T * gain
+    y = y.mean(axis=1); rows = []; hop = 256
+    for start in np.arange(0, duration, 25):
+        lo = max(0, int(round((start - .5) * sr2))); hi = min(len(y), int(round((start + 25.5) * sr2))); z = y[lo:hi]
+        f, _, prob = librosa.pyin(z, fmin=librosa.note_to_hz('C2'), fmax=librosa.note_to_hz('E6'), sr=sr2, frame_length=4096, hop_length=hop, fill_na=np.nan)
+        yf = librosa.yin(z, fmin=librosa.note_to_hz('C2'), fmax=librosa.note_to_hz('E6'), sr=sr2, frame_length=4096, hop_length=hop)
+        rms = librosa.feature.rms(y=z, frame_length=2048, hop_length=hop)[0]; tt = lo / sr2 + np.arange(len(f)) * hop / sr2; keep = (tt >= start) & (tt < min(start + 25, duration))
+        rows.extend(zip(tt[keep], f[keep], prob[keep], rms[keep], yf[keep]))
+    P = np.array(rows); timings['pyin_s'] = round(time.time() - t2, 1)
+
+    t3 = time.time()
+    import torch, torchcrepe
+    y16 = librosa.resample(vocal.mean(1), orig_sr=sr, target_sr=16000)
+    f0, pd = torchcrepe.predict(torch.from_numpy(y16)[None], 16000, hop_length=160, fmin=50, fmax=1500, model='full', batch_size=1024, device=device, return_periodicity=True, decoder=torchcrepe.decode.viterbi)
+    pd = torchcrepe.filter.median(pd, 3); f0 = torchcrepe.filter.mean(f0, 3); f0 = f0[0].cpu().numpy(); pd = pd[0].cpu().numpy(); ct = np.arange(len(f0)) * 160 / 16000
+    # torchcrepe caches its model on the infer function; release it before a
+    # subsequent aligner loads another model in this process.
+    if hasattr(torchcrepe.infer, 'model'): del torchcrepe.infer.model
+    timings['crepe'] = {'model': 'torchcrepe full', 'seconds': round(time.time() - t3, 1)}
+
+    return ct, f0, pd, P, timings
+
+
 # ---------------------------------------------------------------- separation
 # The longest song Studio prepares. Memory does not set it (separation runs in windows, pYIN in 25 s blocks, CREPE in
 # batches); the trainer does. It carries all four stems as base64 inside one script, about 8.7 MiB of HTML per minute of
@@ -218,6 +245,7 @@ def main():
     ap.add_argument('--model', default='htdemucs_ft', choices=['htdemucs', 'htdemucs_ft']); ap.add_argument('--device', default='auto', choices=['auto', 'cpu', 'cuda'])
     ap.add_argument('--no-lyrics', action='store_true'); ap.add_argument('--lang', default='en'); ap.add_argument('--out-html')
     ap.add_argument('--lyrics-from', default='vocal', choices=['vocal', 'mix'], help='audio sent to Soniox: the separated vocal stem (default) or the full mix')
+    ap.add_argument('--auto-place', action='store_true', help='opt-in offline MMS placement and deterministic QA after transcription; requires cached weights')
     a = ap.parse_args(); src = Path(a.audio).expanduser().resolve()
     if not src.is_file(): ap.error('audio file not found')
     slug = slugify(a.title); pkg = Path(a.out).expanduser().resolve() / slug; work = pkg / 'work'; pkg.mkdir(parents=True, exist_ok=True); work.mkdir(exist_ok=True)
@@ -249,22 +277,12 @@ def main():
     del back
     ffmpeg('-i', work / 'mix.wav', '-ar', '22050', '-c:a', 'pcm_f32le', work / 'mix22.wav')
 
-    log('[3/8] pYIN'); t2 = time.time()
-    y, sr2 = sf.read(work / 'vocal22.wav', dtype='float32', always_2d=True); y = y.mean(axis=1); rows = []; hop = 256
-    for start in np.arange(0, duration, 25):
-        lo = max(0, int(round((start - .5) * sr2))); hi = min(len(y), int(round((start + 25.5) * sr2))); z = y[lo:hi]
-        f, _, prob = librosa.pyin(z, fmin=librosa.note_to_hz('C2'), fmax=librosa.note_to_hz('E6'), sr=sr2, frame_length=4096, hop_length=hop, fill_na=np.nan)
-        yf = librosa.yin(z, fmin=librosa.note_to_hz('C2'), fmax=librosa.note_to_hz('E6'), sr=sr2, frame_length=4096, hop_length=hop)
-        rms = librosa.feature.rms(y=z, frame_length=2048, hop_length=hop)[0]; tt = lo / sr2 + np.arange(len(f)) * hop / sr2; keep = (tt >= start) & (tt < min(start + 25, duration))
-        rows.extend(zip(tt[keep], f[keep], prob[keep], rms[keep], yf[keep]))
-    P = np.array(rows); manifest['steps']['pyin_s'] = round(time.time() - t2, 1)
-
-    log('[4/8] CREPE'); t3 = time.time()
-    import torch, torchcrepe
-    y16 = librosa.resample(vocal.mean(1), orig_sr=sr, target_sr=16000)
-    f0, pd = torchcrepe.predict(torch.from_numpy(y16)[None], 16000, hop_length=160, fmin=50, fmax=1500, model='full', batch_size=1024, device=device, return_periodicity=True, decoder=torchcrepe.decode.viterbi)
-    pd = torchcrepe.filter.median(pd, 3); f0 = torchcrepe.filter.mean(f0, 3); f0 = f0[0].cpu().numpy(); pd = pd[0].cpu().numpy(); ct = np.arange(len(f0)) * 160 / 16000
-    manifest['steps']['crepe'] = {'model': 'torchcrepe full', 'seconds': round(time.time() - t3, 1)}
+    log('[3–4/8] pYIN + CREPE')
+    if a.auto_place:
+        # CREPE's decoder adds NumPy dither; the opt-in path has a fixed seed.
+        np.random.seed(0)
+    ct, f0, pd, P, timings = track_pitch(vocal, sr, duration, device, gain)
+    manifest['steps'].update(timings)
 
     log('[5/8] map'); mix22, _ = sf.read(work / 'mix22.wav', dtype='float32', always_2d=True)
     method = f'{a.model} (official Demucs weights) + CREPE full (torchcrepe, Viterbi) cross-checked with pYIN'
@@ -293,6 +311,16 @@ def main():
             log('  lyrics skipped:', e); song['lyrics'] = []; manifest['steps']['lyrics'] = {'error': str(e)}
     else:
         song['lyrics'] = []; manifest['steps']['lyrics'] = {'skipped': 'no Soniox key' if not a.no_lyrics else 'disabled'}
+    if a.auto_place:
+        sys.path.insert(0, str(ROOT))
+        from tools.song_auto.run import place, offline, print_checks
+        os.environ.setdefault('TORCH_HOME', str(Path.home()/'.cache/luma-song-auto/torch'))
+        with offline():
+            song, report = place(pkg, song, song, device, pitch_song=song)
+        manifest['steps']['auto_place'] = report
+        print_checks(report)
+        manifest['map'] = {'id': song['id'], 'metrics': song['metrics'], 'notes': len(song['notes']),
+                           'ok_notes': sum(n['ok'] for n in song['notes'])}
     (pkg / 'target.json').write_text(json.dumps(song, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
 
     log('[8/8] html'); build_html(pkg, out_html)
