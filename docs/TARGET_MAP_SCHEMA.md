@@ -61,8 +61,9 @@ valid without this optional key.
 `tools/song_qa/apply_edits.py` writes the list for an explicit melody edit
 `{"op":"clear","a":1.2,"b":2.4,"kind":"scream"}` (or `noise`). A plain `clear`
 removes contour without inventing a reason. Candidates require visual confirmation
-before a reviewer assigns a kind. Subsequent edits replace the annotations inside
-their time span while preserving the rest. See [SONG_QA.md](SONG_QA.md).
+before a reviewer assigns a kind. Octave edits and plain clears preserve existing
+annotations. Explicitly classified clears replace their selected coverage; fills
+trim annotations only where pitched frames survive derivation. See [SONG_QA.md](SONG_QA.md).
 
 ### `lyrics`
 `[{a, b, words: [{a, b, w, c}]}]` — lines of words with start/end seconds and a confidence `c` 0..1. Words are drawn above the

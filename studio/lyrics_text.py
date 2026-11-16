@@ -88,6 +88,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'studio'))
 import align_lyrics as al
 import lyrics_synced as synced
+from lyric_tokens import tokenize
 from prepare_song import sha256
 
 AUDIO_EXTENSIONS = {'.flac', '.mp3', '.m4a', '.wav'}   # every audio file the safety guard must fingerprint
@@ -189,12 +190,6 @@ def resolve_transcript(pkg: Path, song: dict, prefer: str) -> tuple[list[dict], 
     if not (pkg / 'lyrics' / f'{want}.json').exists(): want = 'auto'   # no stored copy of the preferred one: fall back
     lines, src, _ = al.transcript(pkg, song, prefer=want)
     return lines, src
-
-ANNOTATION = re.compile(r'^\s*[\[(].*[\])]\s*$')   # a whole line like "[Chorus]" or "(Verse 2)" — not sung text
-
-def tokenize(text: str) -> list[str]:
-    lines = [ln for ln in text.splitlines() if not ANNOTATION.match(ln)]
-    return [t for t in ' '.join(lines).split() if t]
 
 # ---------------------------------------------------------------- true text <-> ASR word alignment
 def match_words(asr_words: list[dict], true_tokens: list[str]) -> list[dict]:

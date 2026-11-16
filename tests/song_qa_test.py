@@ -477,7 +477,7 @@ class Inputs(unittest.TestCase):
         for text in ('абв','flim абв','café','İ','q́','123',''):
             with self.subTest(text=text), self.assertRaisesRegex(ValueError,'manual'):
                 fa_align.checked_lines(text,'[00:01]'+text)
-        self.assertEqual(fa_align.model_words("Flim’s — borp"),["Flim’s",'borp'])
+        self.assertEqual(fa_align.model_words("Flim’s borp"),["Flim’s",'borp'])
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); (root/'verified.txt').write_text('абв'); (root/'synced.lrc').write_text('[00:01]абв')
             # Poison model imports: a refusal must occur before either can load.
@@ -510,7 +510,7 @@ class Inputs(unittest.TestCase):
                     self.assertNotIn('imported',result.stderr); self.assertFalse((root/'out.json').exists())
 
     def test_supported_alignment_preserves_words_and_sheet_hint_positions(self):
-        text="Flim’s — borp nuv"
+        text="Flim’s borp nuv"
         _,lines,_=fa_align.checked_lines(text,'[00:00]'+text)
         words=fa_align.model_words(lines[0]); self.assertEqual(words,["Flim’s",'borp','nuv'])
         with tempfile.TemporaryDirectory() as tmp:

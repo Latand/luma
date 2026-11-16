@@ -165,8 +165,22 @@ it preserves the corrected target.
 ```
 
 The optional aligner preserves alphanumeric content when comparing verified and
-synced rows. Digits, mixed letter/digit tokens and unsupported letters refuse
-before audio or model imports. Use the word sheet and pictures for those passages.
+synced rows. It uses the project's lyric tokenizer: each target token owns all
+of its alignment sub-words. The proposal records zero-based `target_token` and
+`target_w` ownership within each row. To add validated hints to the word sheet:
+
+```sh
+"$P" "$T/make_sheet.py" "$S/base.json" --fa "$S/fa.json" > "$S/words.txt"
+```
+
+The sheet validates every row, token, ownership field and timing span before
+printing anything. A compound receives its first sub-word's start through its
+last sub-word's end; repeated words retain separate row/token identities. Older
+proposals without ownership fields require an exact model-word sequence for
+every target row. Incompatible proposals refuse with one-based row/token numbers and
+emit no sheet or hints. Digits, mixed letter/digit tokens, unsupported letters
+and punctuation-only target tokens refuse before audio or model imports. Use
+the manual word sheet (omit `--fa`) and pictures for those passages.
 
 Read **every** window, including repeats and the last partial window. Each 12 s
 window has two strips with 0.1 s ticks. The upper panel is the log-frequency stem
@@ -369,7 +383,8 @@ if a later write fails. Notes follow `prepare_song.build_map`: median of five
 frames, split beyond 0.72 semitones from the rounded current note, minimum four
 frames per note, `ok` at 55% reliable frames. Runs shorter than five frames are
 removed. Phrases, metrics and initial time are derived again. The tool writes
-optional `unpitched` data; renderer changes are separate work.
+optional `unpitched` data. The trainer draws scream spans as a band marked
+«скрим» and excludes both scream and noise spans from targets and scoring.
 
 Before rebuilding (**R7**), run the screen on the finished target. Above **20%**
 of word starts without a boundary sign on clean singing, return to every flagged
@@ -444,7 +459,9 @@ reviewed fourth-song run labelled song D; their mapping stays private.
 Earlier validation used directory order; use the mapping retained with each run.
 
 Run the Python tests using explicit paths and the project's check wrapper in an
-isolated scratch export. The QA suites are `tests/song_qa_test.py` and
-`tests/song_qa_placement_test.py`; browser suites are unaffected. Retain the revision, command, environment dependency versions,
+isolated scratch export. The QA suites are `tests/song_qa_test.py`,
+`tests/song_qa_placement_test.py` and `tests/song_qa_alignment_test.py`. The merged
+trainer's scream check is `tests/e2e/run.sh tests/e2e/scream.mjs`.
+Retain the revision, command, environment dependency versions,
 run time bounds, check results and per-song recall in local evidence. Public
 reports carry the aggregate table and repository-relative file references only.

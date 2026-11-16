@@ -1,6 +1,9 @@
 # Song QA validation
 
-Verified 2026-11-16 with Python 3.11.13 in an isolated scratch export of the final lane source.
+The token-ownership fix and merged-tree checks are recorded below. The earlier
+pilot evidence is retained in the preceding tables and predecessor verification.
+
+Predecessor acceptance was verified 2026-11-16 with Python 3.11.13 in an isolated scratch export.
 Read-only kernel mounts and canary-verified Python guards protected the private
 library and refused browser-profile reads; no violations occurred during acceptance.
 The final acceptance campaign ran from 2026-11-16T15:06:31.047818+00:00 to 2026-11-16T15:11:10.435595+00:00.
@@ -93,7 +96,7 @@ The clock helper conservatively keeps a nearby sign; the independent intro/phras
 Segment candidates can include tracking fragments and scoops. Review their count against the spectrum before using a clock override.
 The numeric flags cover only part of the reviewed start changes; every phrase and its first repeat still requires R1.
 
-## Verification
+## Predecessor verification
 
 365 Python tests passed with zero skips: 302 existing tests, 46 QA tests, and 17 placement tests.
 All 13 test files ran sequentially through the heavy-command wrapper with isolated home/config/temp directories and distinct test ports.
@@ -110,7 +113,7 @@ The entry test checks both placement outputs and forwards counted spans and sync
 
 `git diff --check` and publication scans of proposed files, commit text and PR body passed.
 The scan checks private package metadata, lyric lines, paths and identities. No project publication-check command exists.
-Node and browser sources were unchanged; browser suites, optional model alignment and real-trainer screenshots were outside this run.
+That verification preceded the merge of main; browser suites, optional model alignment and real-trainer screenshots were outside that run.
 Ordinary windows require no browser or profile.
 
 ## Review regressions
@@ -146,9 +149,92 @@ adjacent boundary cases:
 |---|---|
 | Unsupported octave evidence | Real candidate CLI on six-harmonic MIDI 36/90 audio: correct boundary pitches produce no octave candidates; supported shifts work in both directions; every proposal stays inside the feature/schema range; span smoothing stops at unsupported or missing frames |
 | Scream retention | Real apply CLI retains scream spans for no-op, filtered and mixed voiced/scream octave intervals; ordinary clears retain classification; explicit kinds replace it; fills trim only restored frames, including fractional refills; a refill discarded by derivation retains the annotation |
-| Numeric alignment tokens | Matching numeric/mixed tokens refuse before poisoned audio/model imports; differing numeric content cannot compare equal; supported words retain their order and distinct positional sheet hints |
+| Numeric alignment tokens | Matching numeric/mixed tokens refuse before poisoned audio/model imports; differing numeric content cannot compare equal; supported words retain their order; token ownership is covered below |
 
 The octave detector uses the cached MIDI 36–90 grid. Unsupported pitches provide
 zero evidence. The apply CLI updates
 annotations after contour derivation so they reflect the persisted frames.
 Optional alignment weights remain outside the verification run.
+
+## Token ownership regression table
+
+The project tokenizer now lives in the lightweight `studio/lyric_tokens.py`;
+`studio/lyrics_text.py` imports the same function. Its behavior is unchanged.
+`fa_align.py` derives each target token's complete model-word group before
+importing audio/model code and records ownership on every sub-word. The sheet
+validates the entire mapping before printing, then keys hints by row and target
+token. The hint runs from the first sub-word's start to the last one's end.
+
+`tests/song_qa_alignment_test.py` runs the real tokenizer, `model_words`, producer
+ownership helper and sheet CLI over this synthetic table, without model weights:
+
+| Token shape | Expected result |
+|---|---|
+| Compound at row start | First target gets both sub-word spans; following token retains its own span |
+| Compound in row middle | Previous/following tokens retain their spans; compound gets both sub-words |
+| Compound at row end | Final target gets both sub-words |
+| En/em dash inside compound | Same ownership and full-span aggregation as a hyphen |
+| Straight/curly apostrophes | Each target retains its own normalized alignment word |
+| Attached punctuation | Target spelling retained; its alignment span stays with it |
+| Digits | Refuse with row/token and manual path before audio/model imports |
+| Mixed letters/digits | Same early refusal |
+| Cyrillic, accented and combining letters | Same early refusal |
+| Punctuation-only token, including a standalone dash | Same early refusal; never silently drop a target token |
+| Repeated words within/across rows | Separate row/token ownership and spans; reversed ownership refuses |
+
+The table contains 15 inputs. Valid cases cover both newly owned proposals and
+older proposals whose entire per-row model-word sequence is validated. Seven
+unsupported cases exercise the real aligner CLI with poisoned audio/model
+imports. A valid first row followed by a mismatch must emit zero stdout.
+Seventeen mutation cases cover missing/extra/replaced sub-words, incorrect or
+partial ownership, missing/extra/misidentified rows, malformed words and invalid,
+non-finite, boolean, negative, reversed or unordered timing spans. Each refuses
+with row/token numbers and the manual path before printing any hints.
+
+The retained reviewer reproduction was replayed against both revisions: for
+synthetic `flim-borp nuv`, the predecessor emits `1.0–1.3` and `1.4–1.7`; the fix
+emits `1.0–1.7` and `1.8–2.1`. The compound and following token keep their spans.
+
+## Merged-tree verification
+
+Merged main through `0e64e3c`, retaining both the scream renderer and camera
+changes alongside the tool. Shared README, schema and browser-runner content
+is retained. The tool's `unpitched` output agrees with the schema and trainer:
+finite, sorted scream/noise spans contain no pitched frames or overlapping
+notes; absent/empty lists mean none. Both kinds are excluded from scoring and
+the trainer draws scream spans with «скрим».
+
+375 unique Python tests passed across 15 explicit files with zero skips:
+308 existing tests (including six camera-mix tests from main), 46 QA tests,
+17 placement tests and four token-ownership tests. Checks ran sequentially
+through the heavy-command wrapper in an isolated scratch export. The initial
+campaign reached its inherited 15-minute execution limit; plotting dependencies
+were missing and the camera-mix suite was interrupted. After installing the
+documented picture dependencies into scratch, all QA suites and the camera-mix
+suite passed under an explicit longer deadline. Base Python packages stayed
+unchanged; complete initial and renewed results are retained in private evidence.
+
+Four fresh entry dry-runs ran on the merged tree from 2026-11-16 16:04:29 to
+16:09:48 UTC. All passed: event coverage remains A 16/16, B 11/11, C 11/11 and
+D 10/10, confirmed by a separate matcher against the recorded edits. Candidate
+counts in the four-package table are unchanged; candidate lists match the retained
+predecessor lists. The runs regenerated 160 windows
+plus sheets and candidate lists, validated the targets and checked embedded
+equality. Independent source hashes and modification times remained equal.
+Canary-checked audit guards and read-only kernel mounts protected the private
+library; no acceptance access violations occurred.
+
+`tests/e2e/run.sh tests/e2e/scream.mjs` completed on the merged tree with a clean
+console and 12 screenshots covering both views at 1440 px and 390 px, idle,
+singing and reviewing. The desktop notes and mobile contour samples were inspected:
+the «скрим» band and label are visible, no target notes occupy the band and the
+sung line remains visible. Scoring, lives, history, scale and scrolling checks
+passed. The final run used Node 26.13.1 and bundled headless Chromium with a
+2 GiB Node heap. Earlier startup/socket-path and memory interruptions are
+retained in private evidence; a short namespace alias maps browser temp files
+into stage scratch. Browser test sources were unchanged outside the merge.
+
+Whitespace and publication scans passed. PR body changes are read back after
+publication. No private library file was written and no existing browser profile
+was read. Optional alignment weights were never downloaded. Event coverage
+continues to leave precision and complete-span coverage unmeasured.
