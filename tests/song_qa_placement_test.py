@@ -79,6 +79,20 @@ class Placement(unittest.TestCase):
         self.assertEqual(sum('unplaced_origin' in f.get('reasons',[]) for f in out['flags']),2)
         self.assertTrue(any('inside_level_note' in f.get('reasons',[]) for f in out['flags']))
 
+    def test_reviewed_placement_replaces_energy_origin_only_for_explicit_rows(self):
+        import apply_edits
+        song,F=fixture(onsets=[1.])
+        words(song,[.5,2.])
+        for line in song['lyrics']: line['words'][0].update(c=.3,timing_source='vocal_stem_energy')
+        base=copy.deepcopy(song)
+        rows=[dict(k=i,w='zuv',a='1.0' if i==0 else '=',b='1.2' if i==0 else '=',doubt=False,first=True) for i in range(2)]
+        song['lyrics'],_=apply_edits.build_lyrics(song['lyrics'],rows,F,8.)
+        self.assertEqual(song['lyrics'][0]['words'][0]['timing_source'],'reviewed_spectrogram')
+        self.assertEqual(song['lyrics'][1],base['lyrics'][1])
+        flags=placement.screen(song,F,base=base)['flags']
+        self.assertFalse(any(f.get('word')==0 and 'unplaced_origin' in f.get('reasons',[]) for f in flags))
+        self.assertTrue(any(f.get('word')==1 and 'unplaced_origin' in f.get('reasons',[]) for f in flags))
+
     def test_articulation_bands_and_hopping(self):
         for rate,band in [(.5,'sparse'),(1.,'uncertain'),(1.5,'articulated')]:
             song,F=fixture(onsets=np.arange(0,4,1/rate))

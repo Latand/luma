@@ -15,7 +15,7 @@ The result is a proposal and nothing more: frames are 20 ms, sung vowels stretch
 expects, and screamed lines align poorly. Every word is then judged by eye on the spectrogram (draw_windows.py).
 Output: [{"line": i, "lrc": seconds, "words": [{"w", "a", "b", "score"}]}].
 """
-import json, re, sys
+import json, re, sys, unicodedata
 from pathlib import Path
 from common import write_json
 
@@ -26,7 +26,16 @@ def lrc_rows(text):
         if m: rows.append((int(m.group(1)) * 60 + float(m.group(2)), m.group(3).strip()))
     return rows
 
-def norm(w): return re.sub(r"[^a-z']", '', w.lower().replace('’', "'")).strip("'")
+def norm(w):
+    return ''.join(c for c in unicodedata.normalize('NFC', w.lower().replace('’', "'"))
+                   if c.isalpha() or unicodedata.category(c).startswith("M") or c == "'").strip("'")
+
+
+def model_words(line):
+    words = [w for w in re.split(r'[\s—–-]+', line) if norm(w)]
+    if not words or any(not re.fullmatch("[a-z']+", norm(w)) for w in words):
+        raise ValueError('unsupported forced-alignment letters; use the manual word-sheet and picture path')
+    return words
 
 def checked_lines(text, lrc):
     rows = lrc_rows(lrc)
@@ -37,6 +46,8 @@ def checked_lines(text, lrc):
     for i, ((_, synced), line) in enumerate(zip(sung,text_lines)):
         if [norm(w) for w in synced.split()] != [norm(w) for w in line.split()]:
             raise ValueError(f'text/synced content differs at row {i}; fix or omit forced alignment')
+    for line in text_lines: model_words(line)
+    if not text_lines: raise ValueError("no words to align; use the manual word-sheet and picture path")
     return rows,text_lines,sung
 
 
@@ -58,10 +69,10 @@ def main():
     for i, ((t0, _), line) in enumerate(zip(sung, text_lines)):
         nxt = next((s for s in stamps if s > t0 + .05), dur)
         w0 = max(0.0, t0 - before); w1 = min(dur, max(nxt + after, t0 + 2.5)); w1 = min(w1, w0 + 24)
-        words = [w for w in re.split(r'[\s—–-]+', line) if norm(w)]
+        words = model_words(line)
         tokens = [D['*']]; spans = []
         for w in words:
-            ids = [D[c] for c in norm(w) if c in D]; spans.append((len(tokens), len(tokens) + len(ids))); tokens += ids
+            ids = [D[c] for c in norm(w)]; spans.append((len(tokens), len(tokens) + len(ids))); tokens += ids
         tokens.append(D['*'])
         seg = y16[int(w0 * 16000):int(w1 * 16000)]; seg = seg / (seg.abs().max() + 1e-6) * .7
         with torch.inference_mode(): em, _ = model(seg[None].to(dev))

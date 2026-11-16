@@ -10,6 +10,10 @@ from pathlib import Path
 from common import atomic_text
 
 
+VOID_TAGS = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+             'link', 'meta', 'param', 'source', 'track', 'wbr'}
+
+
 class Extractor(HTMLParser):
     def __init__(self, attribute=None, value=None):
         super().__init__(convert_charrefs=True)
@@ -20,10 +24,14 @@ class Extractor(HTMLParser):
                   attrs.get('data-lyrics-container')=='true' or attrs.get('itemprop')=='text')
         if self.depth:
             if tag in ('br','p','div'): self.text.append('\n')
-            if tag not in ('br','hr','img','input','meta','link','wbr'): self.depth+=1
-        elif selected:
+            if tag not in VOID_TAGS: self.depth+=1
+        elif selected and tag not in VOID_TAGS:
             self.depth=1; self.found+=1; self.text.append('\n')
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+        if tag not in VOID_TAGS: self.handle_endtag(tag)
     def handle_endtag(self,tag):
+        if tag in VOID_TAGS: return
         if self.depth:
             if tag in ('p','div'): self.text.append('\n')
             self.depth-=1

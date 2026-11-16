@@ -123,6 +123,9 @@ def melody_candidates(song, F):
         if not len(anchors): continue
         m = float(np.median(anchors))
         band = (F['midi'] >= m-1.5) & (F['midi'] <= m+1.5)
+        # The spectral cache has a narrower pitch range than valid targets.
+        # No supported band means no held-note evidence for this gap.
+        if not np.any(band): continue
         strength = F['sal'][band].max(axis=0)
         supported = loud & (F['periodicity'] > .25) & (strength > best*.2)
         mask = np.zeros(len(t), bool)

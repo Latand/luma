@@ -85,6 +85,25 @@ class Numeric(unittest.TestCase):
         found=candidates.melody_candidates(song,self.F)
         self.assertTrue(any(c['type']=='broken' and c['b']-c['a']>=.1 and c['a']<.98 and c['b']>.8 for c in found))
 
+    def test_valid_extreme_pitches_with_gaps_complete_candidate_cli_unchanged(self):
+        feature=Path(self.tmp.name)/'features.npz'
+        np.savez(feature,**{'qa_'+k:v for k,v in self.F.items()})
+        for pitch in (24,96,108):
+            with self.subTest(pitch=pitch):
+                song=target(pitch)
+                for p in song['points']:
+                    if .8 <= p[0] < 1.1: p[1:]=[None,0,0]
+                song['notes'],song['phrases'],song['metrics'],song['initialTime'],_=apply.derive(song['points'],2,[])
+                self.assertEqual(apply.validate(song),[])
+                common.write_json(self.pkg/'target.json',song)
+                before=runner.fingerprint(self.pkg)
+                output=Path(self.tmp.name)/'candidates.json'
+                subprocess.run([sys.executable,str(ROOT/'tools/song_qa/candidates.py'),str(self.pkg),
+                                str(feature),str(output)],check=True,capture_output=True)
+                self.assertIsInstance(json.loads(output.read_text()),list)
+                self.assertEqual(runner.fingerprint(self.pkg),before)
+                self.assertFalse(any(c['type']=='broken' for c in json.loads(output.read_text())))
+
     def test_silent_gap_is_not_a_held_note(self):
         self.F['db'][:]=-100
         song=target(); song['points'][40:55]=[[p[0],None,0,0] for p in song['points'][40:55]]
@@ -112,6 +131,39 @@ class Numeric(unittest.TestCase):
         song=target(69); original=copy.deepcopy(song)
         self.assertEqual(candidates.detect(song,self.F),candidates.detect(song,self.F))
         self.assertEqual(song,original)
+
+
+class Labels(unittest.TestCase):
+    def test_edge_labels_fit_full_and_partial_windows_without_moving_markers(self):
+        import draw_windows as draw
+        import matplotlib.pyplot as plt
+        from matplotlib.gridspec import GridSpec
+        for start,end in ((138.,144.), (138.,143.027), (222.,222.45)):
+            with self.subTest(start=start,end=end):
+                song=target(duration=float(np.ceil(end)))
+                at=end-.015
+                word=dict(w='flimborp',a=at,b=end,c=.9)
+                song['lyrics']=[dict(a=at,b=end,words=[word])]
+                t=np.arange(start,end,.01)
+                F=dict(t=t,logf=np.geomspace(70,4000,32),pic=np.ones((32,len(t))),
+                       env=np.ones(len(t)),hf=np.ones(len(t)),rms=np.ones(len(t)),
+                       onset_start=np.array([at]),onset_strength=np.ones(1))
+                fig=plt.figure(figsize=(15.6,10.6),dpi=100)
+                try:
+                    gs=GridSpec(3,1,figure=fig,left=.035,right=.995,bottom=.1)
+                    draw.draw_strip(fig,gs[0],gs[1],gs[2],start,end,song,F,[],{id(word):118})
+                    fig.canvas.draw(); renderer=fig.canvas.get_renderer()
+                    self.assertTrue(any('118·' in text.get_text() for text in fig.axes[0].texts))
+                    for ax in fig.axes:
+                        bounds=ax.get_window_extent(renderer)
+                        for text in [*ax.texts,*ax.get_xticklabels()]:
+                            if not text.get_visible(): continue
+                            box=text.get_window_extent(renderer)
+                            self.assertGreaterEqual(box.x0,bounds.x0-1e-6,text.get_text())
+                            self.assertLessEqual(box.x1,bounds.x1+1e-6,text.get_text())
+                        starts=[line for line in ax.lines if line.get_color()=='#ffe14a' and line.get_linestyle()=='-']
+                        self.assertTrue(any(np.allclose(line.get_xdata(),[at,at]) for line in starts))
+                finally: plt.close(fig)
 
 
 class Apply(unittest.TestCase):
@@ -227,6 +279,27 @@ class Apply(unittest.TestCase):
         apply.update_unpitched(song,[{'op':'fill','a':.5,'b':1.}])
         self.assertEqual(song['unpitched'],[{'a':.1,'b':.5,'kind':'noise'},{'a':1.,'b':1.8,'kind':'noise'}])
 
+    def test_fractional_refill_cli_preserves_remaining_annotations(self):
+        feature=Path(self.tmp.name)/'features.npz'; np.savez(feature,**self.F)
+        melody=Path(self.tmp.name)/'melody.json'
+        for a,b in ((.7,.907),(.707,.907)):
+            with self.subTest(a=a,b=b):
+                song=target()
+                clear=[dict(op='clear',a=.4,b=1.2,kind='noise')]
+                apply.apply_melody(self.pkg,song['points'],clear); apply.update_unpitched(song,clear)
+                song['notes'],song['phrases'],song['metrics'],song['initialTime'],_=apply.derive(song['points'],2,[])
+                self.assertEqual(apply.validate(song),[])
+                common.write_json(self.pkg/'target.json',song)
+                original=(self.pkg/'target.json').read_bytes()
+                melody.write_text(json.dumps([dict(op='fill',a=a,b=b,m=57)]))
+                subprocess.run([sys.executable,str(ROOT/'tools/song_qa/apply_edits.py'),str(self.pkg),str(feature),
+                                '--base',str(self.pkg/'target.json'),'--melody',str(melody)],check=True,capture_output=True)
+                saved=json.loads((self.pkg/'target.json').read_text())
+                self.assertEqual(apply.validate(saved),[])
+                first=round(np.ceil(a/.02)*.02,2)
+                self.assertEqual(saved['unpitched'],[dict(a=.4,b=first,kind='noise'),dict(a=.92,b=1.2,kind='noise')])
+                self.assertTrue(any(p.read_bytes()==original for p in (self.pkg/'.song-qa-backups').rglob('target.json')))
+
     def test_atomic_failure_keeps_original(self):
         file=self.pkg/'target.json'; original=file.read_bytes()
         with patch('common.os.replace',side_effect=OSError('injected')):
@@ -284,6 +357,37 @@ class Inputs(unittest.TestCase):
         self.assertEqual(extract.extract('<div itemprop="text">flim</div>'),'flim\n')
         self.assertEqual(extract.extract('<article id="verse">borp</article>','id','verse'),'borp\n')
         with self.assertRaises(ValueError): extract.extract('<div>unknown</div>')
+
+    def test_void_and_self_closing_tags_preserve_container_text(self):
+        for attrs,attribute,value in [('data-lyrics-container="true"',None,None),
+                                      ('itemprop="text"',None,None),('id="verse"','id','verse')]:
+            for br in ('<br>','<br/>','<br />'):
+                for img in ('<img src="x">','<img src="x"/>'):
+                    with self.subTest(attrs=attrs,br=br,img=img):
+                        self.assertEqual(extract.extract(f'<div {attrs}>flim{br}borp{img}{br}nuv</div>',attribute,value),
+                                         'flim\nborp\nnuv\n')
+        with self.assertRaises(ValueError): extract.extract('<img itemprop="text"/>outside')
+
+    def test_unicode_alignment_refuses_before_audio_or_model_import(self):
+        with self.assertRaisesRegex(ValueError,'content differs'):
+            fa_align.checked_lines('абв','[00:01]где')
+        with self.assertRaisesRegex(ValueError,'content differs'):
+            fa_align.checked_lines('q́','[00:01]q')
+        for text in ('абв','flim абв','café','İ','q́','123',''):
+            with self.subTest(text=text), self.assertRaisesRegex(ValueError,'manual'):
+                fa_align.checked_lines(text,'[00:01]'+text)
+        self.assertEqual(fa_align.model_words("Flim’s — borp"),["Flim’s",'borp'])
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); (root/'verified.txt').write_text('абв'); (root/'synced.lrc').write_text('[00:01]абв')
+            # Poison model imports: a refusal must occur before either can load.
+            (root/'torch.py').write_text("raise RuntimeError('model imported')")
+            (root/'soundfile.py').write_text("raise RuntimeError('audio imported')")
+            env={**os.environ,'PYTHONPATH':str(root)}
+            result=subprocess.run([sys.executable,str(ROOT/'tools/song_qa/fa_align.py'),str(root/'missing'),
+                                   str(root/'verified.txt'),str(root/'synced.lrc'),str(root/'out.json')],
+                                  env=env,capture_output=True,text=True)
+            self.assertNotEqual(result.returncode,0); self.assertIn('manual',result.stderr)
+            self.assertNotIn('imported',result.stderr); self.assertFalse((root/'out.json').exists())
 
     def test_fa_mismatched_rows_and_words_refuse_before_model(self):
         self.assertEqual(fa_align.checked_lines('flim borp','[00:01] flim borp')[1],['flim borp'])
@@ -355,6 +459,36 @@ class CommandLines(unittest.TestCase):
             (package/'alias').symlink_to(package/'target.json')
             result=subprocess.run(command+[str(root/'out2')],capture_output=True)
             self.assertNotEqual(result.returncode,0); self.assertFalse((root/'out2').exists())
+
+    def test_documented_correct_lyrics_path_snapshots_base_applies_and_rebuilds(self):
+        import re
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); work=root/'work'; work.mkdir(); scratch=root/'scratch'; scratch.mkdir()
+            package=make_package(work)
+            song=target(); song['lyrics']=[dict(a=.3,b=.7,words=[dict(w='flim',a=.3,b=.7,c=.6)])]
+            common.write_json(package/'target.json',song)
+            for name in ('foreground.mp3','backing.mp3','foreground_80.mp3','backing_80.mp3'):
+                (package/name).write_bytes(b'synthetic')
+            np.savez(scratch/'features.npz',t=np.arange(0,2,.01),rms=np.full(200,-10),onset_start=np.array([]))
+            doc=(ROOT/'docs/SONG_QA.md').read_text()
+            # Execute the shared snapshot and the actual sheet/apply/rebuild lines.
+            shared=doc.index('After either text branch')
+            snapshot=doc.index('cp "$W/package/target.json" "$S/base.json"')
+            self.assertGreater(snapshot,shared)
+            self.assertLess(snapshot,doc.index('## 3.'))
+            commands=[doc[snapshot:].splitlines()[0]]
+            for script in ('make_sheet.py','apply_edits.py','finish_song.py'):
+                match=re.search(r'^"\$P" "\$T/'+script+r'"[^\n]*',doc.replace('\\\n',''),re.M)
+                self.assertIsNotNone(match,script); commands.append(match[0].removesuffix(' --dry-run'))
+            (scratch/'melody.json').write_text('[]')
+            env={**os.environ,'P':sys.executable,'T':str(ROOT/'tools/song_qa'),'W':str(work),'S':str(scratch)}
+            for command in commands:
+                subprocess.run(['sh','-c',command],env=env,cwd=ROOT,check=True,capture_output=True)
+            saved=json.loads((package/'target.json').read_text())
+            self.assertEqual(saved['lyrics'],song['lyrics'])
+            self.assertEqual(saved['points'],song['points'])
+            self.assertEqual(apply.validate(saved),[])
+            self.assertTrue((scratch/'trainer.html').exists())
 
     def test_generated_sheet_preserves_words(self):
         with tempfile.TemporaryDirectory() as tmp:

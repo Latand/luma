@@ -124,7 +124,6 @@ the span for the operator before declaring the text verified.
 "$P" "$T/set_artist.py" "$W/package" "$VERIFIED_ARTIST"
 "$P" studio/lyrics_text.py "$W/package" --text "$VERIFIED" --synced "$SYNCED" --dry-run
 "$P" studio/lyrics_text.py "$W/package" --text "$VERIFIED" --synced "$SYNCED" --no-html --json
-cp "$W/package/target.json" "$S/base.json"
 ```
 
 Inspect a refusal at its timestamp. Fix the source or clock after checking the
@@ -142,7 +141,15 @@ and proposed times for every override and retain the published LRC beside the
 corrected one. A line stamp supplies no internal word positions: use R1 per word.
 
 The single entry command runs mechanical steps; it does not decide lyrics or
-fetch sources. The base for subsequent edits is the corrected target above.
+fetch sources. After either text branch, snapshot the target used by every later
+sheet, apply and placement command:
+
+```sh
+cp "$W/package/target.json" "$S/base.json"
+```
+
+For already-correct words this preserves the current target; for rewritten words
+it preserves the corrected target.
 
 ## 3. Pictures, candidates and timing sheet
 
@@ -150,12 +157,15 @@ fetch sources. The base for subsequent edits is the corrected target above.
 "$P" "$T/features.py" "$W/package" "$S/features.npz"
 "$P" "$T/candidates.py" "$W/package" "$S/features.npz" "$S/candidates.json"
 "$P" "$T/onsets.py" "$S/features.npz"
-# Optional proposal; requires matching text/LRC rows and model weights:
+# Optional proposal; requires matching text/LRC rows, Latin a-z tokens and model weights:
 "$P" "$T/fa_align.py" "$W/package" "$VERIFIED" "$SYNCED" "$S/fa.json"
 "$P" "$T/make_sheet.py" "$S/base.json" > "$S/words.txt"
 "$P" "$T/draw_windows.py" "$W/package" "$S/features.npz" "$S/windows" --step 12
 # Add --fa "$S/fa.json" and/or --sung "$W/attempts.json" when present.
 ```
+
+The optional aligner refuses unsupported letters before loading model weights.
+Use the word sheet and pictures for those passages.
 
 Read **every** window, including repeats and the last partial window. Each 12 s
 window has two strips with 0.1 s ticks. The upper panel is the log-frequency stem
@@ -220,7 +230,9 @@ each occurrence. Agreement establishes consistency; the first occurrence still
 needs independent boundary evidence. Review every `repeat` candidate.
 
 The generated word sheet uses `index word = =`: these rows preserve the original
-start, end and confidence. Change just the rows supported by the picture. Use
+start, end, confidence and timing provenance. Explicitly placed rows receive
+`timing_source: reviewed_spectrogram`; doubtful rows still carry confidence 0.4.
+Change just the rows supported by the picture. Use
 seconds for exact times, `~seconds` for an eye estimate snapped within 70 ms, or
 `o123` for an onset index printed by `onsets.py`. After snapping, inspect the chosen
 candidate. Keep it only with a strong onset or a contour sign within 80 ms. If it

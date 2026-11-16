@@ -1,7 +1,7 @@
 # Song QA validation
 
-Verified 2026-11-16 with Python 3.11.13 in an isolated scratch export of the changes above `afa0187`.
-The final acceptance campaign ran from 2026-11-16T12:37:00.567621+00:00 to 2026-11-16T12:42:07.502826+00:00.
+Verified 2026-11-16 with Python 3.11.13 in an isolated scratch export of the final lane source.
+The final acceptance campaign ran from 2026-11-16T14:13:40.013385+00:00 to 2026-11-16T14:18:34.210347+00:00.
 Exact source fingerprints, dependency versions, commands, frozen references, logs, reports and images are retained in private evidence.
 The procedure is [SONG_QA.md](SONG_QA.md).
 
@@ -91,9 +91,9 @@ The numeric flags cover only part of the reviewed start changes; every phrase an
 
 ## Verification
 
-350 Python tests passed: 302 existing tests, 32 original QA tests, and 16 placement tests.
+357 Python tests passed with zero skips: 302 existing tests, 38 QA tests, and 17 placement tests.
 All 13 test files ran sequentially through the heavy-command wrapper with isolated home/config/temp directories and distinct test ports.
-Both focused QA suites were rerun after the last helper changes and passed (48 tests).
+Both focused QA suites passed in the final run (55 tests).
 The project virtual-environment interpreter path was preserved.
 
 The focused suites are `tests/song_qa_test.py` and `tests/song_qa_placement_test.py`.
@@ -106,3 +106,27 @@ The entry test checks both placement outputs and forwards counted spans and sync
 The scan checks private package metadata, lyric lines, paths and identities. No project publication-check command exists.
 Node and browser sources were unchanged; browser suites, optional model alignment and real-trainer screenshots were outside this run.
 Ordinary windows require no browser or profile.
+
+## Review regressions
+
+Seven focused regression tests cover the seven review findings:
+
+| Finding | Verification |
+|---|---|
+| Already-correct lyrics | Executes the documented shared snapshot, sheet, apply and rebuild commands from fresh synthetic scratch |
+| Self-closing HTML | Built-in and selected containers retain all three lines after ordinary/self-closing breaks and images; void containers refuse |
+| Low/high target pitches | Real candidate CLI accepts schema-valid MIDI 24, 96 and 108 packages with gaps, preserving all source files |
+| Reviewed timing origin | Explicit timing replaces the energy origin; the placement screen no longer calls it unplaced; untouched rows retain every value |
+| Fractional refill | Real apply CLI fills through 0.907 s with consistent full-frame annotation coverage, validates and retains both remaining noise spans plus a backup |
+| Unsupported alignment letters | Mismatched non-Latin rows refuse; matching unsupported, mixed and empty rows refuse before audio/model imports; supported words remain present |
+| Boundary labels | Pixel bounds fit inside full and partial strips while word-start markers retain their original times |
+
+The held-note detector searches its cached MIDI 36–90 grid. An anchor with no
+intersecting band supplies no held-note candidate; its contour still needs the
+picture review. Annotation edits cover whole selected 20 ms frames, including
+the complete final filled frame. Optional model weights were not loaded.
+
+Fresh default-size renders of the reported song C/D windows and both final
+partial windows measured 197 labels with zero clipping. The single-tick final
+strip is covered by the focused regression. Visual inspection confirmed the
+boundary word and edge ticks are readable; the final partial window stays dark.

@@ -124,7 +124,7 @@ def build_lyrics(base_lines, rows, F, duration):
                    resolve(row['b'], F, 'end')[0] if row['b'] is not None else
                    release(F, starts[i], min(nxt, starts[i] + 12)))
             w.update(a=round(starts[i], 3), b=round(min(end, nxt - .005), 3),
-                     c=.4 if row['doubt'] else .95)
+                     c=.4 if row['doubt'] else .95, timing_source='reviewed_spectrogram')
         elif row['b'] not in (None, '='):
             raise ValueError(f'row {i}: unchanged start requires unchanged end')
         if row['doubt']: w['c'] = .4
@@ -254,7 +254,14 @@ def update_unpitched(song, ops):
     spans = [dict(s) for s in song.get('unpitched', [])]
     for op in ops:
         a, b = max(0, op['a']), min(song['duration'], op['b'])
-        # An explicit edit supersedes the annotation inside its interval.
+        # Use the same selected frames as apply_melody and their full 20 ms
+        # coverage, so a derived note cannot extend into a retained annotation.
+        if op.get('kind'): a = math.floor((a + 1e-9) / HOP) * HOP
+        times = [p[0] for p in song['points']]
+        i0, i1 = np.searchsorted(times, [a, b])
+        if i0 == i1: continue
+        a, b = times[i0], min(song['duration'], round(times[i1-1] + HOP, 9))
+        # An explicit edit supersedes the annotation inside its frame coverage.
         kept = []
         for span in spans:
             if span['b'] <= a or span['a'] >= b:

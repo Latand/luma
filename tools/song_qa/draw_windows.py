@@ -63,6 +63,30 @@ def contour_segments(song, t0, t1):
         last = p
     return out
 
+def fit_labels(ax):
+    """Keep text inside its strip while leaving every time marker in place."""
+    renderer = ax.figure.canvas.get_renderer()
+    bounds = ax.get_window_extent(renderer)
+    ticks = [label for label in ax.get_xticklabels() if label.get_visible()]
+    for label in ticks:
+        label.set_ha('center')
+        box = label.get_window_extent(renderer)
+        if box.x0 < bounds.x0 + 3: label.set_ha('left')
+        elif box.x1 > bounds.x1 - 3: label.set_ha('right')
+    for label in ax.texts:
+        if not label.get_visible() or not label.get_text(): continue
+        box = label.get_window_extent(renderer)
+        available = bounds.width - 6
+        if box.width > available:
+            label.set_fontsize(label.get_fontsize() * available / box.width)
+            box = label.get_window_extent(renderer)
+        shift = max(0, bounds.x0 + 3 - box.x0) - max(0, box.x1 - bounds.x1 + 3)
+        if shift:
+            transform = label.get_transform()
+            x, y = transform.transform(label.get_position())
+            label.set_position(transform.inverted().transform((x + shift, y)))
+
+
 def draw_strip(fig, gs_spec, gs_on, gs_roll, t0, t1, song, F, fa_words, widx):
     t = F['t']; i0, i1 = np.searchsorted(t, [t0, t1]); logf = F['logf']
     ax = fig.add_subplot(gs_spec)
@@ -132,6 +156,7 @@ def draw_strip(fig, gs_spec, gs_on, gs_roll, t0, t1, song, F, fa_words, widx):
         for g in np.arange(np.ceil(t0 * 2) / 2, t1 + 1e-6, .5): axx.axvline(g, color='white', lw=.25, alpha=.35, zorder=2)
     plt.setp(ax.get_xticklabels(), visible=False); plt.setp(ax2.get_xticklabels(), visible=False)
     ax3.set_xticklabels([f'{int(x) // 60}:{x % 60:04.1f} ({x:.0f})' for x in ax3.get_xticks()], fontsize=7.5)
+    for axx in (ax, ax2, ax3): fit_labels(axx)
 
 def main():
     (pkg, feat, out), o = args(); pkg = Path(pkg); out = Path(out); out.mkdir(parents=True, exist_ok=True)
