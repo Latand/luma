@@ -24,7 +24,7 @@ if [ "$#" -gt 0 ]; then
   for t in "$@"; do LUMA_SHOT="tests/e2e/shot_$(basename "$t" .mjs).png" "$RUN" "$t" || status=1; done
   exit "$status"
 fi
-for t in scoring audio ux studio scale lessons finish history progress lives activity session wordless autopick latency cloud video xr tract3d; do echo "== $t"; LUMA_SHOT="tests/e2e/shot_$t.png" "$RUN" "tests/e2e/$t.mjs" || status=1; done
+for t in scoring audio ux studio scale lessons finish history progress lives activity session wordless scream autopick latency cloud video xr tract3d; do echo "== $t"; LUMA_SHOT="tests/e2e/shot_$t.png" "$RUN" "tests/e2e/$t.mjs" || status=1; done
 "$PY" tests/studio_test.py || status=1
 "$PY" tests/separation_test.py || status=1
 "$PY" tests/lyrics_text_test.py || status=1
