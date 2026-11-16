@@ -407,6 +407,15 @@ flags and repeat disagreements also lower affected word confidence to 0.4.
 Projection supplies a valid draft; it establishes no acoustic accuracy. Stored
 confidence is a review signal and has no calibrated probability interpretation.
 
+MMS FA in the pinned torchaudio bundle returns letter log probabilities and
+appends a wildcard with log score zero. The adapter passes these emissions
+unchanged to CTC alignment; only wav2vec2 logits receive `log_softmax`.
+An earlier adapter normalized the extended MMS output again, halving every
+letter probability and making the 0.6 gate unreachable. That defect forced
+every generated word below the acoustic gate in the previous run. The correction
+preserves native acoustic scores; order repair, refinement doubts and final QA
+can still lower a high acoustic score to 0.4. The threshold remains 0.6.
+
 The command shares preparation's pYIN + CREPE inference and QA's feature
 extraction, placement screen, octave/broken-note/repeat candidates, note
 rederivation and schema validator. It keeps the better measured melody component.
@@ -454,7 +463,7 @@ has not been demonstrated.
 
 ## End-to-end command measurements
 
-GPU campaign: 2026-11-16 19:02:15–19:17:09 UTC, RTX 3060 (12 GB), PyTorch/torchaudio 2.10.0+cu128, two CPU threads, cached weights. One fresh command process per song, sequentially. Each command computed MMS words, fresh pYIN + CREPE pitch, features, QA and a full scratch trainer build. All five actual output files passed the step 1 scoring CLI. Both hashes and modification times of the audited package files stayed unchanged.
+GPU campaign: 2026-11-16 20:48:01–21:02:50 UTC, RTX 3060 (12 GB), PyTorch/torchaudio 2.10.0+cu128, two CPU threads, cached weights. One fresh command process per song, sequentially. Each command computed MMS words, fresh pYIN + CREPE pitch, features, QA and a full scratch trainer build. All five actual output files passed the step 1 scoring CLI. Both hashes and modification times of the audited package files stayed unchanged. Private instrumentation captured proposals and features without replacing inference.
 
 The visual reference was not checked by ear. E has many reference words with c <= 0.4; pairs below are **all / reference c > 0.4**. A–D and A–E are both reported. The reference retains baseline contour frames and favours the saved tracker. The command received corrected text and row grouping, with coarse clocks only from the saved before target. The baseline retains its historical text differences. See common-text sensitivity below. These limits apply to every table in this section.
 
@@ -532,15 +541,15 @@ All voiced reference frames, including missed predictions. Word-confidence filte
 
 ### Final command runtime
 
-Single measured wall time per song, including process startup, model inference, hashes, feature extraction, checks and the full scratch trainer build. The scorer is excluded. Internal runtime starts after module imports and scratch setup. There are no repeated full-song timings or speedup claims against the historical baseline. The historical and replay baseline times above have different scope.
+Fresh measured wall time per song, including process startup, model inference, hashes, feature extraction, checks and the full scratch trainer build. The scorer is excluded. Internal runtime starts after module imports and scratch setup. This table reports one fresh run per song; earlier campaign times remain in private evidence. No controlled timing study or speedup claim against the historical baseline is made. The historical and replay baseline times above have different scope.
 
 | Song | Wall seconds | Internal seconds | QA flags |
 |---|---:|---:|---:|
-| A | 140.46 | 137.39 | 759 |
-| B | 149.60 | 147.11 | 949 |
-| C | 156.49 | 153.15 | 880 |
-| D | 158.24 | 155.47 | 1271 |
-| E | 284.78 | 280.10 | 1679 |
+| A | 156.97 | 153.09 | 741 |
+| B | 159.99 | 156.45 | 919 |
+| C | 150.98 | 147.85 | 840 |
+| D | 138.87 | 136.37 | 1226 |
+| E | 279.07 | 274.07 | 1630 |
 
 The final path remains opt-in. Across A–E, final word median error is 138.5 ms
 against 470.0 ms, with zero crossing starts. D regresses from 40.5 to 193.5 ms.
@@ -611,14 +620,14 @@ The baseline fallback uses maximum ordered token matches without reference
 word times; unmatched baseline text provides no fallback. A boundary alone
 never raises acoustic confidence or removes another QA doubt.
 
-Measurement replays the previous stage's native MMS proposals and fresh
-pYIN + CREPE output on all five songs, isolating the refinement from neural
-variation. Shared features were recomputed serially from the read-only stems.
-The full scratch CLI and trainer build were replayed with cached neural output
-for each song; generated lyrics equal the measured target, and the unchanged
-scoring CLI reads those outputs back. This is a cached-output replay, with no
-new neural inference runtime or speedup claim. The earlier full GPU timings
-remain above. All audited input hashes and modification times stay unchanged.
+Measurement uses the corrected native MMS scores and fresh pYIN + CREPE
+output from the five full command runs above. Shared features were recomputed
+serially from read-only stems. Raw, ordered, boundary and fallback paths were
+rescored with the same scorer; their word-start and pitch metrics match the
+previous campaign exactly. Confidence and QA counts below replace the earlier
+counts from the double-normalized adapter. Each fixed-rule held-out prediction
+is reproduced from these same proposals without tuning on other songs.
+All audited input hashes and modification times stay unchanged.
 
 The visual reference was set by eye and never checked by ear. E was corrected
 by a smaller model and has many c <= 0.4 words. Every comparison below reports
@@ -716,8 +725,8 @@ The screen uses each path’s own contour. Counts and percentages use actual pre
 | A | boundary | 167 / 156 | 9.6 / 9.0 | 14 / 13 | 167 / 156 |
 | A | hybrid | 167 / 156 | 9.6 / 9.0 | 14 / 13 | 167 / 156 |
 | B | baseline | 165 / 141 | 26.1 / 24.8 | 45 / 38 | 147 / 125 |
-| B | raw | 166 / 164 | 9.0 / 9.1 | 11 / 11 | 166 / 164 |
-| B | ordered | 166 / 164 | 10.2 / 10.4 | 11 / 11 | 166 / 164 |
+| B | raw | 166 / 164 | 9.0 / 9.1 | 11 / 11 | 165 / 163 |
+| B | ordered | 166 / 164 | 10.2 / 10.4 | 11 / 11 | 165 / 163 |
 | B | boundary | 166 / 164 | 3.0 / 3.0 | 7 / 7 | 166 / 164 |
 | B | hybrid | 166 / 164 | 3.0 / 3.0 | 7 / 7 | 166 / 164 |
 | C | baseline | 208 / 142 | 21.6 / 22.5 | 25 / 19 | 194 / 131 |
@@ -731,18 +740,18 @@ The screen uses each path’s own contour. Counts and percentages use actual pre
 | D | boundary | 270 / 233 | 5.9 / 6.9 | 11 / 11 | 270 / 233 |
 | D | hybrid | 270 / 233 | 5.9 / 6.9 | 10 / 10 | 270 / 233 |
 | E | baseline | 280 / 169 | 18.2 / 16.0 | 30 / 16 | 269 / 162 |
-| E | raw | 280 / 171 | 17.5 / 14.0 | 11 / 3 | 280 / 171 |
-| E | ordered | 280 / 171 | 17.1 / 14.0 | 11 / 3 | 280 / 171 |
+| E | raw | 280 / 171 | 17.5 / 14.0 | 11 / 3 | 277 / 168 |
+| E | ordered | 280 / 171 | 17.1 / 14.0 | 11 / 3 | 277 / 168 |
 | E | boundary | 280 / 171 | 2.9 / 0.0 | 10 / 2 | 280 / 171 |
 | E | hybrid | 280 / 171 | 2.9 / 0.0 | 10 / 2 | 280 / 171 |
 | A–D | baseline | 812 / 597 | 25.4 / 22.8 | 112 / 88 | 773 / 564 |
-| A–D | raw | 806 / 736 | 17.4 / 17.4 | 68 / 64 | 806 / 736 |
-| A–D | ordered | 806 / 736 | 19.1 / 18.8 | 67 / 63 | 806 / 736 |
+| A–D | raw | 806 / 736 | 17.4 / 17.4 | 68 / 64 | 805 / 735 |
+| A–D | ordered | 806 / 736 | 19.1 / 18.8 | 67 / 63 | 805 / 735 |
 | A–D | boundary | 806 / 736 | 6.3 / 6.4 | 48 / 47 | 806 / 736 |
 | A–D | hybrid | 806 / 736 | 6.2 / 6.2 | 47 / 46 | 806 / 736 |
 | A–E | baseline | 1092 / 766 | 23.5 / 21.3 | 142 / 104 | 1042 / 726 |
-| A–E | raw | 1086 / 907 | 17.4 / 16.8 | 79 / 67 | 1086 / 907 |
-| A–E | ordered | 1086 / 907 | 18.6 / 17.9 | 78 / 66 | 1086 / 907 |
+| A–E | raw | 1086 / 907 | 17.4 / 16.8 | 79 / 67 | 1082 / 903 |
+| A–E | ordered | 1086 / 907 | 18.6 / 17.9 | 78 / 66 | 1082 / 903 |
 | A–E | boundary | 1086 / 907 | 5.4 / 5.2 | 58 / 49 | 1086 / 907 |
 | A–E | hybrid | 1086 / 907 | 5.3 / 5.1 | 57 / 48 | 1086 / 907 |
 
@@ -780,29 +789,33 @@ Fewer screen flags do not establish closer agreement with the visual reference.
 
 The share over 140 ms grows from 49.1% raw to 50.2% refined (50.3% with the
 baseline fallback). Over 200 ms grows from 43.4% to 45.4% (45.9% fallback).
-**All 1086/1086 generated words remain marked doubtful after final QA.** The
-existing c < 0.6 acoustic gate saturates on these MMS scores, and no calibrated
-confidence or listening verification was added. The confidence and QA rules certify no review-free word subset. The doubtful
-mark supplies a review signal without a calibrated error probability. By its
-current review contract, 100% would still receive a human or agent look.
-Even a threshold that ignored those confidence flags would leave about half
-of starts over 140 ms from the eye-set reference. The requested unattended
-placement outcome remains unmet; the experimental flags preserve the measured
-result without changing the default.
+After correcting MMS confidence, **1082/1086 words in the default
+ordered command remain doubtful after final QA**. Raw proposals give
+1082/1086, boundary 1086/1086, and baseline fallback
+1086/1086. Native acoustic confidence is below 0.6 on 1016/1086
+words before ordering and QA; the previous universal acoustic rejection came
+from the adapter defect. High native scores can now pass that gate.
+Order repair, refinement ambiguity and other QA reasons still mark words
+doubtful. Stored confidence remains an uncalibrated review signal and supplies
+no listening verification. About half of starts still lie over 140 ms from
+the eye-set, unheard reference; E contains many low-confidence reference
+words. The requested unattended placement outcome remains unmet, and the
+experimental flags preserve the measured result without changing the default.
 
 ## Verification
 
-All **435 Python tests across 18 files passed** in an isolated scratch export,
+All **438 Python tests across 18 files passed** in an isolated scratch export,
 with explicit file paths, one process at a time under the heavy-command gate.
-This includes 26 benchmark tests, 21 command tests and 13 refinement tests. Browser suites were
+This includes 29 benchmark tests, 21 command tests and 13 refinement tests. Browser suites were
 outside scope. No test downloads model weights.
 
 Run `python tests/song_auto_bench_test.py`, `python tests/song_auto_test.py`,
 `python tests/song_auto_refine_test.py`, and each other Python test file under
 `tests/`, using the project’s gate and
 an isolated HOME, XDG configuration/data/cache directories and TMPDIR. The
-full run used the existing project Python and read-only dependencies; candidate
-and command probes used a separate scratch environment. No production dependency
+full run used a scratch Python environment borrowing the installed project
+dependencies read-only; LUMA_PY retained the main interpreter path. Candidate
+and command probes also used scratch environments. No production dependency
 was added and the project environment was not installed into or upgraded.
 
 The command tests cover shared compound-token ownership, missing/extra/wrong
@@ -826,6 +839,13 @@ and synthetic pitch fixtures; no inference model is downloaded.
 The prior benchmark tests cover common-text matching and missing-word penalties,
 confidence/pickup subsets, numeric pitch/unpitched/held-gap metrics, pooling,
 chunk seams, output validation, input changes and read-only scratch guards.
+The added confidence tests exercise the installed MMS bundle wrapper with a
+stub acoustic model and stub weight retrieval, followed by real CTC alignment
+and token merging. They cover high and low scores, both sides of the 0.6 gate,
+unchanged word times, wildcard preservation, wav2vec2 logit normalization, and
+word/span QA that still marks high-score words doubtful. They reproduced the
+MMS defect against the previous adapter and passed after the correction.
+
 A separate real-model CPU probe completed the full command on synthetic audio.
 The five GPU command runs built real scratch trainers and scored their generated
 targets; applying to the reference library and listening remain unverified.

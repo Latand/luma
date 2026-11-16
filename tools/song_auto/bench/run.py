@@ -99,7 +99,11 @@ def align(package, lyrics, seed, candidate, device):
         segment = segment/(segment.abs().max()+1e-6)*.7
         with torch.inference_mode():
             emission, _ = model(segment[None].to(device))
-            emission = emission.cpu().log_softmax(-1)
+            # MMS already returns log probabilities with a zero-score wildcard.
+            # Renormalizing that extended vocabulary halves every letter score.
+            emission = emission.cpu()
+            if candidate != 'mms':
+                emission = emission.log_softmax(-1)
             alignment, scores = torchaudio.functional.forced_align(emission, torch.tensor([ids]), blank=0)
         runs = torchaudio.functional.merge_tokens(alignment[0], scores[0].exp())
         if len(runs) != len(ids): raise ValueError('CTC token count differs')

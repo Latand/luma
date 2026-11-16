@@ -149,6 +149,89 @@ class Metrics(unittest.TestCase):
         self.assertIsNone(score.pool_scores([dict(words=None,pitch=result)])['pitch']['voiced_recall'])
 
 
+class AcousticConfidence(unittest.TestCase):
+    def align_stub(self, candidate, confidence):
+        import numpy as np
+        import torch
+        import torchaudio
+        from torchaudio.pipelines._wav2vec2 import utils
+        bundle = (torchaudio.pipelines.MMS_FA if candidate == 'mms'
+                  else torchaudio.pipelines.WAV2VEC2_ASR_BASE_960H)
+        labels = bundle.get_labels(star=None) if candidate == 'mms' else bundle.get_labels()
+        token = labels.index('a' if candidate == 'mms' else 'A')
+        probabilities = torch.full((1, 6, len(labels)), (1-confidence)/(len(labels)-1))
+        probabilities[:, :, 0] = confidence
+        probabilities[:, 2:4, 0] = (1-confidence)/(len(labels)-1)
+        probabilities[:, 2:4, token] = confidence
+
+        class Acoustic(torch.nn.Module):
+            def forward(self, waveform, lengths=None):
+                # Shifted logits catch missing normalization on the ASR branch.
+                return probabilities.log()+7, lengths
+
+        base = dict(duration=1.2, lyrics=[dict(words=[dict(w='a', a=.4, b=.8)])])
+        # Exercise the installed bundle's real wrapper, CTC and merge logic.
+        # Replacing just construction and weight retrieval prevents downloads.
+        with patch.object(utils, '_get_model', return_value=Acoustic()), \
+                patch.object(utils, '_get_state_dict', return_value={}), \
+                patch.object(run, 'audio', return_value=np.zeros(19200, dtype=np.float32)), \
+                patch.object(torchaudio.functional, 'forced_align',
+                             wraps=torchaudio.functional.forced_align) as forced:
+            proposals, _ = run.align(Path('.'), base['lyrics'], base, candidate, 'cpu')
+        emission = forced.call_args.args[0]
+        if candidate == 'mms':
+            torch.testing.assert_close(emission[:, :, -1], torch.zeros(1, 6))
+            normalized = emission[:, :, :-1].exp().sum(-1)
+        else:
+            normalized = emission.exp().sum(-1)
+        torch.testing.assert_close(normalized, torch.ones(1, 6))
+        return base, proposals
+
+    def test_mms_native_scores_reach_word_gate_without_wildcard_renormalization(self):
+        from tools.song_auto import run as command
+        times = []
+        for confidence in (.99, .2, .6001, .5999):
+            with self.subTest(confidence=confidence):
+                base, proposals = self.align_stub('mms', confidence)
+                self.assertAlmostEqual(proposals[0]['confidence'], confidence, places=5)
+                times.append((proposals[0]['a'], proposals[0]['b']))
+                base['lyrics'], flags = command.map_words(base['lyrics'], proposals, base['duration'])
+                self.assertEqual(flags, [])
+                with patch.object(command, 'screen', return_value={'flags': []}), \
+                        patch.object(command, 'detect', return_value=[]):
+                    report = command.end_checks(base, {})
+                self.assertEqual(report['review_required'], confidence < .6)
+                stored = base['lyrics'][0]['words'][0]['c']
+                self.assertAlmostEqual(stored, round(min(.4, confidence) if confidence < .6 else confidence, 3))
+                self.assertEqual([f['type'] for f in report['flags']],
+                                 ['word_confidence'] if confidence < .6 else [])
+        self.assertEqual(len(times), 4)
+        self.assertEqual(times, [times[0]]*len(times))
+
+    def test_wav2vec2_logits_are_normalized_for_high_and_low_scores(self):
+        for confidence in (.99, .2):
+            with self.subTest(confidence=confidence):
+                _, proposals = self.align_stub('wav2vec2', confidence)
+                self.assertAlmostEqual(proposals[0]['confidence'], confidence, places=5)
+
+    def test_high_mms_score_still_yields_to_word_and_span_qa(self):
+        from tools.song_auto import run as command
+        base, proposals = self.align_stub('mms', .99)
+        for reason in ('word_start', 'alignment_order', 'repeat', 'unpitched', 'parallel'):
+            with self.subTest(reason=reason):
+                song = copy.deepcopy(base)
+                song['lyrics'], _ = command.map_words(song['lyrics'], proposals, song['duration'])
+                flag = dict(type=reason, a=proposals[0]['a'], b=proposals[0]['b'])
+                if reason in ('word_start', 'alignment_order'):
+                    flag['word'] = 0
+                with patch.object(command, 'screen', return_value={'flags': []}), \
+                        patch.object(command, 'detect', return_value=[]):
+                    report = command.end_checks(song, {}, [flag])
+                self.assertEqual(song['lyrics'][0]['words'][0]['c'], .4)
+                self.assertTrue(report['review_required'])
+                self.assertIn('word_confidence', [f['type'] for f in report['flags']])
+
+
 class Harness(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
