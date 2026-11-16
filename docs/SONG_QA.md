@@ -164,8 +164,9 @@ it preserves the corrected target.
 # Add --fa "$S/fa.json" and/or --sung "$W/attempts.json" when present.
 ```
 
-The optional aligner refuses unsupported letters before loading model weights.
-Use the word sheet and pictures for those passages.
+The optional aligner preserves alphanumeric content when comparing verified and
+synced rows. Digits, mixed letter/digit tokens and unsupported letters refuse
+before audio or model imports. Use the word sheet and pictures for those passages.
 
 Read **every** window, including repeats and the last partial window. Each 12 s
 window has two strips with 0.1 s ticks. The upper panel is the log-frequency stem
@@ -311,7 +312,9 @@ These numbers rank places to inspect; they have no calibrated probability.
 | `repeat` | Repeated text aligns inconsistently with the stem energy pattern in surrounding context | correct supported word rows; inspect variations separately |
 
 Octave checks use a six-partial spectral comb and odd/even partial evidence;
-phrase context ranks confidence after spectral disagreement. Neighbour pitch
+phrase context ranks confidence after spectral disagreement. Comparisons outside
+the cached MIDI 36–90 grid supply no evidence; proposed pitches must also fit
+the schema range. Candidate spans stop at unsupported frames. Neighbour pitch
 alone supplies no octave verdict. Unpitched checks use energy, autocorrelation
 and harmonic concentration. A noise band can resemble a tone and a rough vowel
 can resemble noise. Broken-note checks search a local pitch band near flanking
@@ -320,6 +323,11 @@ contour frames and include short intervening fragments on another partial; dista
 prefixes also find repeats whose alignment split the occurrences into different rows. Two identical words
 in different musical settings can disagree legitimately. A coherent late section
 or a different arrangement can defeat that reference. These remain visual tasks.
+
+Octave edits preserve existing scream/noise annotations, including gaps within
+a phrase and operations that change no frames. A fill trims annotations only
+where pitched frames survive contour derivation. An explicitly classified clear
+replaces the classification over its selected frame coverage.
 
 Write a private JSON list, for example:
 

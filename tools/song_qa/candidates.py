@@ -70,15 +70,20 @@ def audio_features(package):
 
 
 def evidence(F, midi):
-    indices = np.clip(np.rint((np.asarray(midi) - F['midi'][0]) / .25).astype(int), 0, len(F['midi'])-1)
+    pitch = np.asarray(midi)
+    supported = np.isfinite(pitch) & (pitch >= F['midi'][0]) & (pitch <= F['midi'][-1])
+    indices = np.clip(np.rint((np.where(supported, pitch, F['midi'][0]) - F['midi'][0]) / .25).astype(int), 0, len(F['midi'])-1)
     cols = np.arange(len(F['t']))
-    return F['sal'][indices, cols], F['ratio'][indices, cols]
+    # Index clipping only makes the lookup safe; an absent pitch has no evidence.
+    return (np.where(supported, F['sal'][indices, cols], 0),
+            np.where(supported, F['ratio'][indices, cols], 0))
 
 
-def spans(mask, F, category, confidence, **fields):
+def spans(mask, F, category, confidence, support=None, **fields):
     out = []
     # Close tiny holes, retaining separate musical events.
     mask = ndi.binary_closing(mask, structure=np.ones(3))
+    if support is not None: mask &= support
     for a, b in runs(mask):
         if b-a < 3: continue
         out.append(dict(type=category, a=round(float(F['t'][a]), 3),
@@ -103,13 +108,15 @@ def melody_candidates(song, F):
     for shift in (-12, 12):
         alt, alt_ratio = evidence(F, pitch + shift)
         # Spectral disagreement is required; phrase context ranks its confidence.
-        mask = present & loud & harmonic & (alt > best * .1)
+        proposed = pitch + shift
+        support = present & (proposed >= max(24, F['midi'][0])) & (proposed <= min(108, F['midi'][-1]))
+        mask = support & loud & harmonic & (alt > best * .1)
         if shift == -12: mask &= alt_ratio > .07
         else: mask &= ((own_ratio < .2) | (alt > own * 1.2)) & (alt > own * 1.08)
         neighbours = ndi.median_filter(pitch, size=101, mode='nearest')
         context = np.abs(pitch + shift - neighbours) < np.abs(pitch-neighbours)
         conf = .4 + .25*np.minimum(1, alt/(best+1e-9)) + .15*context + .15*F['periodicity']
-        out += spans(mask, F, 'octave', conf, shift=shift)
+        out += spans(mask, F, 'octave', conf, support=support, shift=shift)
     # Low periodicity and weak harmonic concentration with audible energy.
     unpitched = loud & (~harmonic | (F['periodicity'] < .5)) & (t < song['duration'])
     confidence = .4 + .5*(1-F['periodicity'])

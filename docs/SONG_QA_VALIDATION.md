@@ -1,7 +1,9 @@
 # Song QA validation
 
 Verified 2026-11-16 with Python 3.11.13 in an isolated scratch export of the final lane source.
-The final acceptance campaign ran from 2026-11-16T14:13:40.013385+00:00 to 2026-11-16T14:18:34.210347+00:00.
+Read-only kernel mounts and canary-verified Python guards protected the private
+library and refused browser-profile reads; no violations occurred during acceptance.
+The final acceptance campaign ran from 2026-11-16T15:06:31.047818+00:00 to 2026-11-16T15:11:10.435595+00:00.
 Exact source fingerprints, dependency versions, commands, frozen references, logs, reports and images are retained in private evidence.
 The procedure is [SONG_QA.md](SONG_QA.md).
 
@@ -19,9 +21,10 @@ The entry command ran from the scratch repository root for each package:
 # Song D also supplies --review "$SPANS".
 ```
 
-All four runs passed. Source hashes remained unchanged; targets validated and rebuilt HTML embedded the same target.
+All four runs passed. Independent source hashes and modification times remained unchanged; targets validated and rebuilt HTML embedded the same target.
 There are 80 windows per version (160 total), plus sheets, candidate lists and both placement reports.
-These runs apply frozen melody references to copies of saved bases. They preserve the bases' word times;
+These runs apply current recorded melody references, checked against retained
+reviewed evidence, to copies of saved bases. They preserve the bases' word times;
 the separate song D comparison below reads the actual saved small-model and reviewed targets.
 A legacy word sheet with a different base word count remains outside this acceptance command;
 word application and refusal are exercised by synthetic tests.
@@ -40,11 +43,12 @@ These figures measure event coverage. Thresholds use the pilot data; precision, 
 
 | Song | Octave | Unpitched | Broken | Repeat | Parallel harmonics | Starts without boundary / words (saved base) |
 |---|---:|---:|---:|---:|---:|---:|
-| song A | 107 | 110 | 129 | 1 | 10 | 24/167 |
-| song B | 183 | 200 | 152 | 2 | 29 | 34/166 |
-| song C | 86 | 180 | 145 | 1 | 22 | 33/203 |
-| song D | 161 | 218 | 241 | 2 | 32 | 67/282 |
+| song A | 119 | 110 | 129 | 1 | 10 | 24/167 |
+| song B | 190 | 200 | 152 | 2 | 29 | 34/166 |
+| song C | 87 | 180 | 145 | 1 | 22 | 33/203 |
+| song D | 167 | 218 | 241 | 2 | 32 | 67/282 |
 
+Octave counts reflect spans split at unsupported or missing contour frames.
 Parallel-harmonic candidates can also describe chords or leakage. Their voice identity requires picture review.
 All candidates are proposals; the helper changes no target.
 
@@ -91,9 +95,11 @@ The numeric flags cover only part of the reviewed start changes; every phrase an
 
 ## Verification
 
-357 Python tests passed with zero skips: 302 existing tests, 38 QA tests, and 17 placement tests.
+365 Python tests passed with zero skips: 302 existing tests, 46 QA tests, and 17 placement tests.
 All 13 test files ran sequentially through the heavy-command wrapper with isolated home/config/temp directories and distinct test ports.
-Both focused QA suites passed in the final run (55 tests).
+The wrapper used its documented portable fallback after the user service manager proved unavailable.
+Both focused QA suites were renewed after the final annotation change (63 tests).
+The eight added regression cases were also run against the previous revision and reproduced the defects.
 The project virtual-environment interpreter path was preserved.
 
 The focused suites are `tests/song_qa_test.py` and `tests/song_qa_placement_test.py`.
@@ -126,7 +132,23 @@ intersecting band supplies no held-note candidate; its contour still needs the
 picture review. Annotation edits cover whole selected 20 ms frames, including
 the complete final filled frame. Optional model weights were not loaded.
 
-Fresh default-size renders of the reported song C/D windows and both final
-partial windows measured 197 labels with zero clipping. The single-tick final
+Six fresh default-size full/partial sample renders measured 504 labels with zero
+clipping. All 36 retained sample renders matched byte-for-byte. The single-tick final
 strip is covered by the focused regression. Visual inspection confirmed the
 boundary word and edge ticks are readable; the final partial window stays dark.
+
+## Additional review regressions
+
+Eight additional focused tests exercise the remaining three review findings and
+adjacent boundary cases:
+
+| Finding | Verification |
+|---|---|
+| Unsupported octave evidence | Real candidate CLI on six-harmonic MIDI 36/90 audio: correct boundary pitches produce no octave candidates; supported shifts work in both directions; every proposal stays inside the feature/schema range; span smoothing stops at unsupported or missing frames |
+| Scream retention | Real apply CLI retains scream spans for no-op, filtered and mixed voiced/scream octave intervals; ordinary clears retain classification; explicit kinds replace it; fills trim only restored frames, including fractional refills; a refill discarded by derivation retains the annotation |
+| Numeric alignment tokens | Matching numeric/mixed tokens refuse before poisoned audio/model imports; differing numeric content cannot compare equal; supported words retain their order and distinct positional sheet hints |
+
+The octave detector uses the cached MIDI 36–90 grid. Unsupported pitches provide
+zero evidence. The apply CLI updates
+annotations after contour derivation so they reflect the persisted frames.
+Optional alignment weights remain outside the verification run.

@@ -63,6 +63,56 @@ class Numeric(unittest.TestCase):
         self.assertTrue(any(c['type']=='octave' and c['shift']==12
                             for c in candidates.melody_candidates(target(45.),self.F)))
 
+    def test_octave_feature_boundaries_and_supported_directions_cli(self):
+        feature=Path(self.tmp.name)/'features.npz'
+        output=Path(self.tmp.name)/'candidates.json'
+        for actual,pitch,expected in ((36,36,None),(90,90,None),
+                                      (36,24,12),(90,108,None),
+                                      (36,48,-12),(90,78,12)):
+            with self.subTest(actual=actual,pitch=pitch):
+                t=np.arange(32000)/16000
+                hz=440*2**((actual-69)/12)
+                y=sum(.3/h*np.sin(2*np.pi*hz*h*t) for h in range(1,7))
+                sf.write(self.pkg/'vocals_44k.flac',y,16000)
+                F=candidates.audio_features(self.pkg)
+                np.savez(feature,**{'qa_'+k:v for k,v in F.items()})
+                song=target(pitch); self.assertEqual(apply.validate(song),[])
+                common.write_json(self.pkg/'target.json',song)
+                before=runner.fingerprint(self.pkg)
+                subprocess.run([sys.executable,str(ROOT/'tools/song_qa/candidates.py'),str(self.pkg),
+                                str(feature),str(output)],check=True,capture_output=True)
+                found=[c for c in json.loads(output.read_text()) if c['type']=='octave']
+                if expected is None: self.assertEqual(found,[])
+                else:
+                    self.assertTrue(any(c['shift']==expected for c in found),found)
+                for c in found:
+                    self.assertLessEqual(24,pitch+c['shift'])
+                    self.assertLessEqual(pitch+c['shift'],108)
+                    self.assertLessEqual(F['midi'][0],pitch+c['shift'])
+                    self.assertLessEqual(pitch+c['shift'],F['midi'][-1])
+                self.assertEqual(runner.fingerprint(self.pkg),before)
+
+    def test_octave_spans_do_not_bridge_unsupported_frames(self):
+        for pitch in (24,108,None):
+            with self.subTest(pitch=pitch):
+                song=target(69.)
+                song['points'][50][1]=pitch
+                found=[c for c in candidates.melody_candidates(song,self.F) if c['type']=='octave']
+                self.assertTrue(found)
+                self.assertFalse(any(c['a']<=1.<c['b'] for c in found))
+                self.assertTrue(any(c['b']<=1. for c in found))
+                self.assertTrue(any(c['a']>1. for c in found))
+
+    def test_unsupported_pitch_evidence_is_absent(self):
+        for pitch in (24,35.99,90.01,108,float('nan')):
+            sal,ratio=candidates.evidence(self.F,np.full(len(self.F['t']),pitch))
+            self.assertTrue(np.all(sal==0),pitch)
+            self.assertTrue(np.all(ratio==0),pitch)
+        for index in (0,len(self.F['midi'])-1):
+            sal,ratio=candidates.evidence(self.F,np.full(len(self.F['t']),self.F['midi'][index]))
+            np.testing.assert_array_equal(sal,self.F['sal'][index])
+            np.testing.assert_array_equal(ratio,self.F['ratio'][index])
+
     def test_unpitched_noise_and_silence(self):
         for name,noise,silence,expected in [('noise',True,False,True),('silence',False,True,False)]:
             root=Path(self.tmp.name)/name; root.mkdir(); pkg=make_package(root,noise,silence)
@@ -279,6 +329,42 @@ class Apply(unittest.TestCase):
         apply.update_unpitched(song,[{'op':'fill','a':.5,'b':1.}])
         self.assertEqual(song['unpitched'],[{'a':.1,'b':.5,'kind':'noise'},{'a':1.,'b':1.8,'kind':'noise'}])
 
+    def test_octave_cli_preserves_screams_in_noop_and_mixed_intervals(self):
+        feature=Path(self.tmp.name)/'features.npz'; np.savez(feature,**self.F)
+        melody=Path(self.tmp.name)/'melody.json'; report=Path(self.tmp.name)/'report.json'
+        for a,b,limits,expected in ((.4,1.2,{},0),(0,2,{},60),(0,2,{'lo':80},0)):
+            with self.subTest(a=a,b=b,limits=limits):
+                song=target(); clear=[dict(op='clear',a=.4,b=1.2,kind='scream')]
+                apply.apply_melody(self.pkg,song['points'],clear); apply.update_unpitched(song,clear)
+                song['notes'],song['phrases'],song['metrics'],song['initialTime'],_=apply.derive(song['points'],2,[])
+                self.assertEqual(apply.validate(song),[])
+                common.write_json(self.pkg/'target.json',song)
+                melody.write_text(json.dumps([dict(op='octave',a=a,b=b,shift=12,**limits)]))
+                subprocess.run([sys.executable,str(ROOT/'tools/song_qa/apply_edits.py'),str(self.pkg),str(feature),
+                                '--base',str(self.pkg/'target.json'),'--melody',str(melody),'--report',str(report)],
+                               check=True,capture_output=True)
+                saved=json.loads((self.pkg/'target.json').read_text())
+                self.assertEqual(apply.validate(saved),[])
+                self.assertEqual(saved['unpitched'],song['unpitched'])
+                self.assertEqual(json.loads(report.read_text())['melody'][0]['frames'],expected)
+                self.assertEqual([p for p in saved['points'] if .4<=p[0]<1.2],
+                                 [p for p in song['points'] if .4<=p[0]<1.2])
+                if expected==0:
+                    self.assertEqual(saved['points'],song['points'])
+                    self.assertEqual(saved['notes'],song['notes'])
+
+    def test_unpitched_only_changes_for_restored_frames_or_explicit_kind(self):
+        song=target(); clear=[dict(op='clear',a=.4,b=1.2,kind='scream')]
+        apply.apply_melody(self.pkg,song['points'],clear); apply.update_unpitched(song,clear)
+        original=copy.deepcopy(song['unpitched'])
+        for op in (dict(op='clear',a=.5,b=.8),dict(op='fill',a=.5,b=.8)):
+            apply.update_unpitched(song,[op])
+            self.assertEqual(song['unpitched'],original)
+        change=[dict(op='clear',a=.6,b=1.,kind='noise')]
+        apply.apply_melody(self.pkg,song['points'],change); apply.update_unpitched(song,change)
+        self.assertEqual(song['unpitched'],[dict(a=.4,b=.6,kind='scream'),
+                                          dict(a=.6,b=1.,kind='noise'),dict(a=1.,b=1.2,kind='scream')])
+
     def test_fractional_refill_cli_preserves_remaining_annotations(self):
         feature=Path(self.tmp.name)/'features.npz'; np.savez(feature,**self.F)
         melody=Path(self.tmp.name)/'melody.json'
@@ -299,6 +385,21 @@ class Apply(unittest.TestCase):
                 first=round(np.ceil(a/.02)*.02,2)
                 self.assertEqual(saved['unpitched'],[dict(a=.4,b=first,kind='noise'),dict(a=.92,b=1.2,kind='noise')])
                 self.assertTrue(any(p.read_bytes()==original for p in (self.pkg/'.song-qa-backups').rglob('target.json')))
+
+    def test_short_refill_discarded_by_derivation_retains_scream_cli(self):
+        song=target(); clear=[dict(op='clear',a=.4,b=1.2,kind='scream')]
+        apply.apply_melody(self.pkg,song['points'],clear); apply.update_unpitched(song,clear)
+        song['notes'],song['phrases'],song['metrics'],song['initialTime'],_=apply.derive(song['points'],2,[])
+        common.write_json(self.pkg/'target.json',song)
+        feature=Path(self.tmp.name)/'features.npz'; np.savez(feature,**self.F)
+        melody=Path(self.tmp.name)/'melody.json'
+        melody.write_text(json.dumps([dict(op='fill',a=.7,b=.74,m=57)]))
+        subprocess.run([sys.executable,str(ROOT/'tools/song_qa/apply_edits.py'),str(self.pkg),str(feature),
+                        '--base',str(self.pkg/'target.json'),'--melody',str(melody)],check=True,capture_output=True)
+        saved=json.loads((self.pkg/'target.json').read_text())
+        self.assertEqual(apply.validate(saved),[])
+        self.assertEqual(saved['points'],song['points'])
+        self.assertEqual(saved['unpitched'],song['unpitched'])
 
     def test_atomic_failure_keeps_original(self):
         file=self.pkg/'target.json'; original=file.read_bytes()
@@ -388,6 +489,43 @@ class Inputs(unittest.TestCase):
                                   env=env,capture_output=True,text=True)
             self.assertNotEqual(result.returncode,0); self.assertIn('manual',result.stderr)
             self.assertNotIn('imported',result.stderr); self.assertFalse((root/'out.json').exists())
+
+    def test_numeric_alignment_refuses_before_audio_or_model_import(self):
+        self.assertNotEqual(fa_align.norm('123'),fa_align.norm('456'))
+        with self.assertRaisesRegex(ValueError,'content differs'):
+            fa_align.checked_lines('flim 123 borp','[00:01]flim 456 borp')
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            for module in ('torch','torchaudio','soundfile'):
+                (root/(module+'.py')).write_text("raise RuntimeError('dependency imported')")
+            for text in ('flim 123 borp','flim123 borp','flim １２３ borp','123'):
+                with self.subTest(text=text):
+                    with self.assertRaisesRegex(ValueError,'manual'): fa_align.model_words(text)
+                    with self.assertRaisesRegex(ValueError,'manual'): fa_align.checked_lines(text,'[00:01]'+text)
+                    (root/'verified.txt').write_text(text); (root/'synced.lrc').write_text('[00:01]'+text)
+                    result=subprocess.run([sys.executable,str(ROOT/'tools/song_qa/fa_align.py'),str(root/'missing'),
+                                           str(root/'verified.txt'),str(root/'synced.lrc'),str(root/'out.json')],
+                                          env={**os.environ,'PYTHONPATH':str(root)},capture_output=True,text=True)
+                    self.assertNotEqual(result.returncode,0); self.assertIn('manual',result.stderr)
+                    self.assertNotIn('imported',result.stderr); self.assertFalse((root/'out.json').exists())
+
+    def test_supported_alignment_preserves_words_and_sheet_hint_positions(self):
+        text="Flim’s — borp nuv"
+        _,lines,_=fa_align.checked_lines(text,'[00:00]'+text)
+        words=fa_align.model_words(lines[0]); self.assertEqual(words,["Flim’s",'borp','nuv'])
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); song=target()
+            aligned=[dict(w=w,a=.1+i*.4,b=.3+i*.4,score=.9) for i,w in enumerate(words)]
+            song['lyrics']=[dict(a=.1,b=1.1,words=[dict(w=w,a=.1+i*.4,b=.3+i*.4,c=.9) for i,w in enumerate(words)])]
+            common.write_json(root/'target.json',song)
+            common.write_json(root/'fa.json',[dict(line=0,lrc=0,words=aligned)])
+            result=subprocess.run([sys.executable,str(ROOT/'tools/song_qa/make_sheet.py'),str(root/'target.json'),
+                                   '--fa',str(root/'fa.json')],check=True,capture_output=True,text=True)
+            rows=[line for line in result.stdout.splitlines() if line]
+            self.assertEqual(len(rows),len(words))
+            for i,(row,word) in enumerate(zip(rows,aligned)):
+                self.assertTrue(row.startswith(f"{i} {word['w']} = ="))
+                self.assertIn(f"fa {word['a']}..{word['b']}",row)
 
     def test_fa_mismatched_rows_and_words_refuse_before_model(self):
         self.assertEqual(fa_align.checked_lines('flim borp','[00:01] flim borp')[1],['flim borp'])

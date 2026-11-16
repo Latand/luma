@@ -28,7 +28,7 @@ def lrc_rows(text):
 
 def norm(w):
     return ''.join(c for c in unicodedata.normalize('NFC', w.lower().replace('’', "'"))
-                   if c.isalpha() or unicodedata.category(c).startswith("M") or c == "'").strip("'")
+                   if c.isalnum() or unicodedata.category(c).startswith("M") or c == "'").strip("'")
 
 
 def model_words(line):

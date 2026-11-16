@@ -253,24 +253,30 @@ def derive(points, duration, old_notes):
 def update_unpitched(song, ops):
     spans = [dict(s) for s in song.get('unpitched', [])]
     for op in ops:
+        # Only restored pitched frames or an explicit classification can
+        # replace annotations. Octave shifts and ordinary clears keep them.
+        if op['op'] != 'fill' and not op.get('kind'): continue
         a, b = max(0, op['a']), min(song['duration'], op['b'])
-        # Use the same selected frames as apply_melody and their full 20 ms
-        # coverage, so a derived note cannot extend into a retained annotation.
         if op.get('kind'): a = math.floor((a + 1e-9) / HOP) * HOP
         times = [p[0] for p in song['points']]
         i0, i1 = np.searchsorted(times, [a, b])
         if i0 == i1: continue
-        a, b = times[i0], min(song['duration'], round(times[i1-1] + HOP, 9))
-        # An explicit edit supersedes the annotation inside its frame coverage.
-        kept = []
-        for span in spans:
-            if span['b'] <= a or span['a'] >= b:
-                kept.append(span); continue
-            if span['a'] < a: kept.append({**span, 'b': a})
-            if span['b'] > b: kept.append({**span, 'a': b})
-        spans = kept
-        if op.get('kind'):
-            spans.append({'a': a, 'b': b, 'kind': op['kind']})
+        coverage = [(i0, i1)] if op.get('kind') else [
+            (i0 + left, i0 + right)
+            for left, right in runs(np.array([p[1] is not None for p in song['points'][i0:i1]]))]
+        for left, right in coverage:
+            # Match full frame coverage so a derived note cannot extend into
+            # a retained fractional annotation.
+            a, b = times[left], min(song['duration'], round(times[right-1] + HOP, 9))
+            kept = []
+            for span in spans:
+                if span['b'] <= a or span['a'] >= b:
+                    kept.append(span); continue
+                if span['a'] < a: kept.append({**span, 'b': a})
+                if span['b'] > b: kept.append({**span, 'a': b})
+            spans = kept
+            if op.get('kind'):
+                spans.append({'a': a, 'b': b, 'kind': op['kind']})
     spans.sort(key=lambda s: s['a'])
     merged = []
     for span in spans:
@@ -346,8 +352,8 @@ def main():
     if 'melody' in o:
         ops = json.loads(Path(o['melody']).read_text(encoding='utf-8')); before_valid = sum(p[1] is not None for p in song['points'])
         report['melody'] = apply_melody(pkg, song['points'], ops)
-        update_unpitched(song, ops)
         song['notes'], song['phrases'], song['metrics'], song['initialTime'], kept = derive(song['points'], song['duration'], base['notes'])
+        update_unpitched(song, ops)
         report['melody_totals'] = {'frames_with_target_before': before_valid, 'after': sum(p[1] is not None for p in song['points']), 'notes_before': len(base['notes']), 'notes_after': len(song['notes']), 'notes_unchanged': kept,
                                    'filled_s': round(sum(x['seconds'] for x in report['melody'] if x['op'] == 'fill'), 2), 'octave_s': round(sum(x['seconds'] for x in report['melody'] if x['op'] == 'octave'), 2), 'cleared_s': round(sum(x['seconds'] for x in report['melody'] if x['op'] == 'clear'), 2)}
         note = f'contour corrected by eye against the vocal-stem spectrogram ({STAMP}), not verified by ear'
