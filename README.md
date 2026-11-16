@@ -37,6 +37,10 @@ of your voice, no server after the file is built.
   target are excluded; draft notes count and are labelled as draft. In a song with lyrics, notes that come nowhere near
   a word (stem bleed in a break, wordless singing) are drawn dimmed and never scored: «Без слів — не рахується». Hit notes turn mint with ✓, misses hatched red with ×,
   so the two differ in pattern as well as colour.
+- **Scream stretches.** A song may list spans of a scream or a noise that hold no pitch (`unpitched` in
+  [docs/TARGET_MAP_SCHEMA.md](docs/TARGET_MAP_SCHEMA.md)). A scream is a band with vertical strokes and the word «скрим»
+  on the roll, in both views and in the review, the video and the headset; it holds no notes and nothing in it is scored,
+  costs a life or counts as silence. A noise draws nothing.
 - **Three levels.** Легко (±80 ¢, octave errors forgiven), Звично (±50 ¢), Точно (±35 ¢); each also sets timing slack and how
   much of a note must be hit. Details in [docs/SCORING.md](docs/SCORING.md).
 - **Fragment pitch scale.** The vertical range frames the notes in view plus the next four seconds, so it is already right when a phrase arrives. It grows only when upcoming notes would leave the margin, shrinks after two quiet seconds, and every change eases over a second. Confident voice enters through a percentile band, so a single glitch never moves the plot. Масштаб → Детальніше halves the minimum span.
@@ -214,7 +218,7 @@ repeats, the history read without creating the base, the home button and the rea
 `latency.mjs` seeds attempts with a synthetic voice a known number of milliseconds late and checks «Розрахувати
 затримку»: recovery and Apply, pooling across settings and speeds, noise and octave-down takes, late phrase starts, too
 few attempts, other songs through `/targets`, wordless notes, 200 four-minute attempts under 1.5 s, the daily hint,
-390 px and 1440 px, and `file://`. `cloud.mjs` checks the dust of past takes: built and painted in a worker, the take on
+390 px and 1440 px, and `file://`. `scream.mjs` checks the scream band on the demo with an added span: drawn with its word in both views at 1440 px and 390 px, no note inside it, scoring, lives and history equal to the same take with no target there, the pitch scale and a song without the list unchanged (`LUMA_SHOT_SCREAM=<dir>` saves screenshots). `cloud.mjs` checks the dust of past takes: built and painted in a worker, the take on
 screen and a punch-in left out, drawn under the target and the live line, faint, wordless notes unchanged, the record
 line gone with its saved pref, and frame time with 20 takes at 390 px and 1440 px under 1× and 4× CPU throttle. `video.mjs` runs its own Studios with Chromium's fake camera and a microphone fed with
 non-repeating bursts, each group of checks in a process and a browser of its own, so its memory stays under 2 GB beside
