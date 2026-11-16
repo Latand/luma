@@ -1,5 +1,9 @@
 # Design: a camera video of the take, composed with the game layer and the backing track
 
+> **Update (2026-11-16):** the live mirrored circle now occupies its own stage-readout slot above the roll while
+> filming. Composition measures both tracks and puts the voice 3 LU above backing using constant gains and shared
+> peak headroom. See [CAMERA_VIDEO_BUILD_BRIEF.md §11](CAMERA_VIDEO_BUILD_BRIEF.md#11-camera-corrections-2026-11-16).
+>
 > **Status (2026-10-19):** built per [CAMERA_VIDEO_BUILD_BRIEF.md](CAMERA_VIDEO_BUILD_BRIEF.md). The operator's
 > 2026-10-14 decisions replace §7's recommendations (the game fills a landscape frame with the camera in a circle; one
 > video per sitting, lives rewinds inside it; every sitting of 30 s or longer is composed; oldest deleted past 5 GB).
@@ -66,8 +70,8 @@ instrumental stem. The original vocal stem is not in the mix (Deferred lists a q
 
 ## 2. Measured on this machine (2026-10-11/12)
 
-Probe scripts and raw results: `/var/tmp/luma-camvideo-0067b6ea/probe/` (`probe.mjs`, `align.mjs` + `align.py`,
-`render.mjs`, `cpu.mjs`, `iframe.mjs`, `comp/compose_bench.sh`). Every browser probe ran in the operator's browser binary,
+The original local probe scripts were `probe.mjs`, `align.mjs` + `align.py`,
+`render.mjs`, `cpu.mjs`, `iframe.mjs` and `comp/compose_bench.sh`. Every browser probe ran in the operator's browser binary,
 Microsoft Edge 155.0.4283.45 (`/opt/microsoft/msedge/msedge`), headless, with a fresh profile and pages served by
 Playwright on a `localhost` origin: the operator's profile, Studio and the real camera were never touched.
 
@@ -178,8 +182,8 @@ is `'self'`). Adding `camera` to that list documents the intent and costs nothin
 
 - A switch in the trainer settings, next to the WAV switch: **«Знімати мене на камеру»**, off by default (`prefs.camera`,
   saved in `luma.trainer.settings` like every pref, so all trainers of one Studio share it, sessions included). Under it a
-  camera picker (`prefs.cam`, like `prefs.mic`) and a mirrored live preview for framing, shown only while the dialog is
-  open. Hint: «Кожна спроба записується на відео разом із голосом. Відео монтуються в Studio, «Мої відео».»
+  camera picker (`prefs.cam`, like `prefs.mic`) and a mirrored live preview for framing, shown while the dialog is
+  open. During filming, a separate live circle sits in the stage readout above the roll (§11 of the build brief). Hint: «Кожна спроба записується на відео разом із голосом. Відео монтуються в Studio, «Мої відео».»
 - Only from Studio: on `file://` the switch is disabled with «Відео працює з бібліотеки Studio». Studio stores and
   composes the videos.
 - **One prompt.** With camera mode on, `ensureMic()` (`app/app.js:278-293`) asks
@@ -360,10 +364,13 @@ prototype, hearts and % sit over the top of the plot; in the product the plot's 
 
 ### 5.5 Audio
 
-- Voice: the WAV as recorded, gain 0.9 (the review-playback voice gain, `app/app.js:266`).
+- Voice: the recorded WAV, aligned once, with one measured constant gain for the sitting. The composed voice is
+  3 LU above the backing; shared attenuation preserves peaks and dynamics (build brief §11).
 - Instrumental: `LUMA_ASSETS[String(speed)].backing` from the trainer file, decoded by Studio once per song and speed into
-  `songs/videos/.stems/<songHash>_<speed>.mp3`, trimmed from `a / speed`, at the singer's `prefs.back` (default 0.75).
-- `amix=normalize=0`, then `alimiter=limit=0.95`; AAC LC 192 kbit/s, 48 kHz stereo.
+  `songs/videos/.stems/<songHash>_<speed>.mp3`, trimmed from `a / speed`. A zero backing setting stays muted;
+  otherwise measured loudness sets the composed balance independently of the monitor slider.
+- `amix=normalize=0`, with common true-peak headroom and encoded-peak verification below −1 dBTP; AAC LC
+  192 kbit/s, 48 kHz stereo. The former fixed gains and sample limiter were replaced on 2026-11-16.
 - Without headphones the microphone also hears the speakers. The WAV is shifted by the latency, which is about the
   round trip, so that bleed lands nearly on the instrumental. The settings hint recommends headphones; nothing filters it.
 
@@ -390,9 +397,9 @@ ffmpeg -i camera.webm -f h264 -framerate 30 -i game-portrait.h264 -i voice.wav -
  [0:v]setpts=PTS-STARTPTS+(D−videoOffset)/TB,fps=30,scale=-2:1080,crop=1080:1000:(iw-1080)/2:40[,hflip],
       tpad=stop_mode=clone:stop_duration=<tail>[cam];
  [1:v]setpts=PTS-STARTPTS[game];  [cam][game]vstack,format=yuv420p[v];
- [2:a]aresample=48000,volume=0.9,aformat=channel_layouts=stereo[voice];
- [3:a]atrim=start=<a/speed>,asetpts=PTS-STARTPTS,aresample=48000,volume=<back>[inst];
- [voice][inst]amix=inputs=2:normalize=0,alimiter=limit=0.95[a]"
+ [2:a]aresample=48000,volume=<measuredVoiceGain>dB,aformat=channel_layouts=stereo[voice];
+ [3:a]atrim=start=<a/speed>,asetpts=PTS-STARTPTS,aresample=48000,volume=<measuredBackingGain>dB[inst];
+ [voice][inst]amix=inputs=2:normalize=0[a]"
  -map [v] -map [a] -t <duration + tail> -c:v h264_nvenc -preset p5 -rc vbr -cq 23 -maxrate 5M -bufsize 10M
  (or -c:v libx264 -preset veryfast -crf 22 -maxrate 5M -bufsize 10M) -profile:v high
  -c:a aac -b:a 192k -movflags +faststart video-portrait.mp4
@@ -474,8 +481,8 @@ the switch is off by default. The history export never includes video.
 
 ## 7. Prototype review and operator choices
 
-Published as review `pr_58bdcb710bc3d45ec5cc7389fcf65644` on this lane's task, with three layout variants in portrait and
-landscape and the burn storyboard. Frames are under `/var/tmp/luma-camvideo-0067b6ea/frames/`. The game layer in each frame is the demo trainer's
+The original prototype review used three layout variants in portrait and
+landscape and the burn storyboard in the original local frame set. The game layer in each frame is the demo trainer's
 own canvas (synthetic syllables, no song), rendered by `render.mjs` at that layout's panel size. The camera is a drawn
 stand-in. The lyric band, hearts, burn and % are mocked where the render mode would draw them.
 
@@ -573,7 +580,7 @@ not history.
 - **Automatic camera-lag measurement** (clap detection in picture and sound). The clap test is needed once per camera.
 - **Face tracking for the crop.** The crop is centred; the framing preview lets the singer sit right.
 - **Punch-in with video.** Splicing camera footage costs far more than the punch saves; camera mode records new attempts.
-- **A quiet original vocal as a guide in the mix**, per-video mix sliders, two-pass loudness normalization.
+- **A quiet original vocal as a guide in the mix**, per-video mix sliders. Constant loudness matching is implemented in build brief §11.
 - **4K capture, HEVC or AV1 output.** 1080p30 is the camera's best MJPG mode at 30 fps, and H.264 plays everywhere.
 - **Sharing from Studio to messengers or social networks.** Download is enough; nothing leaves the computer.
 - **Video without Studio** (`file://`). There is nowhere to store or compose it.

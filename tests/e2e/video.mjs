@@ -21,7 +21,7 @@ import {launch, assert} from './lib.mjs';
 // Run as a whole, the suite runs each group of scenarios in a fresh process of its own, one after another: its browsers,
 // its Studios and its memory end with it. (One long-lived bun process that launched a browser per scenario lost the
 // DevTools pipe of a fresh browser after some fifteen launches.)
-const GROUPS = ['basic', 'capture', 'sync', 'lives', 'lost', 'refused', 'session', 'budget'];
+const GROUPS = ['preview', 'basic', 'capture', 'sync', 'lives', 'lost', 'refused', 'session', 'budget'];
 if (!process.env.VIDEO_ONLY) {
   let failed = 0;
   for (const g of GROUPS) { console.log('-- video:' + g); const r = spawnSync(process.execPath, [process.argv[1]], {env: {...process.env, VIDEO_ONLY: g}, stdio: 'inherit'}); if (r.status !== 0) failed = 1; }
@@ -164,9 +164,100 @@ async function settingsLayout(page, name, on) {
   await page.setViewportSize({width: 1440, height: 900});
 }
 
-const A = ['basic', 'sync', 'lives', 'lost', 'refused'].some(want) ? await studio('A', ['--video-min-seconds', '3']) : null;
+const A = ['preview', 'basic', 'sync', 'lives', 'lost', 'refused'].some(want) ? await studio('A', ['--video-min-seconds', '3']) : null;
 const demoA = A && A.base + '/demo';
 let basicId = null;
+
+// Live camera in a reserved header slot: moving native video, mirror, geometry, lifecycle and roll budget.
+if (want('preview')) {
+  const browser = await open(), {page, logs} = await trainer(browser, demoA);
+  const absent = async label => assert(await page.locator('#liveCameraPreview').count() === 0, label);
+  await absent('preview absent with camera off');
+  await setCamera(page, true);
+  await page.evaluate(() => { const c = document.getElementById('livesMode'); if (c) { c.checked = true; c.dispatchEvent(new Event('change')); } });
+  await page.locator('#singBtn').click();
+  await page.waitForFunction(() => { const v = document.getElementById('liveCameraPreview'); return v && v.readyState >= 2 && v.videoWidth > 0; });
+  const start = await page.locator('#liveCameraPreview').evaluate(v => ({time: v.currentTime, muted: v.muted, inline: v.playsInline,
+    mirror: getComputedStyle(v).transform, track: v.srcObject.getVideoTracks()[0].readyState}));
+  await page.waitForTimeout(2300);
+  assert(start.muted && start.inline && start.track === 'live' && start.mirror.startsWith('matrix(-1,') &&
+    await page.locator('#liveCameraPreview').evaluate((v, t) => v.currentTime > t + .1, start.time), 'preview plays live mirrored video, muted and inline');
+  const geometry = [];
+  for (const viewport of [{width:1440,height:900}, {width:900,height:900}, {width:1440,height:600}]) {
+    await page.setViewportSize(viewport); await page.waitForTimeout(300);
+    const data = await page.evaluate(async () => {
+      const T = window.Luma.test, rect = e => { const r = e.getBoundingClientRect(); return {x0:r.left,y0:r.top,x1:r.right,y1:r.bottom}; };
+      const intersects = (a,b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+      const bad = []; let notes = 0, words = 0;
+      for (let k = 0; k < 60; k++) {
+        await new Promise(r => requestAnimationFrame(r));
+        const c = rect(document.getElementById('chart')), p = rect(document.getElementById('liveCameraPreview'));
+        const plot = T.plot(), view = T.viewWindow(T.now()), playX = c.x0 + plot.left + (T.now()-view.a)/view.span*(plot.right-plot.left);
+        const boxes = [...T.noteRects(), ...T.wordBoxes()].map(b => ({x0:b.x0+c.x0,y0:b.y0+c.y0,x1:b.x1+c.x0,y1:b.y1+c.y0}));
+        notes += T.noteRects().length; words += T.wordBoxes().length;
+        boxes.push({x0:playX-1,x1:playX+1,y0:c.y0+plot.top,y1:c.y0+plot.bottom});
+        for (const sel of ['#lives','#matchPct','#lyricBand','.target-meta','.voice-meta','#liveNote']) {
+          const e = document.querySelector(sel); if (e.checkVisibility()) boxes.push(rect(e));
+        }
+        if (boxes.some(b => intersects(p,b)) || p.y1 > c.y0+plot.top || p.x0 < 0 || p.x1 > innerWidth) bad.push(k);
+      }
+      return {bad, notes, words, preview:rect(document.getElementById('liveCameraPreview')), viewport:[innerWidth,innerHeight]};
+    });
+    geometry.push(data);
+    assert(!data.bad.length && data.notes > 0 && data.words > 0, 'live preview clear of notes, words, playhead, hearts, percentage and readout ' + JSON.stringify(data));
+    if (process.env.LUMA_PREVIEW_EVIDENCE) await page.screenshot({path:join(process.env.LUMA_PREVIEW_EVIDENCE, `preview-${viewport.width}x${viewport.height}.png`)});
+  }
+  await page.locator('#stopBtn').click();
+  await page.waitForFunction(() => window.Luma.test.state().mode === 'idle' && !window.Luma.diagnostics().pending);
+  await absent('preview removed when recording stops');
+  // Hold the chart's synthetic clock for a deterministic paired budget. Camera continues to supply native frames.
+  // Same 480 frames, alternating blocks of 32; the project's p95 and median budgets at 1x and 4x CPU.
+  const perf = [], cdp = await page.context().newCDPSession(page);
+  await page.setViewportSize({width:1440,height:900});
+  for (const rate of [1,4]) {
+    await cdp.send('Emulation.setCPUThrottlingRate', {rate});
+    const data = await page.evaluate(async () => {
+      const T = window.Luma.test, stream = await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+      const rec = window.LumaCamera.open(stream, {id:'00000000-0000-4000-8000-000000000099',now:()=>0}); rec.start();
+      const v = document.getElementById('liveCameraPreview'), on = [], off = [];
+      T.closeTrace(); T.fakeSing({a:2,b:30});
+      for (let k = 0; k < 512; k++) {
+        const shown = (k >> 5) % 2 === 1; v.style.display = shown ? '' : 'none';
+        await new Promise(r => requestAnimationFrame(r));
+        const at = performance.now(); T.fakeTick(k/60); const ms = performance.now()-at;
+        if (k >= 32 && k%32) (shown ? on : off).push(ms);
+      }
+      T.fakeFinish(); T.closeTrace(); await rec.abort(); stream.getTracks().forEach(t => t.stop());
+      const q = (a,f) => +a.sort((a,b)=>a-b)[Math.floor(a.length*f)].toFixed(2);
+      return {onP95:q(on,.95),offP95:q(off,.95),onMed:q(on,.5),offMed:q(off,.5)};
+    });
+    perf.push({rate,...data});
+    assert(data.onP95 <= Math.max(data.offP95*1.25,data.offP95+1.5) && data.onMed <= data.offMed+1,
+      'preview keeps the roll within existing frame budgets ' + JSON.stringify({rate,...data}));
+  }
+  await cdp.send('Emulation.setCPUThrottlingRate', {rate:1});
+  // Real transport again in a fresh page after the synthetic clock; lost camera and phone visibility.
+  await page.close(); const lost = await trainer(browser, demoA); await setCamera(lost.page,true);
+  await lost.page.locator('#singBtn').click(); await lost.page.waitForSelector('#liveCameraPreview');
+  await lost.page.setViewportSize({width:390,height:844}); await lost.page.waitForTimeout(250);
+  assert(!(await lost.page.locator('#liveCameraPreview').isVisible()), 'phone preview hidden');
+  await lost.page.setViewportSize({width:1440,height:900});
+  await lost.page.evaluate(() => window.Luma.test.loseCamera());
+  await lost.page.waitForFunction(() => !document.getElementById('liveCameraPreview'));
+  assert(await lost.page.evaluate(() => window.Luma.test.state().mode === 'singing'), 'lost camera removes preview while singing continues');
+  await lost.page.locator('#stopBtn').click();
+  await lost.page.waitForFunction(() => window.Luma.test.state().mode === 'idle' && !window.Luma.diagnostics().pending);
+  await close(browser);
+  const refused = await open(), denied = await trainer(refused,demoA,{failVideo:'NotAllowedError'});
+  await setCamera(denied.page,true); await denied.page.locator('#singBtn').click();
+  await denied.page.waitForFunction(() => window.Luma.test.state().mode === 'singing');
+  assert(await denied.page.locator('#liveCameraPreview').count() === 0, 'refused camera has no preview');
+  await denied.page.locator('#stopBtn').click();
+  await denied.page.waitForFunction(() => window.Luma.test.state().mode === 'idle' && !window.Luma.diagnostics().pending);
+  assert(logs.length === 0 && lost.logs.length === 0 && denied.logs.length === 0, 'preview scenarios have clean browser consoles');
+  await close(refused);
+  if (process.env.LUMA_PREVIEW_EVIDENCE) writeFileSync(join(process.env.LUMA_PREVIEW_EVIDENCE,'preview-check.json'),JSON.stringify({geometry,perf},null,2));
+}
 
 // ── 1 · off by default; 3 · one prompt, one recorder; the badge; 17 · the settings field, the badge and the card ────────
 if (want('basic')) {

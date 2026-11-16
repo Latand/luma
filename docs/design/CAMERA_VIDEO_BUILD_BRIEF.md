@@ -80,10 +80,10 @@ Other facts that moved:
 | D5 | Budget | `--video-budget` bytes, default 5 GiB, over everything under `songs/videos/`. After every compose, and at Studio start, the video worker deletes whole video folders, oldest `startedAt` first, until the total fits. It never deletes the folder it is composing, a sitting still recording, or the newest ready video. No pinning: the operator asked for automatic deletion. Raw sources (`camera.webm`, `voice-*.wav`, `game.h264`) are deleted as soon as the MP4 passes its checks, so a ready video is its MP4, thumbnail, `take.json` and `align.json`. | decision 4 |
 | D6 | Burn | `LumaBurn.drawHeart` unchanged, seeds = heart index, `ms` = video milliseconds since the loss. The video always burns, whatever the reduced-motion preference. | decision 5; LIFE_BURN.md §4 |
 | D7 | Dust | Drawn by the same worker and `drawCloud()` from packs the trainer uploads. Each segment uses the set `cloudTakes()` held when that segment started, so the attempt that ends in a rewind joins the dust for the re-sing, as it does on screen. | decision 5; code |
-| D8 | Audio | Voice: each segment's WAV, gain 0.9 (the review-playback voice gain, `ensureContext()` `app/app.js:307-313`). Instrumental: `LUMA_ASSETS[String(speed)].backing` decoded from the trainer file named in the take, gain = the recorded `prefs.back`. The original vocal stem is never mixed. `amix=normalize=0`, `alimiter=limit=0.95`, AAC LC 192 kbit/s, 48 kHz stereo. | spec Audio; design §5.5 |
+| D8 | Audio (updated 2026-11-16) | Each aligned microphone WAV and the trainer’s instrumental are measured on their edited timelines. Constant sitting-wide gains put voice 3 LU above backing; shared attenuation and encoded-peak verification keep true peak below −1 dBTP (§11). Zero backing stays muted. AAC LC 192 kbit/s, 48 kHz stereo. | spec Audio; correction §11 |
 | D9 | Timeline | Output second `u` is AudioContext time `when₁ + u` for the instrumental and the game layer (what was heard and seen), and `when₁ + u + lag` for the voice and the camera, so the latency is applied once and the camera follows the voice. Segment *k* (music start `when_k`, stop `stop_k`, count-in start `cin_k`) sits at output `[when_k − when₁, stop_k − when₁]`. Between segments the game layer shows what the trainer showed: the frozen last frame while the last heart burns, then from `cin_{k+1}` the stage at the rewind point with «Ще раз з mm:ss», the count-in number and the refill. Voice and instrumental are silent in the gap, as they were in the room. The video starts at `u = 0` (music start of segment 1, no count-in) and ends at the last stop. | design §4.1, extended to several segments |
 | D10 | Live line and note states in the video | Replayed from the stored attempt: a point appears once the playhead reaches its `songT`, and the score advances to `t − 0.18 × speed` as `tick()` does (`app/app.js:1564-1566`). The line therefore meets the playhead together with the voice you hear. (In the trainer it trails by the latency, because the voice arrives that much later.) Lives come from the trainer's own record: it stores each loss with the playhead song time it happened at, and the render burns that heart when its playhead reaches that time. Replaying `livesStep()` on stored points could lose lives on other frames than the live run did, since live frames are scored before late points arrive. | decision 1 "live pitch line"; code |
-| D11 | Mirror | The video is not mirrored, so the singer sees themselves as others do. The framing preview in the settings dialog is mirrored, like a mirror. | convention; no operator word, reversible in one filter |
+| D11 | Mirror | The composed camera keeps its original orientation. The framing preview and the live singing preview are mirrored, like a mirror. | correction §11 |
 | D12 | Punch-in | Off while camera mode is on: `punchTarget()` (`app/app.js:400`) returns null, so «Співати» always records a new attempt. Splicing video is out of proportion to the need (design §3.3). | design |
 | D13 | WAV | Forced on for an attempt only when a recorder is actually running (`meta.hasAudio = true`). The tab then keeps it under the usual `AUDIO_TAKES` / `AUDIO_BYTES` rules (`:355`). With the camera refused or absent, `prefs.audio` decides as before. | design §3.2; "works exactly as before" |
 | D14 | Camera capture | `video: {width: {ideal: 1280}, height: {ideal: 720}, frameRate: {ideal: 30}}`, `video/webm;codecs=h264,opus` (fallback `vp8,opus`), `videoBitsPerSecond: 2.5e6`, `audioBitsPerSecond: 128e3`, `start(1000)`. The circle shows a 300 px crop of the centre square, so 720p is enough; the design's 1080p costs CPU while singing and buys no visible detail. | D1; design §2.3 |
@@ -225,7 +225,7 @@ Pipeline per video, in the one video worker, under `nice -n 19`:
    (trim when negative), `fps=30`, centre-square crop, `scale=300:300`, a soft circular alpha (`geq`, a 1 px edge),
    `tpad=stop_mode=clone`, and `overlay=72:570`. Each voice WAV is `adelay` by `when_k − when₁` (sample units), each
    instrumental piece `atrim=start=a_k/speed:duration=stop_k−when_k` and `adelay` by `when_k − when₁`, all into
-   `amix=normalize=0` and `alimiter`. Encode `libx264 -preset veryfast -crf 22 -maxrate 5M -bufsize 10M -profile:v high
+   `amix=normalize=0`. The 2026-11-16 correction below replaces the fixed gains and limiter with measured constant gains. Encode `libx264 -preset veryfast -crf 22 -maxrate 5M -bufsize 10M -profile:v high
    -pix_fmt yuv420p`, AAC 192k 48 kHz stereo, `-movflags +faststart`, `-t <duration>`, written to `video.mp4.part` and
    renamed after `ffprobe` passes. Then `thumb.jpg` (one frame at 40 %), delete the raw sources, run eviction.
 4. The instrumental is decoded from the trainer's `LUMA_ASSETS` once per (trainer mtime, speed) into
@@ -381,7 +381,7 @@ checkout's `.venv/bin/python` and with free ports.
 - A camera picker (`prefs.cam`): the system default camera is used.
 - Disk floor and 507 on low space (317 GB free); a failed write already answers 507 and the trainer goes on without
   video.
-- NVENC; HEVC/AV1; 1080p+ camera capture; loudness normalization; per-video mix sliders; a quiet guide vocal.
+- NVENC; HEVC/AV1; 1080p+ camera capture; per-video mix sliders; a quiet guide vocal.
 - Recovering a crashed tab's partial sitting (a stale incomplete folder is deleted after an hour).
 - Live compositing during the take, muxing in the browser (design §5.1 A and B).
 - Sharing to messengers; video in the history export; video on `file://`.
@@ -403,3 +403,73 @@ checkout's `.venv/bin/python` and with free ports.
 | decision 4: ≥ 30 s automatic, 5 GB oldest-first | D4, D5, checks 11, 12 |
 | decision 5: dust as in the trainer | D7, check 10 |
 | "camera denied or absent: works exactly as before, clear message" | §6.1, check 13 |
+
+## 11. Camera corrections (2026-11-16)
+
+The live preview is a native muted, inline video of the existing camera track, mirrored with CSS and cropped to a
+circle. `app/camera.js` inserts it at the left of the stage readout while its recorder runs (112 px on desktop,
+88 px on smaller computers; hidden at 720 px and below). It occupies header flow space above the roll. The existing
+header ResizeObserver reserves space for the plot and lyric band, keeping notes, words, playhead, hearts and percentage
+clear. Stop, abort, upload refusal and an ended camera track remove it and release its video reference. It requests no
+additional camera permission, has no chart-frame callback and is absent in render mode; the exported video has its
+single compositor circle.
+
+Observation of the sole available composed sitting: backing −14.24 LUFS, estimated voice residual −22.88 LUFS
+(8.64 LU below backing), mix −13.92 LUFS, −0.49 dBTP. The residual includes AAC error; the original microphone source
+had been deleted. Recording disables AGC and preserves PCM amplitude; the previous composer applied fixed voice 0.9
+and backing 0.75 gains, followed by a sample limiter. It never matched their loudness.
+
+The correction measures the exact edited stereo voice and backing timelines with FFmpeg loudnorm's gated EBU R128
+input analysis. The dynamic output of loudnorm is discarded. A voice target of −18 LUFS and backing −21 LUFS chooses
+a 3 LU lead: about twice the gated, weighted energy of the backing, giving a measurable few-LU vocal advantage
+for karaoke. One constant gain per track spans the entire sitting,
+including rewinds, so phrase dynamics remain and there is no ducking or pumping. A common attenuation puts the sum of
+the two true-peak bounds at or below −2 dBTP, leaving headroom for AAC. This may lower the overall loudness for a highly
+dynamic recording, preserving the voice/backing margin without crushing peaks. The decoded AAC is measured before publication; if it exceeds the strict −1 dBTP requirement, both tracks receive
+extra shared attenuation and are re-encoded once. A second overshoot fails composition and retains the sources. An input below the R128 absolute gate is lifted for analysis and its measurement
+corrected for that lift; silence is left silent. Missing backing is voice-only. A zero backing setting remains muted;
+nonzero monitor volume settings do not set the composed balance.
+
+Existing MP4s are untouched. Re-composition needs the original camera, microphone WAVs, take record and trainer in a
+separate library, with the old MP4 removed from that copy before Studio starts. Successful composition deletes source
+recordings as before. With only a finished MP4, record a new sitting.
+
+Validation: `tests/video_mix_test.py` covers quiet (the observed 8.64 LU deficit), normal and loud synthetic inputs,
+encoded AAC peaks, silence, missing/muted backing, below-gate voice and missing input. `tests/e2e/video.mjs` includes
+live preview geometry and lifecycle checks, screenshots while a synthetic take sings, and the existing roll frame
+budgets (p95 ≤ max(off × 1.25, off + 1.5 ms), median ≤ off + 1 ms) at 1× and 4× CPU. There is one real before observation;
+the correction has not been verified on a second real recording.
+
+Measured comparison (2026-11-16, FFmpeg loudnorm input analysis; stereo timelines, AAC mix at 192 kbit/s). Arrows show
+before → after. Synthetic A reproduces the real observation's approximate voice/backing deficit. Synthetic voices use
+harmonic phrases with gaps and a quieter first half, over an independent instrumental fixture.
+
+| Case | Voice LUFS | Backing LUFS | Mix LUFS | Voice − backing, LU | Mix true peak, dBTP |
+|---|---:|---:|---:|---:|---:|
+| Real sitting A | −22.88 estimated → unavailable | −14.24 → unavailable | −13.92 → unavailable | −8.64 estimated → unavailable | −0.49 → unavailable |
+| Synthetic A, quiet | −30.06 → −18.01 | −21.45 → −21.05 | −21.15 → −17.78 | −8.61 → +3.04 | −14.60 → −8.54 |
+| Synthetic B, normal | −21.44 → −18.01 | −21.45 → −21.05 | −19.53 → −17.77 | +0.01 → +3.04 | −10.79 → −8.54 |
+| Synthetic C, loud | −9.44 → −18.01 | −21.45 → −21.05 | −11.50 → −17.77 | +12.01 → +3.04 | −2.23 → −8.54 |
+
+Track loudness is measured before encoding; mix loudness and true peak are measured after decoding the AAC MP4. The
+synthetic before mix uses the previous fixed gains and sample limiter. Very quiet recordings receive positive gain;
+the loud input receives −9.49 dB of constant attenuation, preserving its phrase-level ratio. This validation used one
+real before observation and synthetic after tests; it has not verified the fix on a second real recording.
+
+A labelled reconstruction used the real sitting's instrumental with a synthetic harmonic voice calibrated to the
+estimated −22.88 LUFS voice level. This is additional synthetic evidence; the original microphone source remains
+unavailable. It measured voice −22.88 → −17.98 LUFS, backing −14.24 → −21.00 LUFS, mix −14.06 → −17.81 LUFS,
+margin −8.64 → +3.02 LU, and encoded mix peak −2.96 → −6.44 dBTP.
+
+Final lane-base checks: all 19 browser suite files passed, run one at a time through `tests/e2e/run.sh` in scratch. Video used
+fake camera/audio devices; its preview frames were opened and inspected at 1440×900, 900×900 and 1440×600. Roll median
+cost was 1.0 → 1.1 ms at 1× CPU and 4.7 → 5.0 ms at 4×; p95 was 2.0 → 2.2 ms and 8.1 → 8.4 ms, within existing budgets.
+All 308 tests across the 12 Python files passed, including six mix tests and fourteen existing video tests. The new
+mix test is registered in the default runner. Earlier Bun/Edge session timing and autopick-browser failures are
+retained with base comparisons; both suites passed unchanged with Node and bundled Chromium. Campaigns interrupted
+at their recording boundary were completed by running the remaining files separately. Source recordings in the
+private library and its existing video were left unchanged.
+
+After the separate scream-band change reached main, this patch applied cleanly to a scratch export of that revision.
+Its live-preview browser group, `tests/e2e/scream.mjs` and all six mix tests passed together. The integration preview
+frames were also opened and inspected; the reserved header circle remains clear of the plotted content and HUD.
