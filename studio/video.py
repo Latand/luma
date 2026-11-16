@@ -111,10 +111,52 @@ def aligned(d: Path, take: dict) -> dict:
     return align(pcm, a0, wavs, take['segments'], float(take['ctxAtStart']))
 
 # ── compose ────────────────────────────────────────────────────────────────────────────────────────────────────────
-def compose_cmd(game: Path, camera: Path | None, voices: list[Path], stem: Path | None, take: dict, cam_offset: float, out: Path) -> list[str]:
+# Constant gains for a whole sitting: gated EBU R128 loudness, voice 3 LU above backing.
+# Sum of the two true-peak bounds fits below -2 dBTP, leaving AAC reconstruction headroom.
+# No compressor, ducking or moving gain: phrases and transients keep their original dynamics.
+VOICE_LUFS = -18.0; VOICE_MARGIN = 3.0; MIX_CEILING = -2.0
+
+def audio_track(voices: list[Path], stem: Path | None, take: dict, role: str, gain_db: float = 0, index: int = 0):
+    """The exact segment edits used by both analysis and composition, as a stereo timeline."""
+    segs = take['segments']; t1 = segs[0]['when']; inputs = []; graph = []; labels = []
+    paths = voices if role == 'voice' else ([stem] * len(segs) if stem and take.get('back', .75) > 0 else [])
+    for k, path in enumerate(paths):
+        inputs += ['-i', str(path)]; seg = segs[k]; delay = round((seg['when'] - t1) * SR)
+        trim = (f"atrim=start={seg['a'] / seg['speed']:.6f}:duration={seg['stop'] - seg['when']:.6f}," if role == 'backing' else '')
+        label = f'{role}{k}'; labels.append(f'[{label}]')
+        graph.append(f'[{index + k}:a]aresample={SR},aformat=sample_fmts=fltp:channel_layouts=stereo,'
+                     f'{trim}asetpts=PTS-STARTPTS,adelay=delays={delay}S:all=1[{label}]')
+    if labels:
+        graph.append(''.join(labels) + f'amix=inputs={len(labels)}:normalize=0:duration=longest,apad,'
+                     f'atrim=duration={duration(take):.6f},volume={gain_db:.6f}dB[{role}]')
+    else: graph.append(f'anullsrc=r={SR}:cl=stereo,atrim=duration={duration(take):.6f}[{role}]')
+    return inputs, graph
+
+def loudness(inputs: list[str], graph: list[str], label: str, preamp: float = 0) -> dict:
+    """Read loudnorm's input measurements; its dynamic output is discarded. Bounded streaming memory."""
+    result = run(nice(['ffmpeg', '-nostdin', '-hide_banner', '-nostats', *inputs, '-filter_complex',
+                      ';'.join([*graph, f'[{label}]volume={preamp:.6f}dB,loudnorm=print_format=json[measured]']),
+                      '-map', '[measured]', '-f', 'null', '-']))
+    report = json.loads(re.findall(r'\{[^{}]*"input_i"[^{}]*\}', result.stderr.decode())[-1])
+    level, peak = float(report['input_i']), float(report['input_tp'])
+    # Below R128's absolute gate, first lift the signal for measurement only. Silence stays silence.
+    if not math.isfinite(level) and math.isfinite(peak) and peak < -6 and preamp == 0:
+        return loudness(inputs, graph, label, -6 - peak)
+    return {'lufs': level - preamp, 'truePeak': peak - preamp}
+
+def mix_plan(voices: list[Path], stem: Path | None, take: dict) -> dict:
+    measured = {role: loudness(*audio_track(voices, stem, take, role), role) for role in ('voice', 'backing')}
+    gains = {role: target - measured[role]['lufs'] if math.isfinite(measured[role]['lufs']) else 0.0
+             for role, target in (('voice', VOICE_LUFS), ('backing', VOICE_LUFS - VOICE_MARGIN))}
+    bound = sum(10 ** ((measured[r]['truePeak'] + gains[r]) / 20) for r in gains)
+    attenuation = min(0.0, MIX_CEILING - 20 * math.log10(bound)) if bound else 0.0
+    return {'measured': measured, 'gainDB': {r: g + attenuation for r, g in gains.items()},
+            'marginLU': VOICE_MARGIN, 'ceilingDBTP': MIX_CEILING}
+
+def compose_cmd(game: Path, camera: Path | None, voices: list[Path], stem: Path | None, take: dict, cam_offset: float, out: Path, plan: dict | None = None) -> list[str]:
     """One ffmpeg run. The game layer is the base; the camera, cut to its centre square, sits in a soft-edged circle at
     (180, 320) and holds its last frame; each voice and each instrumental piece is delayed to its segment's place."""
-    segs = take['segments']; t1 = segs[0]['when']; dur = duration(take); back = float(take.get('back', .75)); n = len(segs)
+    dur = duration(take); plan = plan if plan is not None else mix_plan(voices, stem, take)
     # x264 sizes its thread pool by the cores (24 threads on 16 cores, 0.8 GB at 1080p); four keep it near 0.4 GB and leave
     # the cores to a trainer that sings on while a video composes
     cmd = ['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-threads', '2', '-f', 'h264', '-framerate', str(FPS), '-i', str(game)]
@@ -125,22 +167,26 @@ def compose_cmd(game: Path, camera: Path | None, voices: list[Path], stem: Path 
                      f"geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':a='255*clip({r / 2:.1f}-hypot(X-{c},Y-{c}),0,1)',tpad=stop_mode=clone:stop_duration={dur + 1:.3f}[c]")
         graph.append(f"[g][c]overlay={CAM['x']}:{CAM['y']}:eof_action=repeat,format=yuv420p[v]"); i += 1
     else: graph.append('[g]null[v]')
-    mix = []
-    for k, path in enumerate(voices):
-        cmd += ['-i', str(path)]; delay = round((segs[k]['when'] - t1) * SR)
-        graph.append(f'[{i}:a]aresample={SR},aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.9,adelay=delays={delay}S:all=1[vo{k}]'); mix.append(f'[vo{k}]'); i += 1
-    # one input of the stem per segment: an asplit of a single input would hold every later segment's copy in memory
-    # until its delay ran out (about 1 GB for a 4-minute sitting of eight rewinds); separate inputs are read on demand
-    for k, s in enumerate(segs if stem else []):
-        cmd += ['-i', str(stem)]; delay = round((s['when'] - t1) * SR)
-        graph.append(f"[{i}:a]aresample={SR},aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=start={s['a'] / s['speed']:.6f}:duration={s['stop'] - s['when']:.6f},"
-                     f"asetpts=PTS-STARTPTS,volume={back:.4f},adelay=delays={delay}S:all=1[bk{k}]"); mix.append(f'[bk{k}]'); i += 1
-    if mix: graph.append(''.join(mix) + f'amix=inputs={len(mix)}:normalize=0:duration=longest,alimiter=limit=0.95:level=false:latency=true,apad[a]')
-    else: graph.append(f'anullsrc=r={SR}:cl=stereo[a]')
+    for role in ('voice', 'backing'):
+        inputs, filters = audio_track(voices, stem, take, role, plan['gainDB'][role], i)
+        cmd += inputs; graph += filters; i += inputs.count('-i')
+    graph.append('[voice][backing]amix=inputs=2:normalize=0:duration=longest[a]')
     cmd += ['-filter_complex', ';'.join(graph), '-map', '[v]', '-map', '[a]', '-c:v', 'libx264', '-threads', str(ENC_THREADS), '-preset', 'veryfast', '-crf', '22', '-maxrate', '5M', '-bufsize', '10M',
             '-profile:v', 'high', '-pix_fmt', 'yuv420p', '-color_range', 'tv', '-r', str(FPS), '-c:a', 'aac', '-b:a', '192k', '-ar', str(SR), '-ac', '2', '-movflags', '+faststart',
             '-t', f'{dur:.3f}', '-f', 'mp4', str(out)]
     return cmd
+
+def compose_media(game: Path, camera: Path | None, voices: list[Path], stem: Path | None, take: dict, cam_offset: float, out: Path) -> dict:
+    """Compose with static gains; verify AAC reconstruction and reserve extra headroom if needed."""
+    plan = mix_plan(voices, stem, take)
+    for attempt in range(2):
+        run(nice(compose_cmd(game, camera, voices, stem, take, cam_offset, out, plan)))
+        peak = loudness(['-i', str(out)], ['[0:a]anull[encoded]'], 'encoded')['truePeak']
+        if peak < -1: return plan
+        # Codec overshoot can exceed its input bound. Re-encode from the original sources with
+        # one extra shared attenuation; never limit or change the voice/backing relationship.
+        plan['gainDB'] = {role: gain + (-1.5 - peak) for role, gain in plan['gainDB'].items()}
+    raise Failed('AAC true peak exceeds -1 dBTP')
 
 def duration(take: dict) -> float:
     s = take['segments']; return s[-1]['stop'] - s[0]['when']
@@ -411,7 +457,9 @@ class Videos:
         # camera frame at file time τ lands at output u = τ + W0 − when₁ − lag₁ (brief §5.4, step 3)
         offset = al['W0'] - segs[0]['when'] - segs[0]['latency'] / 1000
         part = d / 'video.mp4.part'
-        try: run(nice(compose_cmd(game, d / 'camera.webm', [d / f'voice-{k}.wav' for k in range(len(segs))], stem, t, offset, part)))
+        voices = [d / f'voice-{k}.wav' for k in range(len(segs))]
+        try:
+            compose_media(game, d / 'camera.webm', voices, stem, t, offset, part)
         except subprocess.CalledProcessError as e: raise Failed('ffmpeg: ' + e.stderr.decode(errors='replace')[-300:])
         checked(part, dur)
         try: run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-ss', f'{thumb_at(t):.2f}', '-f', 'mp4', '-i', str(part), '-frames:v', '1', '-vf', 'scale=480:-2', '-q:v', '4', str(d / 'thumb.jpg')])

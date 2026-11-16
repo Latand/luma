@@ -24,7 +24,7 @@ if [ "$#" -gt 0 ]; then
   for t in "$@"; do LUMA_SHOT="tests/e2e/shot_$(basename "$t" .mjs).png" "$RUN" "$t" || status=1; done
   exit "$status"
 fi
-for t in scoring audio ux studio scale lessons finish history progress lives activity session wordless autopick latency cloud video xr tract3d; do echo "== $t"; LUMA_SHOT="tests/e2e/shot_$t.png" "$RUN" "tests/e2e/$t.mjs" || status=1; done
+for t in scoring audio ux studio scale lessons finish history progress lives activity session wordless scream autopick latency cloud video xr tract3d; do echo "== $t"; LUMA_SHOT="tests/e2e/shot_$t.png" "$RUN" "tests/e2e/$t.mjs" || status=1; done
 "$PY" tests/studio_test.py || status=1
 "$PY" tests/separation_test.py || status=1
 "$PY" tests/lyrics_text_test.py || status=1
@@ -34,5 +34,6 @@ for t in scoring audio ux studio scale lessons finish history progress lives act
 "$PY" tests/pitch_quality_test.py || status=1
 "$PY" tests/phonemes_test.py || status=1
 "$PY" tests/video_test.py || status=1
+"$PY" tests/video_mix_test.py || status=1
 "$PY" tests/audio_stems_test.py || status=1   # last: it rebuilds the demo, so it must not race the suites served from it
 exit $status

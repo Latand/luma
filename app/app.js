@@ -90,9 +90,27 @@ function wordedSpans(notes,lyricLines){
 }
 function scoredAt(t){const w=scoredSpans();if(!w.on)return true;const a=w.spans;let lo=0,hi=a.length;while(lo<hi){const m=(lo+hi)>>1;if(a[m][0]<=t)lo=m+1;else hi=m;}const sp=a[lo-1];return !!sp&&t<=sp[1];}
 function wordlessNote(n){return !n.ignored&&!scoredAt((n.a+n.b)/2);}
+// Unpitched stretches (docs/TARGET_MAP_SCHEMA.md «unpitched»): spans of a scream or a noise with no pitch. Nothing in
+// them is a target: no note, no scored frame, no life lost, no silence under a note; the singer's line is drawn there as
+// anywhere. A scream is also drawn as a band (drawScreams); a noise draws nothing. A song without the list is untouched.
+let UNP={all:[],scream:[]};
+function unpitchedRead(){
+ const raw=Array.isArray(song.unpitched)?song.unpitched.slice(0,5000):[],merge=list=>{const out=[];for(const [a,b] of list.sort((x,y)=>x[0]-y[0])){const top=out.at(-1);if(top&&a<=top[1])top[1]=Math.max(top[1],b);else out.push([a,b]);}return out;};
+ const ok=raw.filter(u=>u&&Number.isFinite(u.a)&&Number.isFinite(u.b)&&u.b>u.a&&u.b>0&&u.a<song.duration&&(u.kind==='scream'||u.kind==='noise')).map(u=>({a:Math.max(0,u.a),b:Math.min(song.duration,u.b),kind:u.kind}));
+ UNP={all:merge(ok.map(u=>[u.a,u.b])),scream:merge(ok.filter(u=>u.kind==='scream').map(u=>[u.a,u.b]))};
+}
+function inSpans(list,t){let lo=0,hi=list.length;while(lo<hi){const m=(lo+hi)>>1;if(list[m][0]<=t)lo=m+1;else hi=m;}return lo>0&&t<list[lo-1][1];}
+function unpitchedAt(t){return UNP.all.length>0&&inSpans(UNP.all,t);}
+// The notes and contour points inside a span go (the map the tools write holds none there): every reader of the target,
+// the pitch scale and the head included, then sees no target in that stretch. Idempotent; a no-op without the list.
+function unpitchedClip(){
+ if(!UNP.all.length)return;
+ if(song.notes.some(n=>unpitchedAt((n.a+n.b)/2)))song.notes=song.notes.filter(n=>!unpitchedAt((n.a+n.b)/2));
+ for(const p of song.points)if(p[1]!==null&&unpitchedAt(p[0]))p[1]=null;
+}
 // raw: the drawn target, wordless stretches included; everything that scores reads the default.
 function targetAt(t,opt=effective(),raw=false){
- if(t<0||t>song.duration||!raw&&!scoredAt(t))return null;const n=noteAt(t),p=pointAt(t);if(n?.ignored)return null;
+ if(t<0||t>song.duration||!raw&&!scoredAt(t)||unpitchedAt(t))return null;const n=noteAt(t),p=pointAt(t);if(n?.ignored)return null;
  if(opt.view==='notes')return n?{m:n.m+opt.octave,ok:!!n.ok||!!n.manual,verified:verifiedAt(t),id:n.id}:null;
  if(!p||p[1]===null)return null;let m=p[1];if(n?.manual)m+=n.m-(n.originalM??n.m);
  return {m:m+opt.octave,ok:!!p[3]||!!n?.manual,verified:verifiedAt(t),id:n?.id};
@@ -354,7 +372,8 @@ function populateSong(){
  // Whole song by default; the user draws a loop region on the timeline when a fragment is wanted.
  s.rangeId=0;s.range={a:0,b:song.duration};s.pos=clamp(song.initialTime||0,0,song.duration);
  if(!validLyrics(song.lyrics))song.lyrics=[];$('lyricsBtn').hidden=!song.lyrics.length;
- baseNotes=structuredClone(song.notes);loadEdits();invalidateMap();setRangeScale();sync();
+ unpitchedRead();unpitchedClip();baseNotes=structuredClone(song.notes);loadEdits();unpitchedClip();invalidateMap();setRangeScale();sync();
+ $('legendScream').hidden=!UNP.scream.length;
 }
 function sync(){
  if(window.LumaActivity)window.LumaActivity.state({mode:s.mode,view:prefs.view,level:prefs.level,tolerance:levelOpt().tolerance,speed:prefs.speed,loop:prefs.loop,tab:prefs.tab,rangeId:s.rangeId,range:[+s.range.a.toFixed(1),+s.range.b.toFixed(1)],octave:prefs.octave,vocal:prefs.vocal,lyrics:prefs.lyrics,tract:prefs.tract,tractBody:prefs.tractBody||null,audio:prefs.audio,takesOpen:prefs.takesOpen,review:traceShown()?s.trace.take.runId:null});
@@ -621,7 +640,8 @@ function singEnd(){let e=0;for(const n of song.notes)if(!n.ignored&&n.b>e&&!word
 // With the wordless rule on, the scored spans are part of the ruler: every song with words opened a new group once
 // when the rule arrived, and a lesson or a song without words keeps the hash it always had.
 function mapVersion(){if(mapVersionCache)return mapVersionCache;const notes=song.notes.map(n=>[n.id,Math.round(n.a*1000),Math.round(n.b*1000),Math.round(n.m*100),n.ignored?1:0]),w=scoredSpans();
- return mapVersionCache=song.id+':'+hash16(JSON.stringify(w.on?[notes,w.spans.map(([a,b])=>[Math.round(a*1000),Math.round(b*1000)])]:notes));}
+ const key=w.on?[notes,w.spans.map(([a,b])=>[Math.round(a*1000),Math.round(b*1000)])]:notes;// the stretches with no target are part of the ruler once a song has them
+ return mapVersionCache=song.id+':'+hash16(JSON.stringify(UNP.all.length?[key,UNP.all.map(([a,b])=>[Math.round(a*1000),Math.round(b*1000)])]:key));}
 function levelKey(meta){return meta.level==='custom'?'custom:'+meta.tolerance:meta.level;}
 // The ruler a score was measured with. Two numbers may stand side by side only when all five agree. The vocal octave
 // is not in it: it moves the target and leaves the difficulty alone.
@@ -1613,6 +1633,27 @@ function drawCloud(b,v,oct,holes){
  g.drawImage(L.bitmap,(v.a-L.ta)*pxs*L.dpr,0,v.span*pxs*L.dpr,ph*L.dpr,b.left,top,pw,y(L.lo)-top);
  if(holes?.length)g.restore();
  if(probe)cloud.probeAt=probe.length;}
+// A scream is a calm band at a fixed height near the top of the plot, whatever the pitch scale does: no pitch is drawn
+// for it. Vertical strokes inside a solid slate outline set it apart from a target (a lavender bar), a wordless note
+// (faint lavender) and a miss (red, hatched aslant); «скрим» stands on a halo at the band's left edge, kept in view while
+// the band scrolls past it. The singer's line, the words and the playhead are drawn over it.
+let screamPat=null;
+function screamHatch(){if(screamPat)return screamPat;const c=document.createElement('canvas');c.width=5;c.height=8;const h=c.getContext('2d');
+ h.fillStyle='#c3d3f247';h.fillRect(1,0,1.3,8);screamPat=g.createPattern(c,'repeat');return screamPat;}
+function drawScreams(b,v,x,sans){
+ const ph=b.bottom-b.top,bh=ph<130?18:W<720?22:26,top=b.top+(ph<130?4:W<720?8:10);
+ g.textBaseline='middle';
+ for(const [a,e] of UNP.scream){if(a>v.b)break;if(e<v.a)continue;
+  const x0=x(a),x1=x(e),ww=Math.max(2,x1-x0);
+  g.beginPath();g.roundRect(x0,top,ww,bh,Math.min(4,ww/2,bh/2));g.fillStyle='#93a8c41c';g.fill();
+  const pat=screamHatch();pat.setTransform(new DOMMatrix().translate(x0,0));g.fillStyle=pat;g.fill();
+  g.strokeStyle='#93a8c4a6';g.lineWidth=1.1;g.stroke();
+  const v0=Math.max(x0,b.left),v1=Math.min(x1,b.right);if(v1-v0<14)continue;
+  g.font='600 11px '+sans;const tw=g.measureText('скрим').width,roomy=v1-v0>=tw+16,lx=roomy?Math.min(v0+7,v1-tw-7):clamp((v0+v1)/2-tw/2,b.left+4,b.right-tw-4);
+  g.fillStyle='#0c111aec';g.beginPath();g.roundRect(lx-4,top+bh/2-8,tw+8,16,4);g.fill();
+  g.textAlign='left';g.fillStyle='#dbe6f6';g.fillText('скрим',lx,top+bh/2+.5);
+  if(probe)probe.push({kind:'scream',a,b:e,x:x0,y:top,w:ww,h:bh,label:'скрим',tx:lx,tw,ty:top+bh/2});}
+}
 function draw(t){
  if(!g)return;const b=bounds(),v=view(t);followRange(v,t);const x=a=>b.left+(a-v.a)/v.span*(b.right-b.left),y=m=>b.bottom-(m-s.rangeLo)/(s.rangeHi-s.rangeLo)*(b.bottom-b.top);const rowH=(b.bottom-b.top)/(s.rangeHi-s.rangeLo);
  const mono=getComputedStyle(document.body).getPropertyValue('--mono'),sans=getComputedStyle(document.body).getPropertyValue('--sans');
@@ -1659,6 +1700,7 @@ function draw(t){
  // past takes as dust, under everything the target and the voice draw; in the notes view it keeps out of the bars
  let holes=null;if(opt.view==='notes'){holes=[];for(const n of song.notes){if(n.a>v.b)break;if(n.b<v.a)continue;const xx=x(n.a);holes.push([xx,y(n.m+opt.octave)-barH/2,Math.max(2,x(n.b)-xx),barH]);}}
  drawCloud(b,v,opt.octave,holes);
+ if(UNP.scream.length)drawScreams(b,v,x,sans);
  if(opt.view==='notes'){
   for(const n of song.notes){if(n.a>v.b)break;if(n.b<v.a)continue;const xx=x(n.a),ww=Math.max(2,x(n.b)-xx),yy=y(n.m+opt.octave);const ok=(n.ok||n.manual)&&!n.ignored;
    const kind=n.ignored?null:noteKind(sc,n.id),missed=kind==='miss'||kind==='silent';const cur=t>=n.a&&t<n.b,curState=cur?frameState(sc,t-.03):0;
@@ -1986,7 +2028,7 @@ const R={segs:[],dust:{},packs:new Map(),key:'',n:0,last:-1};
 // x 822, and the roll fades out before it reaches them, so no note, word or line runs under the HUD or the camera.
 function renderSize(){W=960;H=540;DPR=2;TW=TH=1;canvas.width=1920;canvas.height=1080;g.setTransform(2,0,0,2,0,0);s.headH=14;s.railH=90;s.leftW=56;s.dense=false;s.dirty=true;}
 function renderLoad(take){
- if(validNotes(take.notes,song.duration)){song.notes=take.notes.map(n=>({...n})).sort((a,b)=>a.a-b.a);invalidateMap();}
+ if(validNotes(take.notes,song.duration)){song.notes=take.notes.map(n=>({...n})).sort((a,b)=>a.a-b.a);unpitchedClip();invalidateMap();}
  if(Array.isArray(take.verified))s.verified=take.verified.filter(r=>Number.isFinite(r.a)&&Number.isFinite(r.b)&&r.b>r.a);
  if(take.view==='notes'||take.view==='contour')prefs.view=take.view;prefs.octave=[-12,0,12].includes(take.octave)?take.octave:0;prefs.lyrics=true;
  if([1,2,.5].includes(take.scaleZoom))$('scaleSelect').value=String(take.scaleZoom);

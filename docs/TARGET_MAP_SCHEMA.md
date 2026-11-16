@@ -92,6 +92,9 @@ marks it «приблизно». `<` is written as `\u003c`. The line repeats wo
   0.5 s of a lyric line, plus the lines widened by 0.5 s. A wordless chain is drawn dimmed and never scored; lessons and
   songs with no lyrics score every target. Computed in the trainer, so nothing in `target.json` changes
   ([SCORING.md](SCORING.md#wordless-target-без-слів--не-рахується)).
+- A span of `unpitched` with kind `scream` is drawn as a band with the word «скрим» at a fixed height near the top of the
+  plot, in both views; kind `noise` draws nothing. No frame inside a span is a target, so none is scored, costs a life or
+  counts as silence under a note, and the pitch scale ignores the band. A song without the list is drawn and scored as before.
 - The live match score and per-note ✓/× use every non-ignored, scored note regardless of `ok`. The strict statistics on attempt cards
   ("У коридорі", "Покриття") use only `ok` frames inside ranges the user has explicitly verified.
 - Validation on import: points ≤ 300 000, notes ≤ 20 000, ranges inside `duration`, MIDI 24..108, non-overlapping notes.
