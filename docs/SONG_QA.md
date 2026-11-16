@@ -42,7 +42,8 @@ always reads the original package and writes a copy under scratch. It refuses
 nested scratch/package trees and package symlinks. It saves `before/`, computes
 features and candidates, draws before windows, generates a timing sheet, applies
 provided edits to the copy, rebuilds `trainer.html`, verifies embedded data, draws
-after windows, creates paginated sheets and runs the onset spot check. With no
+after windows, creates paginated sheets and runs the all-word placement screen
+before and after edits, plus the onset spot check. With no
 edits, the apply step validates and preserves the copied target. Source file
 hashes are checked at the end. `--dry-run` records acceptance intent; both modes
 keep the original read-only. Each run has a fresh directory, so old evidence stays.
@@ -57,7 +58,11 @@ For an earlier target and approved edits:
 
 Candidates are computed before apply. `--recorded-edits` is used after detection
 for the hit-rate report. It cannot influence a detector. Add `--attempts "$HISTORY"`
-for a trainer export; without it windows omit the green layer. `attempts.py`
+for a trainer export; without it windows omit the green layer. Add `--synced "$SYNCED"`
+for published-clock comparisons and `--review "$S/spans.json"` for counted phrase,
+intro, response and scream spans described below. The placement screen reports
+word indices and times in `placement-before.json` and `placement-after.json`.
+`attempts.py`
 decodes `luma.history.v1`, filters by source ID, and places traces at
 `run.a + (segment.t0 + frame * hop) * speed`. It keeps confident, audible frames.
 The export already contains microphone timing correction; no extra latency or
@@ -83,6 +88,19 @@ apostrophes and excludes bracketed/parenthesized echoes. Compare again with
 `--include-echoes` and judge each backing answer against the lead stem. Counts and
 index ranges identify disagreements without printing text; inspect private files.
 
+Before including each echo, response or backing row, apply **R5**. Use the slot
+between neighbouring lead words, count its syllables, and measure it with the
+placement helper. Require at least **0.15 s per syllable**, plus **1.5 strong
+onsets/s** or one contour segment per syllable. An unbroken preceding lead note
+through the slot belongs to its held word. Inspect parallel partials: a second
+voice can make a separate line while the lead continues. Clear those second-voice
+contour fragments and give them no words unless the operator requests them.
+For a full-text row absent from the synced source that fails these checks, remove
+it from the verified text and the scratch package's cached source, list its times
+in the private report, and place no words. Preserve both originals. Never compress
+a response into the remaining space. If the voices or formants are unclear, list
+the span for the operator before declaring the text verified.
+
 3. Write `verified.txt`: one sung line per row, repeats written in full, no section
    labels. Write `synced.lrc` with the **same nonempty lines in the same order**.
    Empty timed LRC rows may mark vocal-window endings. Reflow text to the synced
@@ -90,7 +108,13 @@ index ranges identify disagreements without printing text; inspect private files
    zip mismatched row counts. If the grouping remains doubtful, omit forced
    alignment and use the existing word sheet plus pictures.
 4. If stored words already equal the verified text, retain the current target as
-   the base and skip lyric rewriting and metadata changes. Still inspect timing.
+   the base and skip lyric rewriting and metadata changes. Still inspect every
+   word's timing (**R2**). A start with `c <= 0.3` or
+   `timing_source: vocal_stem_energy` is unplaced: ignore its time as a proposal and
+   place it from the picture. Keeping any other word requires R1 boundary evidence.
+   Keeping a whole section also requires the original recogniser transcript to
+   contain its words within **0.3 s**, plus a passing R1 screen. Without that
+   transcript, inspect words individually. Record each disposition privately.
 5. For incorrect text, work on the scratch package. Correct artist metadata only
    when independently verified, before lyric correction (it changes the source
    cache identity):
@@ -106,6 +130,17 @@ cp "$W/package/target.json" "$S/base.json"
 Inspect a refusal at its timestamp. Fix the source or clock after checking the
 picture; never force acceptance. Keep the published LRC separately. Without a
 reliable synced clock for unpitched singing, leave the passage for the operator.
+Use the published clock under **R4**. If a boundary sign exists within **0.5 s**
+of a synced line start, choose the sign nearest the stamp, preferring a strong
+onset, and stop the search there. Override the stamp using a burst pattern only
+when all three hold: no sign within 0.5 s; a pattern within **3 s** whose segment
+count equals the line's syllable count; and an independent second witness. A
+witness is the same line's pattern at the same relative offset elsewhere, a fixed
+section offset measured on two or three strong onsets, or a recogniser word time.
+Without a witness keep the stamp and mark the line doubtful. Record both original
+and proposed times for every override and retain the published LRC beside the
+corrected one. A line stamp supplies no internal word positions: use R1 per word.
+
 The single entry command runs mechanical steps; it does not decide lyrics or
 fetch sources. The base for subsequent edits is the corrected target above.
 
@@ -135,28 +170,121 @@ is clipped to audio duration and unused rows retain the dark page background.
 Change **only what the picture shows without doubt**. List everything else with
 start/end times, the competing readings, and what the operator should hear.
 
-Word-start signs:
+Before placing words in a phrase, apply **R1** in this order:
 
-- Stops and voiceless consonants show a short fundamental dip, burst in the white
-  curve, or rise in orange before the vowel. Place the consonant at that burst.
-- Voiced consonants and vowels may start on a pitch step, scoop or change of
-  partial brightness with continuous energy. Count syllables against the steps.
-- A final word extends through the held vowel; noise after its partials fade is
-  a breath. A legato word may have no separate energy onset.
-- A scream has broadband bursts/formants without a harmonic ladder. Count
-  syllable bursts; mark uncountable starts doubtful.
-- For repeated lines, measure the stem offset on several strong bursts, then
-  inspect each repeat. Review `repeat` candidates even when the LRC looks tidy.
+1. Count syllables in the verified phrase, then count contour segments. A segment
+   begins after a gap of at least **40 ms** or a pitch step of **0.8 semitone**
+   completed within **150 ms**. The helper lists segment-start candidates; check
+   tracking fragments, scoops and vibrato against the stem partials before
+   accepting its count.
+2. With at least as many segments as syllables, assign word starts to segment
+   starts in sung order. For the common two-short-pickups/long-note pattern, the
+   final word begins at the start of the long segment and holds through its end.
+3. With fewer segments than syllables, inspect moving bright partials **above
+   500 Hz** for the vowel change while the fundamental continues. Mark each such
+   legato start doubtful and record its vowel-change evidence.
+4. Require a boundary sign: contour start/stop within **80 ms**, pitch variation
+   of at least **0.8 semitone** inside ±80 ms, or a strong onset within **60 ms**.
+   A strong onset has strength at least **0.25 × the 99.5th percentile** of the
+   full onset envelope. A wholly absent contour supplies no edge by itself.
+5. A start inside an unbroken contour level within **±0.5 semitone for 0.25 s on
+   each side** must move to a supported boundary, unless the legato evidence in
+   step 3 is present and recorded. A weak vibrato/noise tick supplies no evidence.
+
+Consonant bursts can precede the vowel: stops show a short fundamental dip or a
+white-curve burst; sibilants show orange energy. Voiced consonants may show a
+scoop or changed partial brightness. Read those signs together with R1.
+
+For the **intro (R3)**, measure candidate spans before trusting the first synced
+stamp or contour. At **≥1.5 strong onsets/s**, confirm moving formants above 500 Hz
+between bursts before placing a sung word. Follow its last burst: a steady partial
+continuing without a gap or hop belongs to that word; join supported contour pieces
+and extend its end to the partial's stop. At **≤0.6/s**, short pieces **under
+0.5 s** hopping between fixed pitches with both partials continuously bright
+identify a pad/chord: clear that contour and place no word. The numbers and the
+picture must agree. Between **0.6 and 1.5/s**, place no word, keep the contour and
+list the span for the operator. An unresolved band/formant reading also requires
+operator review; make and record the disposition for every measured span.
+
+For **screams (R6)**, assign all clean segments before the scream first so every
+clean syllable has its segment. Inside the scream, count bright formant arcs of
+about **0.2–0.5 s** as syllables in order. The final flat texture holds the last
+syllable; place no new word inside it. Every scream start is doubtful, including
+starts on a burst. Clear contour fragments there and write the scream span as
+unpitched data. Harmonic/onset numbers cannot identify these formant arcs reliably;
+inspect the spectrum and list ambiguous readings for the operator.
+
+For repeats (**R7**), check the first occurrence by R1 before copying its relative
+placements. Measure the section offset on two or three strong onsets and inspect
+each occurrence. Agreement establishes consistency; the first occurrence still
+needs independent boundary evidence. Review every `repeat` candidate.
 
 The generated word sheet uses `index word = =`: these rows preserve the original
 start, end and confidence. Change just the rows supported by the picture. Use
 seconds for exact times, `~seconds` for an eye estimate snapped within 70 ms, or
-`o123` for an onset index printed by `onsets.py`. An omitted end uses a level drop
+`o123` for an onset index printed by `onsets.py`. After snapping, inspect the chosen
+candidate. Keep it only with a strong onset or a contour sign within 80 ms. If it
+fails, discard the snap and enter the nearest visually confirmed segment start
+as plain seconds. This also applies to explicit onset indices. Apply accepts
+proposals mechanically; the placement report and picture review supply this guard.
+An omitted end uses a level drop
 or ends just before the next word. `?` marks doubtful placement at confidence 0.4;
 blank rows begin a lyric line. Word order/text must match the base. If snaps
 collide, both involved estimates fall back to their supplied eye times and are
 reported under `collisions`. If those still collide, apply refuses: re-read the
 picture and enter distinct exact times. Never shift unrelated words to make room.
+
+### Placement screen and counted spans
+
+```sh
+"$P" "$T/placement.py" "$W/package" "$S/features.npz" "$S/placement.json" \
+  --synced "$SYNCED" --review "$S/spans.json" --base "$S/base.json"
+```
+
+`--synced`, `--review`, and `--base` are optional. The all-word screen always runs.
+Read `flags` by word index/time, `segment_starts`, `strong_onsets` and the computed
+`onset_strength_threshold`, plus `intro_windows` (4 s windows,
+2 s step over the first 20 s), and `first_word_candidates` (2 s burst/harmonic
+windows requiring at least 1.5 strong onsets/s and some harmonic support). Intro candidates include harmonic-energy fraction and displacement
+from the first synced stamp. These identify windows for formant review; neither
+energy nor parallel harmonics alone prove the voice or a word's identity.
+`held_word_tail` asks whether the same partial continues after a line's last word.
+It can also find a following word or chord: confirm continuity before extending.
+`--synced` matches normalized full row text, reports >0.5 s disagreements, and
+lists unmatched rows without guessing a row mapping. `target_unsynced` identifies
+stored lines absent from those matches; inspect them as potential responses and
+supply counted spans. It never overrides a stamp. `parallel_harmonics` lists
+stretches of at least 0.2 s with competing combs **2–10 semitones** apart and a
+second/first strength ratio of at least **0.55**, with odd-partial and harmonic
+energy support. These can be chords, leakage or another voice. Confirm that the
+lead partial continues before clearing a second-voice fragment; close unisons,
+octaves and wide intervals remain outside this particular screen.
+
+`spans.json` is a private JSON list with explicit syllable counts read by the
+reviewer; the helper never guesses pronunciation. Example with synthetic times:
+
+```json
+[
+  {"role":"intro","a":0.2,"b":2.2,"syllables":4},
+  {"role":"response","a":5.0,"b":5.5,"syllables":5},
+  {"role":"scream","a":8.0,"b":9.5,"syllables":3},
+  {"role":"phrase","a":12.0,"b":13.8,"syllables":3,
+   "synced":13.6,"burst_start":12.0,
+   "witness":{"kind":"recognizer","a":12.1}}
+]
+```
+
+Roles are `intro`, `response`, `scream`, `phrase`; `a/b` bound the measured span,
+`syllables` is positive. For clock checks provide both `synced` and `burst_start`.
+A witness `kind` is `recognizer`, `repeat` or `section`; its `a` is an independently
+measured start in this occurrence's clock within **0.3 s** of the burst reading.
+For a section/repeat witness, retain the measured anchor times and offset in
+private notes. `override_candidate` requires no sign near the stamp, a reading
+within 3 s, equal segment/syllable counts and that witness. Confirm the picture
+and witness before overriding. Otherwise follow `keep_nearest_sign` or
+`keep_stamp_doubtful`. A response flag gives room, articulation and continuous-lead
+measurements; confirm a separate lead articulation before including its words.
+Parallel voice identity and vowel changes remain visual judgments.
 
 ## 4. Numeric candidates and contour edits
 
@@ -204,6 +332,9 @@ frames too and requires clear visual evidence for each such replacement.
 "$P" "$T/apply_edits.py" "$W/package" "$S/features.npz" --base "$S/base.json" \
   --words "$S/words.txt" --melody "$S/melody.json" --report "$S/apply-report.json" --dry-run
 # After inspecting that report, repeat without --dry-run on this scratch copy.
+# R7: inspect all flags and record dispositions before rebuilding.
+"$P" "$T/placement.py" "$W/package" "$S/features.npz" "$S/placement-after.json" \
+  --base "$S/base.json" --synced "$SYNCED" --review "$S/spans.json"
 "$P" "$T/finish_song.py" "$W/package" "$S/trainer.html"
 "$P" "$T/draw_windows.py" "$W/package" "$S/features.npz" "$S/after" --step 12
 "$P" "$T/sheets.py" "$S/after" "$S/sheets"
@@ -220,6 +351,16 @@ frames per note, `ok` at 55% reliable frames. Runs shorter than five frames are
 removed. Phrases, metrics and initial time are derived again. The tool writes
 optional `unpitched` data; renderer changes are separate work.
 
+Before rebuilding (**R7**), run the screen on the finished target. Above **20%**
+of word starts without a boundary sign on clean singing, return to every flagged
+word's picture. For every flag, move it to a supported sign or mark it doubtful
+with its legato/formant reason; a share at or below 20% still leaves every flag to
+review. For every word moved more than **0.1 s**, record both times and its sign
+(gap, step, burst, vowel change). A mismatched base cannot supply a movement audit;
+use a base with identical words/order or retain a separate explicit mapping.
+
+The onset check samples 28 words and can accept a nearby vibrato tick. It supplies
+an additional spot check; run the all-word R1 screen and inspect its flags too.
 The onset check uses level rises independently of spectral-flux snapping.
 Inspect outliers and words with no rise; do not equate this proxy with accuracy.
 Compare after pictures with before and confirm the rebuilt embedded target equals
@@ -259,6 +400,10 @@ A visual pass remains unverified by ear until the operator checks it.
 | Scream / noise spans | count, kind, times |
 | Notes / confident notes; unchanged notes | counts |
 | Repeat outliers and disposition | times, offset, evidence |
+| R1 missing signs / all starts; flagged dispositions | counts, share, times, move or doubtful reason |
+| Unplaced origins / reviewed words | counts and per-word decision |
+| Intro / response / clock / scream checks | times, density, syllables, room, witness and disposition |
+| Moves >0.1 s and signs; overridden stamps | both times and gap/step/burst/vowel-change evidence |
 | Onset check within 80 ms / measured / no rise | counts |
 | Target validation / embedded equality / source unchanged | checks |
 | Candidate recall by category / total; candidate counts | numerator/denominator |
@@ -274,11 +419,12 @@ therefore reports diagnostic event coverage, with the contributing candidate typ
 recorded separately. It does not claim every removal is unpitched. Report
 misses explicitly. A category with no reference events is N/A. Report candidate
 counts alongside recall: high recall alone does not establish precision or
-whole-span coverage. The four private packages are labelled song A–D, ordered by
-package directory name locally; their mapping stays private.
+whole-span coverage. The four private packages are labelled song A–D, with the
+reviewed fourth-song run labelled song D; their mapping stays private.
+Earlier validation used directory order; use the mapping retained with each run.
 
 Run the Python tests using explicit paths and the project's check wrapper in an
-isolated scratch export. The new suite is `tests/song_qa_test.py`; browser suites
-are unaffected. Retain the revision, command, environment dependency versions,
+isolated scratch export. The QA suites are `tests/song_qa_test.py` and
+`tests/song_qa_placement_test.py`; browser suites are unaffected. Retain the revision, command, environment dependency versions,
 run time bounds, check results and per-song recall in local evidence. Public
 reports carry the aggregate table and repository-relative file references only.

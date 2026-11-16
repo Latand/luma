@@ -3,6 +3,7 @@
 Usage: python tools/song_qa/run.py PACKAGE --scratch DIRECTORY [--dry-run]
        [--base TARGET.json] [--words WORDS.txt] [--melody MELODY.json]
        [--attempts HISTORY.json] [--recorded-edits MELODY.json]
+       [--review SPANS.json] [--synced SOURCE.lrc]
 
 The input package is always read-only. Outputs (including a rebuilt trainer,
 windows, sheets, reports and the original backup) are written under --scratch.
@@ -69,7 +70,7 @@ def benchmark(candidates, edits):
 def main():
     ap=argparse.ArgumentParser(description=__doc__,formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('package',type=Path); ap.add_argument('--scratch',required=True,type=Path)
-    for name in ('base','words','melody','attempts','recorded-edits'): ap.add_argument('--'+name,type=Path)
+    for name in ('base','words','melody','attempts','recorded-edits','review','synced'): ap.add_argument('--'+name,type=Path)
     ap.add_argument('--dry-run',action='store_true',help='record read-only acceptance intent; outputs stay in scratch in either mode')
     a=ap.parse_args(); source=a.package.resolve(); scratch=a.scratch.resolve()
     if scratch==source or source in scratch.parents or scratch in source.parents:
@@ -91,6 +92,10 @@ def main():
     call('features.py',package,features)
     candidates=work/'candidates.json'
     call('candidates.py',package,features,candidates)
+    placement_args=[]
+    if a.review: placement_args+=['--review',a.review]
+    if a.synced: placement_args+=['--synced',a.synced]
+    call('placement.py',package,features,work/'placement-before.json',*placement_args)
     sung=[]
     if a.attempts:
         call('attempts.py',package,a.attempts,work/'attempts.json')
@@ -102,6 +107,7 @@ def main():
     if a.words: edits+=['--words',a.words]
     if a.melody: edits+=['--melody',a.melody]
     call('apply_edits.py',package,features,'--base',package/'target.json','--report',work/'apply-report.json',*edits)
+    call('placement.py',package,features,work/'placement-after.json','--base',work/'before'/'target.json',*placement_args)
     call('finish_song.py',package,work/'trainer.html')
     call('draw_windows.py',package,features,work/'windows'/'after','--step',12,*sung)
     call('sheets.py',work/'windows'/'before',work/'sheets'/'before')
@@ -110,6 +116,10 @@ def main():
         subprocess.run([sys.executable,str(HERE/'check_onsets.py'),str(package)],stdout=output,check=True)
     report={'dry_run':a.dry_run,'source_unchanged':fingerprint(source)==before,
             'embedded_target_equal':True,'windows':len(list((work/'windows'/'before').glob('*.png')))}
+    report['placement']={}
+    for phase in ('before','after'):
+        placement=json.loads((work/('placement-'+phase+'.json')).read_text())
+        report['placement'][phase]={k:placement[k] for k in ('words','without_boundary','without_boundary_share','review_required')}
     if a.recorded_edits:
         report['benchmark']=benchmark(json.loads(candidates.read_text()),json.loads(a.recorded_edits.read_text()))
     write_json(work/'checks.json',report)

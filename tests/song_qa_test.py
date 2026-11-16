@@ -335,11 +335,20 @@ class CommandLines(unittest.TestCase):
             for name in ('foreground.mp3','backing.mp3','foreground_80.mp3','backing_80.mp3'):
                 (package/name).write_bytes(b'synthetic')
             before=runner.fingerprint(package)
-            command=[sys.executable,str(ROOT/'tools/song_qa/run.py'),str(package),'--dry-run','--scratch']
+            review=root/'spans.json'; review.write_text('[{"role":"intro","a":0.2,"b":1.2,"syllables":2}]')
+            synced=root/'source.lrc'; synced.write_text('[00:00.20]zuv\n')
+            command=[sys.executable,str(ROOT/'tools/song_qa/run.py'),str(package),'--dry-run','--review',str(review),'--synced',str(synced),'--scratch']
             result=subprocess.run(command+[str(root/'out')],capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stderr)
             checks=json.loads(next((root/'out').glob('qa-*/checks.json')).read_text())
             self.assertTrue(checks['source_unchanged']); self.assertTrue(checks['embedded_target_equal'])
+            self.assertIn('placement',checks)
+            work=next((root/'out').glob('qa-*'))
+            for phase in ('before','after'):
+                report=json.loads((work/('placement-'+phase+'.json')).read_text())
+                self.assertEqual(report['words'],0)
+                self.assertTrue(any(f['type']=='intro' for f in report['flags']))
+                self.assertTrue(any(f['type']=='synced_unmatched' for f in report['flags']))
             self.assertEqual(checks['windows'],1); self.assertEqual(runner.fingerprint(package),before)
             result=subprocess.run(command+[str(package/'nested')],capture_output=True)
             self.assertNotEqual(result.returncode,0); self.assertFalse((package/'nested').exists())
