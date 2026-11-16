@@ -32,6 +32,7 @@ the head of the «Голова» panel reads (see [`LUMA_PHONES`](#luma_phones))
 | `waveform` | number[1000] | 0..1 envelope for the timeline |
 | `points` | array | pitch contour, below |
 | `notes` | array | segmented notes, below |
+| `unpitched` | array | optional scream/noise intervals, below; absent means none |
 | `phrases` | array | optional practice fragments `{id ≥ 1, a, b, label, verified:false}` |
 | `lyrics` | array | optional word timings, below |
 | `lyricsSource` | string | provenance of the lyrics |
@@ -45,9 +46,30 @@ the head of the «Голова» panel reads (see [`LUMA_PHONES`](#luma_phones))
 `q` confidence 0..1, `ok` confident note (solid) vs draft (dashed), `ignored` excluded from comparison and drawing.
 User edits add `manual: true` and `originalM`.
 
+### `unpitched`
+
+Optional top-level list `[{"a": 1.2, "b": 2.4, "kind": "scream"}]`. Times are finite
+seconds with `0 <= a < b <= duration`. Kinds are `scream` and `noise`. Entries are
+sorted by start and do not overlap; adjacent entries of the same kind may merge.
+An absent list and an empty list both mean no annotated spans.
+
+These intervals carry no pitch: contour points inside them have `midi: null`, and
+notes do not intersect them. They mark audible unpitched voice/noise for a chart
+renderer. They supply no target notes or scoring credit. Existing targets remain
+valid without this optional key.
+
+`tools/song_qa/apply_edits.py` writes the list for an explicit melody edit
+`{"op":"clear","a":1.2,"b":2.4,"kind":"scream"}` (or `noise`). A plain `clear`
+removes contour without inventing a reason. Candidates require visual confirmation
+before a reviewer assigns a kind. Octave edits and plain clears preserve existing
+annotations. Explicitly classified clears replace their selected coverage; fills
+trim annotations only where pitched frames survive derivation. See [SONG_QA.md](SONG_QA.md).
+
 ### `lyrics`
 `[{a, b, words: [{a, b, w, c}]}]` — lines of words with start/end seconds and a confidence `c` 0..1. Words are drawn above the
 melody at their own moment; the current line is shown at the top of the stage.
+The aligner rounds line endpoints to two decimals and words to three, so their
+corresponding endpoints may differ by up to 0.005 s.
 
 ## `LUMA_ASSETS`
 `{"1": {backing, foreground}, "0.8": {backing, foreground}}` — base64 MP3 (22.05 kHz, 128 kb/s). The 0.8× pair is

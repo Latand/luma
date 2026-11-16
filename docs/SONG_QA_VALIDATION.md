@@ -1,0 +1,240 @@
+# Song QA validation
+
+The token-ownership fix and merged-tree checks are recorded below. The earlier
+pilot evidence is retained in the preceding tables and predecessor verification.
+
+Predecessor acceptance was verified 2026-11-16 with Python 3.11.13 in an isolated scratch export.
+Read-only kernel mounts and canary-verified Python guards protected the private
+library and refused browser-profile reads; no violations occurred during acceptance.
+The final acceptance campaign ran from 2026-11-16T15:06:31.047818+00:00 to 2026-11-16T15:11:10.435595+00:00.
+Exact source fingerprints, dependency versions, commands, frozen references, logs, reports and images are retained in private evidence.
+The procedure is [SONG_QA.md](SONG_QA.md).
+
+Song D names the reviewed fourth-song run. The earlier report used directory order;
+this report uses the retained revised private mapping for all tables.
+
+## Four-package acceptance
+
+The entry command ran from the scratch repository root for each package:
+
+```sh
+"$P" tools/song_qa/run.py "$PKG" --scratch "$S" --dry-run \
+  --base "$BASE" --melody "$MELODY" --recorded-edits "$MELODY" \
+  --synced "$SYNCED"
+# Song D also supplies --review "$SPANS".
+```
+
+All four runs passed. Independent source hashes and modification times remained unchanged; targets validated and rebuilt HTML embedded the same target.
+There are 80 windows per version (160 total), plus sheets, candidate lists and both placement reports.
+These runs apply current recorded melody references, checked against retained
+reviewed evidence, to copies of saved bases. They preserve the bases' word times;
+the separate song D comparison below reads the actual saved small-model and reviewed targets.
+A legacy word sheet with a different base word count remains outside this acceptance command;
+word application and refusal are exercised by synthetic tests.
+
+| Song | Octave | Removals | Held fills | Event coverage |
+|---|---:|---:|---:|---:|
+| song A | 3/3 | 10/10 | 3/3 | 16/16 |
+| song B | 3/3 | 6/6 | 2/2 | 11/11 |
+| song C | 2/2 | 8/8 | 1/1 | 11/11 |
+| song D | N/A | 6/6 | 4/4 | 10/10 |
+
+All 48 reference events are located. A hit requires 80 ms overlap (half a shorter edit), matching octave direction and fill pitch within two semitones.
+Removals can match unpitched or broken-note candidates. Unpitched alone finds 7/8 clears in song C; the remaining pitched interruption is found by the held-note detector.
+The latest reviewed song D melody references also score 10/10 against independently generated candidates.
+These figures measure event coverage. Thresholds use the pilot data; precision, complete-span coverage and held-out accuracy are unmeasured.
+
+| Song | Octave | Unpitched | Broken | Repeat | Parallel harmonics | Starts without boundary / words (saved base) |
+|---|---:|---:|---:|---:|---:|---:|
+| song A | 119 | 110 | 129 | 1 | 10 | 24/167 |
+| song B | 190 | 200 | 152 | 2 | 29 | 34/166 |
+| song C | 87 | 180 | 145 | 1 | 22 | 33/203 |
+| song D | 167 | 218 | 241 | 2 | 32 | 67/282 |
+
+Octave counts reflect spans split at unsupported or missing contour frames.
+Parallel-harmonic candidates can also describe chords or leakage. Their voice identity requires picture review.
+All candidates are proposals; the helper changes no target.
+
+## Song D review comparison
+
+Unchanged tokens are matched in order between the saved small-model output and reviewed target.
+Of 100 starts moved by more than 20 ms, 48 receive a new word-start flag.
+Within the first 26 s this is 1/4 moved starts.
+The full flagged and missed time lists stay private. Flags can overlap: 43 moved starts lack a boundary,
+21 lie inside level contour, and 6 fall in supplied scream spans.
+The comparison has 12 unmatched small-model tokens after the response-line removals.
+
+| Screen | Saved small-model output | Reviewed target |
+|---|---:|---:|
+| Words | 282 | 270 |
+| Starts without boundary | 65 (23.05%) | 37 (13.70%) |
+
+Both missing-boundary and level-note flags need a disposition even below the 20% screen threshold.
+Every supplied scream start is doubtful; legato vowel changes need the picture.
+
+| Reviewed location | New report and limit |
+|---|---|
+| First word | Earliest burst/harmonic proposal 0.197 s, published stamp 1.82 s, displacement -1.623 s; confirm moving formants |
+| Cut held end | No held-word-tail flag; the existing broken-note detector locates the 1.60–3.44 s fill; the reviewed end is 3.44 s |
+| Pad/chord stretches | 3.44–8.56 s at 0.586/s and 11.42–16.40 s at 0.402/s, both sparse/hopping; inspect simultaneous partials |
+| Responses | See measured slots below; unmatched stored rows are separately flagged from the synced source |
+| Screams | 6 word starts flagged in reviewer-supplied spans at 72.06–75.70, 144.05–148.70 and 200.25–204.00 s; syllable arcs still require visual reading |
+| Intro clock conflict | Difference -1.62 s is flagged; a nearby contour/onset sign keeps the strict R4 decision at `keep_nearest_sign` |
+
+| Response slot | Strong onsets/s | Segments / counted syllables | Room | Report |
+|---|---:|---:|---|---|
+| 12.90–14.70 s | 0.556 | 3/5 | yes | `exclude_if_absent_from_synced` |
+| 91.90–92.40 s | 0.000 | 1/5 | no | `exclude_if_absent_from_synced` |
+| 96.10–97.40 s | 0.769 | 6/5 | yes | `inspect_independent_lead` |
+
+Counted spans and syllables are explicit private review inputs. They are not automatic voice or pronunciation labels.
+The response slot at 91.9–92.4 s needs 0.75 s for five syllables and has only 0.5 s.
+At 96.1–97.4 s the arithmetic accepts six contour segments for five syllables; it does not reject the response the review removed.
+Those tracking fragments require a visual check of the continuing lead partial before accepting an independent articulation.
+The first intro conflict illustrates a remaining limit: the raw contour can supply an internal edge near the stamp.
+The clock helper conservatively keeps a nearby sign; the independent intro/phrase review is needed to identify the first word.
+Segment candidates can include tracking fragments and scoops. Review their count against the spectrum before using a clock override.
+The numeric flags cover only part of the reviewed start changes; every phrase and its first repeat still requires R1.
+
+## Predecessor verification
+
+365 Python tests passed with zero skips: 302 existing tests, 46 QA tests, and 17 placement tests.
+All 13 test files ran sequentially through the heavy-command wrapper with isolated home/config/temp directories and distinct test ports.
+The wrapper used its documented portable fallback after the user service manager proved unavailable.
+Both focused QA suites were renewed after the final annotation change (63 tests).
+The eight added regression cases were also run against the previous revision and reproduced the defects.
+The project virtual-environment interpreter path was preserved.
+
+The focused suites are `tests/song_qa_test.py` and `tests/song_qa_placement_test.py`.
+They cover synthetic harmonic audio, weak ticks, boundary thresholds, short pickups, density bands,
+held tails, synced-clock witnesses and refusal, response room/articulation and continuous-lead veto,
+parallel harmonics, scream starts, movement auditing, source matching, malformed inputs, CLI output refusal and source immutability.
+The entry test checks both placement outputs and forwards counted spans and synced rows.
+
+`git diff --check` and publication scans of proposed files, commit text and PR body passed.
+The scan checks private package metadata, lyric lines, paths and identities. No project publication-check command exists.
+That verification preceded the merge of main; browser suites, optional model alignment and real-trainer screenshots were outside that run.
+Ordinary windows require no browser or profile.
+
+## Review regressions
+
+Seven focused regression tests cover the seven review findings:
+
+| Finding | Verification |
+|---|---|
+| Already-correct lyrics | Executes the documented shared snapshot, sheet, apply and rebuild commands from fresh synthetic scratch |
+| Self-closing HTML | Built-in and selected containers retain all three lines after ordinary/self-closing breaks and images; void containers refuse |
+| Low/high target pitches | Real candidate CLI accepts schema-valid MIDI 24, 96 and 108 packages with gaps, preserving all source files |
+| Reviewed timing origin | Explicit timing replaces the energy origin; the placement screen no longer calls it unplaced; untouched rows retain every value |
+| Fractional refill | Real apply CLI fills through 0.907 s with consistent full-frame annotation coverage, validates and retains both remaining noise spans plus a backup |
+| Unsupported alignment letters | Mismatched non-Latin rows refuse; matching unsupported, mixed and empty rows refuse before audio/model imports; supported words remain present |
+| Boundary labels | Pixel bounds fit inside full and partial strips while word-start markers retain their original times |
+
+The held-note detector searches its cached MIDI 36–90 grid. An anchor with no
+intersecting band supplies no held-note candidate; its contour still needs the
+picture review. Annotation edits cover whole selected 20 ms frames, including
+the complete final filled frame. Optional model weights were not loaded.
+
+Six fresh default-size full/partial sample renders measured 504 labels with zero
+clipping. All 36 retained sample renders matched byte-for-byte. The single-tick final
+strip is covered by the focused regression. Visual inspection confirmed the
+boundary word and edge ticks are readable; the final partial window stays dark.
+
+## Additional review regressions
+
+Eight additional focused tests exercise the remaining three review findings and
+adjacent boundary cases:
+
+| Finding | Verification |
+|---|---|
+| Unsupported octave evidence | Real candidate CLI on six-harmonic MIDI 36/90 audio: correct boundary pitches produce no octave candidates; supported shifts work in both directions; every proposal stays inside the feature/schema range; span smoothing stops at unsupported or missing frames |
+| Scream retention | Real apply CLI retains scream spans for no-op, filtered and mixed voiced/scream octave intervals; ordinary clears retain classification; explicit kinds replace it; fills trim only restored frames, including fractional refills; a refill discarded by derivation retains the annotation |
+| Numeric alignment tokens | Matching numeric/mixed tokens refuse before poisoned audio/model imports; differing numeric content cannot compare equal; supported words retain their order; token ownership is covered below |
+
+The octave detector uses the cached MIDI 36–90 grid. Unsupported pitches provide
+zero evidence. The apply CLI updates
+annotations after contour derivation so they reflect the persisted frames.
+Optional alignment weights remain outside the verification run.
+
+## Token ownership regression table
+
+The project tokenizer now lives in the lightweight `studio/lyric_tokens.py`;
+`studio/lyrics_text.py` imports the same function. Its behavior is unchanged.
+`fa_align.py` derives each target token's complete model-word group before
+importing audio/model code and records ownership on every sub-word. The sheet
+validates the entire mapping before printing, then keys hints by row and target
+token. The hint runs from the first sub-word's start to the last one's end.
+
+`tests/song_qa_alignment_test.py` runs the real tokenizer, `model_words`, producer
+ownership helper and sheet CLI over this synthetic table, without model weights:
+
+| Token shape | Expected result |
+|---|---|
+| Compound at row start | First target gets both sub-word spans; following token retains its own span |
+| Compound in row middle | Previous/following tokens retain their spans; compound gets both sub-words |
+| Compound at row end | Final target gets both sub-words |
+| En/em dash inside compound | Same ownership and full-span aggregation as a hyphen |
+| Straight/curly apostrophes | Each target retains its own normalized alignment word |
+| Attached punctuation | Target spelling retained; its alignment span stays with it |
+| Digits | Refuse with row/token and manual path before audio/model imports |
+| Mixed letters/digits | Same early refusal |
+| Cyrillic, accented and combining letters | Same early refusal |
+| Punctuation-only token, including a standalone dash | Same early refusal; never silently drop a target token |
+| Repeated words within/across rows | Separate row/token ownership and spans; reversed ownership refuses |
+
+The table contains 15 inputs. Valid cases cover both newly owned proposals and
+older proposals whose entire per-row model-word sequence is validated. Seven
+unsupported cases exercise the real aligner CLI with poisoned audio/model
+imports. A valid first row followed by a mismatch must emit zero stdout.
+Seventeen mutation cases cover missing/extra/replaced sub-words, incorrect or
+partial ownership, missing/extra/misidentified rows, malformed words and invalid,
+non-finite, boolean, negative, reversed or unordered timing spans. Each refuses
+with row/token numbers and the manual path before printing any hints.
+
+The retained reviewer reproduction was replayed against both revisions: for
+synthetic `flim-borp nuv`, the predecessor emits `1.0–1.3` and `1.4–1.7`; the fix
+emits `1.0–1.7` and `1.8–2.1`. The compound and following token keep their spans.
+
+## Merged-tree verification
+
+Merged main through `0e64e3c`, retaining both the scream renderer and camera
+changes alongside the tool. Shared README, schema and browser-runner content
+is retained. The tool's `unpitched` output agrees with the schema and trainer:
+finite, sorted scream/noise spans contain no pitched frames or overlapping
+notes; absent/empty lists mean none. Both kinds are excluded from scoring and
+the trainer draws scream spans with «скрим».
+
+375 unique Python tests passed across 15 explicit files with zero skips:
+308 existing tests (including six camera-mix tests from main), 46 QA tests,
+17 placement tests and four token-ownership tests. Checks ran sequentially
+through the heavy-command wrapper in an isolated scratch export. The initial
+campaign reached its inherited 15-minute execution limit; plotting dependencies
+were missing and the camera-mix suite was interrupted. After installing the
+documented picture dependencies into scratch, all QA suites and the camera-mix
+suite passed under an explicit longer deadline. Base Python packages stayed
+unchanged; complete initial and renewed results are retained in private evidence.
+
+Four fresh entry dry-runs ran on the merged tree from 2026-11-16 16:04:29 to
+16:09:48 UTC. All passed: event coverage remains A 16/16, B 11/11, C 11/11 and
+D 10/10, confirmed by a separate matcher against the recorded edits. Candidate
+counts in the four-package table are unchanged; candidate lists match the retained
+predecessor lists. The runs regenerated 160 windows
+plus sheets and candidate lists, validated the targets and checked embedded
+equality. Independent source hashes and modification times remained equal.
+Canary-checked audit guards and read-only kernel mounts protected the private
+library; no acceptance access violations occurred.
+
+`tests/e2e/run.sh tests/e2e/scream.mjs` completed on the merged tree with a clean
+console and 12 screenshots covering both views at 1440 px and 390 px, idle,
+singing and reviewing. The desktop notes and mobile contour samples were inspected:
+the «скрим» band and label are visible, no target notes occupy the band and the
+sung line remains visible. Scoring, lives, history, scale and scrolling checks
+passed. The final run used Node 26.13.1 and bundled headless Chromium with a
+2 GiB Node heap. Earlier startup/socket-path and memory interruptions are
+retained in private evidence; a short namespace alias maps browser temp files
+into stage scratch. Browser test sources were unchanged outside the merge.
+
+Whitespace and publication scans passed. PR body changes are read back after
+publication. No private library file was written and no existing browser profile
+was read. Optional alignment weights were never downloaded. Event coverage
+continues to leave precision and complete-span coverage unmeasured.

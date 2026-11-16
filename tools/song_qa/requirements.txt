@@ -1,0 +1,3 @@
+# Picture tools, in addition to the project requirements.
+matplotlib>=3.8,<4
+Pillow>=10,<14
