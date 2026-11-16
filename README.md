@@ -69,13 +69,17 @@ of your voice, no server after the file is built.
   the attempt is saved, the song rewinds to the start of the phrase and you sing it again after the count-in. Rules and
   constants in [docs/SCORING.md](docs/SCORING.md#lives-mode-режим-життів).
 - **Відео з камерою.** «Знімати мене на камеру» in the settings, off by default, works in a trainer opened from Studio.
-  With it on, the camera opens together with the microphone and «● ВІДЕО» shows in the top bar while it films. One video
+  With it on, the camera opens together with the microphone and «● ВІДЕО» shows in the top bar while it films.
+  A small mirrored live circle sits at the left of the stage readout, in its own space above the notes and words
+  (hidden at 720 px and below). It disappears when filming ends or the camera is lost, and stays out of the composed game layer. One video
   covers a sitting: from «Співати» until an attempt ends with no lives rewind after it, rewinds included. Studio turns
   every sitting of 30 s or longer into a 1920×1080 video. The game fills the frame (target notes, your live line, the dust of
   past takes, the words, the hearts with the same burn as on screen, the match %), with no buttons. The hearts, the % and
   you in a circle stand in one column on the part of the roll already sung; the roll fades out around them, so no note,
   word or line runs under the circle, the hearts or the %. The sound is your voice, shifted by the microphone offset,
-  over the song's own instrumental. The attempt's card gets «Відео», which opens it in Studio. A camera that is refused, missing, busy or
+  over the song's own instrumental. Studio measures both edited tracks and uses constant gains to place the voice
+  3 LU above the backing, with shared peak headroom; quiet microphones are raised and loud voices keep their dynamics.
+  The attempt's card gets «Відео», which opens it in Studio. A camera that is refused, missing, busy or
   unplugged mid-take never stops the singing: the attempt goes on without video and the settings say why. While the
   camera is on, «Перезаписати з …» is off. Each A–B repeat pass is its own attempt and so its own video: a loop shorter
   than 30 s gives no video. Design in [docs/design/CAMERA_VIDEO_BUILD_BRIEF.md](docs/design/CAMERA_VIDEO_BUILD_BRIEF.md).
@@ -138,7 +142,10 @@ cross-correlating its own audio with each attempt's WAV, opens the trainer at `/
 Chrome (`LUMA_BROWSER`, else the first on `PATH`), where the trainer draws the game layer frame by frame with its own code
 and encodes it with WebCodecs, and has ffmpeg put the camera in its circle and mix the voice over the instrumental. Together
 the videos take at most 5 GB (`--video-budget`): the oldest are deleted first, and the raw recordings are deleted once
-the MP4 checks out. `--video-min-seconds` (30) and `--render-deadline-factor` (3) set the other limits.
+the MP4 checks out. Existing videos keep their original mix. To compose with the new mix, record a new sitting;
+re-composing an older sitting requires restored original camera and voice files, its take record and trainer,
+with the old MP4 removed from that restored copy before starting a separate Studio library. Source recordings
+are deleted after composition, so the finished MP4 alone cannot be re-composed. `--video-min-seconds` (30) and `--render-deadline-factor` (3) set the other limits.
 
 **Hardware.** A 5-minute song takes about 4 minutes on an RTX 3060 (Demucs ≈ 50 s, pYIN ≈ 1 min, CREPE ≈ 30 s). CPU works
 and takes considerably longer. Python 3.11, FFmpeg and a few GB of RAM are required; `requirements.txt` pins PyTorch 2.10.
@@ -229,6 +236,9 @@ and dust the take implies, the burn at each loss, the count-in of a rewind on it
 a restart, Range and the player, the layout at 390, 900 and 1440 px, and no process left behind. `tests/video_test.py`
 checks the alignment through Opus, the eviction order, the render deadline, the ffmpeg graph and that the thumbnail
 falls inside a sung segment, without a browser.
+The camera mix regression `tests/video_mix_test.py` composes quiet, normal and loud synthetic voices through the real
+ffmpeg graph, checks the 3 LU margin and encoded AAC true peak below −1 dBTP, and covers silence, muted or missing backing,
+very quiet audio and missing input. Run with the same Python environment as `tests/video_test.py`.
 Run one browser suite with `tests/e2e/run.sh tests/e2e/tract3d.mjs` (the runner accepts explicit suite paths).
 `tract3d.mjs` also checks short lyric marks against a held note and a rising/falling scale: open-vowel coverage of at
 least 90 %, 150 ms eased vowel blends, visible consonants, a 300 ms release, next-word boundaries, ignored and excluded

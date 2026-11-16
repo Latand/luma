@@ -34,5 +34,6 @@ for t in scoring audio ux studio scale lessons finish history progress lives act
 "$PY" tests/pitch_quality_test.py || status=1
 "$PY" tests/phonemes_test.py || status=1
 "$PY" tests/video_test.py || status=1
+"$PY" tests/video_mix_test.py || status=1
 "$PY" tests/audio_stems_test.py || status=1   # last: it rebuilds the demo, so it must not race the suites served from it
 exit $status
