@@ -22,9 +22,9 @@ def line_plan(lyrics, text, duration):
 
     Use the correction tool's minimum-edit correspondence and 80% exact-token
     floor. Source-only rows reserve time but receive no invented package words.
-    Inserted package tokens belong to the preceding matched row. All package
-    words must be covered, with an anchor for the first. No reference clocks
-    or per-recording clock compensation are used.
+    Every known token needs a counterpart; row edges must match exactly.
+    Small substitutions inside a row are allowed. No reference clocks or
+    per-recording clock compensation are used.
     """
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'studio'))
     from lyrics_synced import parse_lrc, token_mapping, SyncedLyricsError
@@ -44,10 +44,24 @@ def line_plan(lyrics, text, duration):
     shared = sum(norm(source[i]) == norm(flat[j]['w']) for i, j in mapping.items())
     if shared / max(len(source), len(flat)) < MIN_SHARED:
         raise AnchorError('synced lyrics: rows cannot be matched to known lyric text (80% exact tokens required)')
+    if set(mapping.values()) != set(range(len(flat))):
+        raise AnchorError('synced lyrics: rows cannot cover known lyric text; unmatched words need anchors')
+    exact = {j for i, j in mapping.items() if norm(source[i]) == norm(flat[j]['w'])}
+    offset = 0
+    for row in lyrics:
+        if not exact.intersection(range(offset, offset + len(row['words']))):
+            raise AnchorError('synced lyrics: known lyric row has no exact counterpart')
+        offset += len(row['words'])
     cursor = 0
     bounds = []
     for row in rows:
         indices = [mapping[i] for i in range(cursor, cursor + len(row['tokens'])) if i in mapping]
+        if indices:
+            # Missing/substituted source edges cannot establish a line start or
+            # ending. Interior wording differences retain their known owner.
+            edges = (cursor, cursor + len(row['tokens']) - 1)
+            if any(i not in mapping or norm(source[i]) != norm(flat[mapping[i]]['w']) for i in edges):
+                raise AnchorError('synced lyrics: line boundary has no exact counterpart')
         bounds.append(min(indices) if indices else None)
         cursor += len(row['tokens'])
     sung = [(i, j) for i, j in enumerate(bounds) if j is not None]
@@ -57,12 +71,13 @@ def line_plan(lyrics, text, duration):
     for k, (i, start) in enumerate(sung):
         end = sung[k+1][1] if k+1 < len(sung) else len(flat)
         at = rows[i]['a']
-        # Each next row owns its 250 ms early context. Source-only and empty
-        # rows also close the preceding window. There is no overlap to repair.
+        # A start stamp gives no evidence that the preceding voice ended early.
+        # Only an explicit empty row establishes room for early context. The
+        # first row may use intro context; source-only sung rows reserve time.
         stop = rows[i+1]['a'] if i+1 < len(rows) else duration
-        lo = max(0., at-MARGIN)
-        hi = min(duration, stop-MARGIN if i+1 < len(rows) else duration,
-                 at+MAX_WINDOW-MARGIN)
+        lo = (max(0., at-MARGIN) if i == 0 else
+              max(rows[i-1]['a'], at-MARGIN) if not rows[i-1]['tokens'] else at)
+        hi = min(duration, stop, lo+MAX_WINDOW)
         # Millisecond storage must preserve the same exclusive boundaries.
         lo, hi = math.ceil((lo-1e-9)*1000)/1000, math.floor((hi+1e-9)*1000)/1000
         if hi-lo < (end-start)*.04+.02:

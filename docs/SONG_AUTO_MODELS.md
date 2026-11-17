@@ -858,10 +858,11 @@ lyrics, audio, model weights or private paths are included in this change.
 ## Published synced line anchors: measured
 
 **Keep stored-clock MMS as the word-placement default. Published line anchors
-remain an opt-in experiment.** They worsen pooled median start error from
-138.5 to 146.5 ms. Excluding D gives 120.5 versus 137.5 ms. Even spacing from
-line clocks is substantially worse. The requested autonomous-placement outcome
-remains unmet.
+remain an opt-in experiment.** After the matching and window fixes, A and C
+complete; B, D and E refuse before inference. On the same completed A/C set,
+synced median error is 270.0 ms against 272.0 ms with stored clocks, while the
+share within 200 ms falls from 43.5% to 41.6%. Every completed synced word stays
+doubtful. The requested autonomous-placement outcome remains unmet.
 
 The question was whether published line starts plus neural alignment inside each
 line improve word placement over stored-clock MMS and today's saved preparation.
@@ -912,20 +913,26 @@ saved-after fallback was needed. No library package was written.
 benchmark. The existing correction reader parses timestamps, empty instrumental
 rows and millisecond offsets. Minimum-edit token correspondence follows lyric
 order, with the existing 80% exact-token floor, independent of reference word
-times. Known spelling and package row grouping survive. Small substitutions and
-missing known words are attached to their matched span; source-only rows reserve
-time and add no words. B has extra repeated source text, D has omitted package
-words, and E has spelling/wording differences. Repeated-text correspondence and
-these disagreements can misassign a boundary. Unmatched text, an unanchored
-prefix, invalid/out-of-recording clocks and insufficient room refuse clearly.
+times. Known spelling and package row grouping survive, including safe reflow
+across published rows. Every known token must have a counterpart, every known
+row must contain at least one exact token match, and the first and last source
+tokens of each mapped row must match exactly. Interior substitutions are allowed within the 80% floor;
+missing known words and unsupported row edges refuse before inference. Source-only
+rows reserve time and add no words. These checks replace the earlier rule that
+attached unmatched words to the preceding span. Repeated-text correspondence
+remains a limit of minimum-edit matching. Invalid/out-of-recording clocks and
+insufficient room also refuse clearly.
 Enhanced word-timestamp files explicitly refuse; none was available in this run.
 
-All parameters were fixed by reasoning before the first score: 250 ms early
-context reuses the existing refinement radius; the next timed row owns its own
-250 ms early context and caps the preceding window. Empty and source-only rows
-also cap it. A start-only LRC provides no vocal end: trailing context is clipped
-at that reserved boundary, and recording duration bounds the last window.
-Windows are capped at 30 s by the existing inference budget. Bounds round inward
+The original parameters were fixed by reasoning before scoring: 250 ms context,
+the 80% exact-token floor and a 30 s inference cap. Review found that giving each
+next row early context removed the preceding vocal tail. The fixed rule retains
+the preceding interval up to the next start stamp. Early context is available
+only for the first timed row or after an explicit empty row establishing an
+instrumental gap, and never starts before that gap. Empty and source-only rows
+also close the preceding window. A start-only LRC supplies no vocal end, so no
+additional padding is inferred between adjacent sung rows. Recording duration
+bounds the last window; every crop remains capped at 30 s. Bounds round inward
 to milliseconds. The command's existing 40 ms start spacing runs separately
 inside each window; starts and ends cannot cross into a neighbour's window.
 No song-specific margin, clock shift, source choice by score or threshold fitting
@@ -934,7 +941,7 @@ was used. Boundary refinement cannot be combined with synced anchors.
 The cached MMS checkpoint was reused read-only, with its built-in alphabet,
 star-token mode, sample rate and configuration hashed in private evidence.
 Model inference and the noncommercial checkpoint licence remain as documented
-above. Final word campaign: 2026-11-17 12:30:15–12:32:44 UTC, RTX 3060,
+above. Fixed word campaign: 2026-11-17 13:31:28–13:34:16 UTC, RTX 3060,
 PyTorch/torchaudio 2.10.0+cu128. Runs used one model at a time and two CPU threads.
 The stored-clock results reproduce the existing ordered command's word path.
 Even spacing begins at the published line start and divides the remaining line
@@ -958,114 +965,135 @@ input was a clear synced-anchor win; this experiment does not meet it.
 ### Word starts and doubtful words
 
 All / reference c > 0.4, except the explicitly labelled doubtful count fractions.
+B refuses an unsupported published row edge, D has unmatched known words, and E
+has a known row without an exact counterpart. Both synced variants refuse on the
+same planner checks. No source, text, threshold or margin was adjusted per song
+to obtain coverage. A and C cover 370/1086 reference words (34.1%). A–E and
+A/B/C/E synced pools are N/A because the method did not produce those complete
+sets; A/C is shown for all four variants as the comparison with equal coverage.
+Refused runs produce no predictions, crossings or doubtful count.
 
 | Song / set | Variant | Reference words | Matched | Median ms | Within 80 ms % | Within 200 ms % | Crossings | Doubtful/predicted: all ; confident |
 |---|---|---:|---:|---:|---:|---:|---:|---|
 | A | Saved baseline | 167 / 156 | 84 / 81 | 1654.0 / 1440.0 | 12.0 / 12.8 | 13.8 / 14.7 | 0 | 151/157 ; 76/81 |
 | A | MMS stored clocks | 167 / 156 | 167 / 156 | 272.0 / 272.0 | 32.9 / 33.3 | 43.1 / 42.3 | 0 | 167/167 ; 156/156 |
-| A | MMS synced lines | 167 / 156 | 167 / 156 | 140.0 / 160.0 | 40.7 / 41.0 | 54.5 / 53.2 | 0 | 166/167 ; 155/156 |
-| A | Line times evenly spread | 167 / 156 | 167 / 156 | 203.0 / 194.0 | 24.0 / 25.6 | 49.1 / 50.6 | 0 | 167/167 ; 156/156 |
+| A | MMS synced lines | 167 / 156 | 167 / 156 | 201.0 / 217.5 | 35.3 / 36.5 | 49.7 / 48.7 | 0 | 167/167 ; 156/156 |
+| A | Line times evenly spread | 167 / 156 | 167 / 156 | 213.0 / 205.9 | 22.2 / 23.7 | 47.9 / 49.4 | 0 | 167/167 ; 156/156 |
 | B | Saved baseline | 166 / 164 | 143 / 141 | 575.5 / 583.5 | 2.4 / 2.4 | 10.2 / 9.8 | 0 | 147/165 ; 125/141 |
 | B | MMS stored clocks | 166 / 164 | 166 / 164 | 88.5 / 88.5 | 48.2 / 48.2 | 68.1 / 68.3 | 0 | 165/166 ; 163/164 |
-| B | MMS synced lines | 166 / 164 | 166 / 164 | 94.0 / 92.5 | 45.8 / 46.3 | 68.7 / 69.5 | 0 | 165/166 ; 163/164 |
-| B | Line times evenly spread | 166 / 164 | 166 / 164 | 624.0 / 596.2 | 10.2 / 10.4 | 21.1 / 21.3 | 0 | 166/166 ; 164/164 |
+| B | MMS synced lines | 166 / 164 | Refused | N/A | N/A | N/A | N/A | N/A |
+| B | Line times evenly spread | 166 / 164 | Refused | N/A | N/A | N/A | N/A | N/A |
 | C | Saved baseline | 203 / 183 | 158 / 142 | 401.0 / 412.0 | 31.0 / 31.1 | 37.4 / 36.6 | 0 | 194/208 ; 131/142 |
 | C | MMS stored clocks | 203 / 183 | 203 / 183 | 273.0 / 253.0 | 33.0 / 34.4 | 43.8 / 45.9 | 0 | 203/203 ; 183/183 |
-| C | MMS synced lines | 203 / 183 | 203 / 183 | 304.0 / 272.0 | 26.6 / 28.4 | 37.4 / 39.9 | 0 | 203/203 ; 183/183 |
-| C | Line times evenly spread | 203 / 183 | 203 / 183 | 291.0 / 277.3 | 16.3 / 15.8 | 32.5 / 33.9 | 0 | 203/203 ; 183/183 |
+| C | MMS synced lines | 203 / 183 | 203 / 183 | 331.0 / 334.0 | 25.1 / 24.6 | 35.0 / 35.5 | 0 | 203/203 ; 183/183 |
+| C | Line times evenly spread | 203 / 183 | 203 / 183 | 345.7 / 304.0 | 16.3 / 18.0 | 33.5 / 35.0 | 0 | 203/203 ; 183/183 |
 | D | Saved baseline | 270 / 233 | 270 / 233 | 40.5 / 29.0 | 52.6 / 60.1 | 61.1 / 67.0 | 0 | 281/282 ; 232/233 |
 | D | MMS stored clocks | 270 / 233 | 270 / 233 | 193.5 / 194.0 | 36.7 / 35.2 | 50.4 / 50.2 | 0 | 270/270 ; 233/233 |
-| D | MMS synced lines | 270 / 233 | 270 / 233 | 168.5 / 185.0 | 38.1 / 36.5 | 54.1 / 52.4 | 0 | 270/270 ; 233/233 |
-| D | Line times evenly spread | 270 / 233 | 270 / 233 | 247.7 / 214.2 | 23.0 / 26.2 | 45.2 / 48.5 | 0 | 270/270 ; 233/233 |
+| D | MMS synced lines | 270 / 233 | Refused | N/A | N/A | N/A | N/A | N/A |
+| D | Line times evenly spread | 270 / 233 | Refused | N/A | N/A | N/A | N/A | N/A |
 | E | Saved baseline | 280 / 171 | 278 / 169 | 595.0 / 478.0 | 7.9 / 9.9 | 11.1 / 12.9 | 0 | 269/280 ; 162/169 |
 | E | MMS stored clocks | 280 / 171 | 280 / 171 | 69.5 / 46.0 | 53.2 / 65.5 | 70.7 / 81.9 | 0 | 277/280 ; 168/171 |
-| E | MMS synced lines | 280 / 171 | 280 / 171 | 87.0 / 47.0 | 48.9 / 61.4 | 63.9 / 78.9 | 0 | 278/280 ; 170/171 |
-| E | Line times evenly spread | 280 / 171 | 280 / 171 | 394.2 / 279.0 | 14.6 / 19.9 | 33.6 / 39.8 | 0 | 280/280 ; 171/171 |
+| E | MMS synced lines | 280 / 171 | Refused | N/A | N/A | N/A | N/A | N/A |
+| E | Line times evenly spread | 280 / 171 | Refused | N/A | N/A | N/A | N/A | N/A |
 | A–E | Saved baseline | 1086 / 907 | 933 / 766 | 470.0 / 432.0 | 23.1 / 26.2 | 28.7 / 31.3 | 0 | 1042/1092 ; 726/766 |
 | A–E | MMS stored clocks | 1086 / 907 | 1086 / 907 | 138.5 / 123.0 | 41.4 / 42.8 | 56.0 / 57.2 | 0 | 1082/1086 ; 903/907 |
-| A–E | MMS synced lines | 1086 / 907 | 1086 / 907 | 146.5 / 127.0 | 40.3 / 42.1 | 55.8 / 58.1 | 0 | 1082/1086 ; 904/907 |
-| A–E | Line times evenly spread | 1086 / 907 | 1086 / 907 | 311.5 / 281.7 | 17.8 / 20.0 | 36.7 / 39.4 | 0 | 1086/1086 ; 907/907 |
+| A–E | MMS synced lines | 1086 / 907 | N/A (refused B,D,E) | N/A | N/A | N/A | N/A | N/A |
+| A–E | Line times evenly spread | 1086 / 907 | N/A (refused B,D,E) | N/A | N/A | N/A | N/A | N/A |
 | A/B/C/E | Saved baseline | 816 / 674 | 663 / 533 | 569.0 / 527.5 | 13.4 / 14.5 | 18.0 / 19.0 | 0 | 761/810 ; 494/533 |
 | A/B/C/E | MMS stored clocks | 816 / 674 | 816 / 674 | 120.5 / 103.0 | 43.0 / 45.4 | 57.8 / 59.6 | 0 | 812/816 ; 670/674 |
-| A/B/C/E | MMS synced lines | 816 / 674 | 816 / 674 | 137.5 / 108.5 | 41.1 / 44.1 | 56.4 / 60.1 | 0 | 812/816 ; 671/674 |
-| A/B/C/E | Line times evenly spread | 816 / 674 | 816 / 674 | 342.6 / 309.7 | 16.1 / 17.8 | 33.9 / 36.2 | 0 | 816/816 ; 674/674 |
+| A/B/C/E | MMS synced lines | 816 / 674 | N/A (refused B,E) | N/A | N/A | N/A | N/A | N/A |
+| A/B/C/E | Line times evenly spread | 816 / 674 | N/A (refused B,E) | N/A | N/A | N/A | N/A | N/A |
+| A/C (accepted) | Saved baseline | 370 / 339 | 242 / 223 | 538.5 / 535.0 | 22.4 / 22.7 | 26.8 / 26.5 | 0 | 345/365 ; 207/223 |
+| A/C (accepted) | MMS stored clocks | 370 / 339 | 370 / 339 | 272.0 / 264.0 | 33.0 / 33.9 | 43.5 / 44.2 | 0 | 370/370 ; 339/339 |
+| A/C (accepted) | MMS synced lines | 370 / 339 | 370 / 339 | 270.0 / 270.0 | 29.7 / 30.1 | 41.6 / 41.6 | 0 | 370/370 ; 339/339 |
+| A/C (accepted) | Line times evenly spread | 370 / 339 | 370 / 339 | 274.0 / 244.0 | 18.9 / 20.6 | 40.0 / 41.6 | 0 | 370/370 ; 339/339 |
 
 Doubtful counts use the unchanged acoustic/confidence gates and final QA with
 the replayed baseline contour. Their denominator is actual predictions, including
 unmatched baseline words; the second pair uses only predictions matched to
-reference c > 0.4. Counts identify review candidates, not verified errors.
-Missing reference words enter accuracy denominators, never doubtful counts.
+reference c > 0.4. Counts identify review candidates. Missing reference words
+enter accuracy denominators, never doubtful counts.
 
 ### Pickup proxy
 
 Same reference-defined pickup-before-held-note proxy and small denominators as
-above; every cell is all / reference c > 0.4. Crossings count the complete output
-for each variant and are zero throughout.
+above; every cell is all / reference c > 0.4. Crossings count complete outputs;
+all completed outputs have zero crossings. Refusals remain N/A.
 
 | Song / set | Variant | Pickup words | Matched | Median ms | Within 80 ms % | Within 200 ms % |
 |---|---|---:|---:|---:|---:|---:|
 | A | Saved baseline | 2 / 2 | 1 / 1 | N/A / N/A | 50.0 / 50.0 | 50.0 / 50.0 |
 | A | MMS stored clocks | 2 / 2 | 2 / 2 | 350.5 / 350.5 | 0.0 / 0.0 | 0.0 / 0.0 |
-| A | MMS synced lines | 2 / 2 | 2 / 2 | 347.0 / 347.0 | 0.0 / 0.0 | 0.0 / 0.0 |
-| A | Line times evenly spread | 2 / 2 | 2 / 2 | 150.7 / 150.7 | 0.0 / 0.0 | 50.0 / 50.0 |
+| A | MMS synced lines | 2 / 2 | 2 / 2 | 357.5 / 357.5 | 0.0 / 0.0 | 0.0 / 0.0 |
+| A | Line times evenly spread | 2 / 2 | 2 / 2 | 164.6 / 164.6 | 0.0 / 0.0 | 100.0 / 100.0 |
 | B | Saved baseline | 9 / 9 | 9 / 9 | 267.0 / 267.0 | 0.0 / 0.0 | 11.1 / 11.1 |
 | B | MMS stored clocks | 9 / 9 | 9 / 9 | 23.0 / 23.0 | 66.7 / 66.7 | 88.9 / 88.9 |
-| B | MMS synced lines | 9 / 9 | 9 / 9 | 25.0 / 25.0 | 77.8 / 77.8 | 88.9 / 88.9 |
-| B | Line times evenly spread | 9 / 9 | 9 / 9 | 329.5 / 329.5 | 11.1 / 11.1 | 33.3 / 33.3 |
+| B | MMS synced lines | 9 / 9 | Refused | N/A | N/A | N/A |
+| B | Line times evenly spread | 9 / 9 | Refused | N/A | N/A | N/A |
 | C | Saved baseline | 5 / 5 | 4 / 4 | 209.0 / 209.0 | 40.0 / 40.0 | 40.0 / 40.0 |
 | C | MMS stored clocks | 5 / 5 | 5 / 5 | 558.0 / 558.0 | 40.0 / 40.0 | 40.0 / 40.0 |
-| C | MMS synced lines | 5 / 5 | 5 / 5 | 559.0 / 559.0 | 40.0 / 40.0 | 40.0 / 40.0 |
-| C | Line times evenly spread | 5 / 5 | 5 / 5 | 207.0 / 207.0 | 20.0 / 20.0 | 40.0 / 40.0 |
+| C | MMS synced lines | 5 / 5 | 5 / 5 | 570.0 / 570.0 | 40.0 / 40.0 | 40.0 / 40.0 |
+| C | Line times evenly spread | 5 / 5 | 5 / 5 | 357.0 / 357.0 | 20.0 / 20.0 | 40.0 / 40.0 |
 | D | Saved baseline | 14 / 10 | 14 / 10 | 130.0 / 125.5 | 28.6 / 40.0 | 64.3 / 70.0 |
 | D | MMS stored clocks | 14 / 10 | 14 / 10 | 24.5 / 22.5 | 71.4 / 60.0 | 85.7 / 80.0 |
-| D | MMS synced lines | 14 / 10 | 14 / 10 | 11.0 / 13.0 | 78.6 / 70.0 | 85.7 / 80.0 |
-| D | Line times evenly spread | 14 / 10 | 14 / 10 | 260.7 / 278.2 | 7.1 / 10.0 | 35.7 / 30.0 |
+| D | MMS synced lines | 14 / 10 | Refused | N/A | N/A | N/A |
+| D | Line times evenly spread | 14 / 10 | Refused | N/A | N/A | N/A |
 | E | Saved baseline | 2 / 2 | 2 / 2 | 80.5 / 80.5 | 50.0 / 50.0 | 100.0 / 100.0 |
 | E | MMS stored clocks | 2 / 2 | 2 / 2 | 194.5 / 194.5 | 50.0 / 50.0 | 50.0 / 50.0 |
-| E | MMS synced lines | 2 / 2 | 2 / 2 | 193.5 / 193.5 | 50.0 / 50.0 | 50.0 / 50.0 |
-| E | Line times evenly spread | 2 / 2 | 2 / 2 | 306.8 / 306.8 | 0.0 / 0.0 | 0.0 / 0.0 |
+| E | MMS synced lines | 2 / 2 | Refused | N/A | N/A | N/A |
+| E | Line times evenly spread | 2 / 2 | Refused | N/A | N/A | N/A |
 | A–E | Saved baseline | 32 / 28 | 30 / 26 | 216.5 / 216.5 | 25.0 / 28.6 | 46.9 / 46.4 |
 | A–E | MMS stored clocks | 32 / 28 | 32 / 28 | 33.0 / 45.0 | 59.4 / 53.6 | 71.9 / 67.9 |
-| A–E | MMS synced lines | 32 / 28 | 32 / 28 | 27.0 / 38.0 | 65.6 / 60.7 | 71.9 / 67.9 |
-| A–E | Line times evenly spread | 32 / 28 | 32 / 28 | 254.5 / 255.2 | 9.4 / 10.7 | 34.4 / 32.1 |
+| A–E | MMS synced lines | 32 / 28 | N/A (refused B,D,E) | N/A | N/A | N/A |
+| A–E | Line times evenly spread | 32 / 28 | N/A (refused B,D,E) | N/A | N/A | N/A |
 | A/B/C/E | Saved baseline | 18 / 18 | 16 / 16 | 261.5 / 261.5 | 22.2 / 22.2 | 33.3 / 33.3 |
 | A/B/C/E | MMS stored clocks | 18 / 18 | 18 / 18 | 66.0 / 66.0 | 50.0 / 50.0 | 61.1 / 61.1 |
-| A/B/C/E | MMS synced lines | 18 / 18 | 18 / 18 | 58.0 / 58.0 | 55.6 / 55.6 | 61.1 / 61.1 |
-| A/B/C/E | Line times evenly spread | 18 / 18 | 18 / 18 | 228.0 / 228.0 | 11.1 / 11.1 | 33.3 / 33.3 |
+| A/B/C/E | MMS synced lines | 18 / 18 | N/A (refused B,E) | N/A | N/A | N/A |
+| A/B/C/E | Line times evenly spread | 18 / 18 | N/A (refused B,E) | N/A | N/A | N/A |
+| A/C (accepted) | Saved baseline | 7 / 7 | 5 / 5 | 209.0 / 209.0 | 42.9 / 42.9 | 42.9 / 42.9 |
+| A/C (accepted) | MMS stored clocks | 7 / 7 | 7 / 7 | 449.0 / 449.0 | 28.6 / 28.6 | 28.6 / 28.6 |
+| A/C (accepted) | MMS synced lines | 7 / 7 | 7 / 7 | 446.0 / 446.0 | 28.6 / 28.6 | 28.6 / 28.6 |
+| A/C (accepted) | Line times evenly spread | 7 / 7 | 7 / 7 | 174.8 / 174.8 | 14.3 / 14.3 | 57.1 / 57.1 |
 
 ### Conclusion and verification
 
 Use stored-clock MMS for the general automatic draft. Synced anchors help A
-(272.0 to 140.0 ms) and D (193.5 to 168.5 ms), while C worsens from 273.0 to
-304.0 ms and E from 69.5 to 87.0 ms. B moves from 88.5 to 94.0 ms.
-D's saved baseline remains much better at 40.5 ms. Pooled 200 ms accuracy is
-56.0% stored versus 55.8% synced;
-pickup medians improve from 33.0 to 27.0 ms, with 71.9% within 200 ms
-for both methods. Those small pickup counts cannot establish a general win.
+(272.0 to 201.0 ms), while C worsens from 273.0 to 331.0 ms. B, D and E cannot
+safely use the selected files with the known package text. D's saved baseline
+remains much better at 40.5 ms. On completed A/C, synced median is 270.0 versus
+272.0 ms stored, but 80 ms accuracy falls from 33.0% to 29.7%, and 200 ms accuracy
+from 43.5% to 41.6%. The seven pickup words have medians 449.0 ms stored and
+446.0 ms synced, with 28.6% within 200 ms for both. This establishes no clear win.
+The earlier five-song synced result used unsafe matching and transferred vocal
+tails; it is superseded by these fixed-window measurements and explicit refusals.
 
-For synced anchors, 550/1086 starts (50.6%) are more than 140 ms from the
-visual reference, and 44.2% are over 200 ms. The unchanged QA still marks
-**1082/1086 words (99.6%) doubtful**, versus 1082/1086 for stored-clock MMS;
-the confident-reference subset leaves 904/907 (99.7%) doubtful.
-Plan to review essentially every word under this gate. About half still miss the
-140 ms timing tolerance; source availability alone does not make an unattended
-placement reliable. The synced input stays available for explicit experiments.
+For completed synced anchors, 233/370 starts (63.0%) are more than 140 ms from
+the visual reference, and 58.4% are over 200 ms. The unchanged QA marks
+**370/370 words (100%) doubtful**, including 339/339 in the confident-reference
+subset. Stored-clock MMS also marks all 370 words doubtful on A/C; across A–E
+it leaves 1082/1086 (99.6%) doubtful. Plan to review every completed synced word;
+three recordings additionally need a suitable source or manually resolved text.
+The synced input stays available for explicit experiments, with clear refusals.
+Preparation keeps its existing default and gains no switch from this result.
 
-All **452 Python tests across 19 files passed**, with explicit file paths in an
-isolated scratch export, serially under the project gate. The 14 new tests were
-rerun successfully after expanding refusal cases during diff review. They cover
-synthetic audio crops, stub acoustic output, text/row matching, unmatched-prefix
-and malformed-file refusal, offsets, window budgets and bounds, word ends and
-starts staying inside their line, CLI option refusals, full scratch trainer
-construction, changed-source detection and real-process restarts. Existing
-command, refinement, benchmark and all other Python suites passed. Browser
-suites were outside scope. No test downloaded weights.
+All **457 Python tests across 19 files passed**, with explicit file paths in an
+isolated scratch export, serially under the project gate. The 19 synced tests
+cover synthetic audio crops, stub acoustic output, safe row reflow, missing
+first/middle/final rows and boundary words, unsupported row edges, interior
+substitutions, explicit-gap padding, offsets, window budgets and bounds, word
+ends and starts staying inside their line, CLI option refusals, scratch trainer
+construction, changed-source detection and real-process restarts. Both command
+entry points refuse the review's missing-row/boundary cases before inference.
+An audio impulse at 1.90 s stays in the preceding crop and out of the next crop.
+The three original reviewer reproductions also pass. Existing command,
+refinement, benchmark and all other Python suites passed. Browser suites were
+outside scope. No test downloaded weights.
 
 Run `python tests/song_auto_synced_test.py` and each other Python file under
 `tests/` with the gate and isolation described in the original verification
 section. No production environment or dependency was modified.
 
 Exact commands, UTC bounds, environment versions, checkpoint/configuration and
-input hashes, neutral predictions, unchanged-scorer outputs and QA reports stay
-in private evidence. Song metadata, lyrics, downloaded files and weights remain
-outside the repository.
+input hashes, neutral predictions, unchanged-scorer CLI/API outputs, refusals
+and QA reports stay in private evidence. Song metadata, lyrics, downloaded files
+and weights remain outside the repository.

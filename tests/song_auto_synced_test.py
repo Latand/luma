@@ -30,7 +30,7 @@ class Plans(unittest.TestCase):
     def test_matches_regrouped_text_without_reference_times(self):
         plan = synced.line_plan(lyrics(), LRC, 4.)
         self.assertEqual([(r['start'], r['end']) for r in plan], [(0, 2), (2, 4)])
-        self.assertEqual([(r['lo'], r['hi']) for r in plan], [(.75, 1.75), (1.75, 2.75)])
+        self.assertEqual([(r['lo'], r['hi']) for r in plan], [(.75, 2.), (2., 3.)])
         changed = lyrics()
         for row in changed:
             for word in row['words']: word.update(a=-100, b=-99)
@@ -47,8 +47,8 @@ class Plans(unittest.TestCase):
         text = '[00:00] '+' '.join(f'w{i}' for i in range(5))+'\n[00:02] extra\n[00:03] '+' '.join(f'w{i}' for i in range(5, 10))
         plan = synced.line_plan(rows, text, 6.)
         self.assertEqual(len(plan), 2)
-        self.assertEqual(plan[0]['hi'], 1.75)
-        self.assertEqual(plan[1]['lo'], 2.75)
+        self.assertEqual(plan[0]['hi'], 2.)
+        self.assertEqual(plan[1]['lo'], 3.)
         text = text.replace('w8', 'changed')
         self.assertEqual(len(synced.line_plan(rows, text, 6.)), 2)
 
@@ -72,17 +72,84 @@ class Plans(unittest.TestCase):
         for duration in (0, -1, float('nan')):
             with self.assertRaises(synced.AnchorError): synced.line_plan(lyrics(), LRC, duration)
 
+    def test_refuses_missing_words_at_every_line_position(self):
+        # The review's missing final row (80%) and next-row prefix (90%),
+        # plus the same class at a first/middle row and a last-word boundary.
+        rows = [dict(words=[dict(w=f'w{i}') for i in range(5)]),
+                dict(words=[dict(w=f'w{i}') for i in range(5, 10)])]
+        sources = [
+            '[00:01] w0 w1 w2 w3 w4\n[00:10] w6 w7 w8 w9',
+            '[00:01] w0 w1 w2 w3\n[00:10] w5 w6 w7 w8 w9',
+            '[00:01] w1 w2 w3 w4\n[00:10] w5 w6 w7 w8 w9',
+            '[00:01] w0 w1 w2 w3 w4\n[00:10] w5 w6 w7 w8',
+        ]
+        for text in sources:
+            with self.subTest(text=text), self.assertRaisesRegex(synced.AnchorError, 'unmatched words'):
+                synced.line_plan(rows, text, 15.)
+        for missing in range(3):
+            known = [dict(words=[dict(w=f'w{i}') for i in range(a, b)])
+                     for a, b in ((0, 8), (8, 9), (9, 10))]
+            text = '\n'.join(f'[00:{1+4*i:02}] ' + ' '.join(w['w'] for w in row['words'])
+                             for i, row in enumerate(known) if i != missing)
+            with self.subTest(missing=missing), self.assertRaises(synced.AnchorError):
+                synced.line_plan(known, text, 15.)
+        known = [dict(words=[dict(w=f'w{i}') for i in range(8)]),
+                 dict(words=[dict(w='w8'), dict(w='w9')])]
+        with self.assertRaisesRegex(synced.AnchorError, 'unmatched words'):
+            synced.line_plan(known, '[00:01] w0 w1 w2 w3 w4 w5 w6 w7\n[00:03]', 12.)
+
+    def test_only_interior_substitutions_have_supported_boundaries(self):
+        rows = [dict(words=[dict(w=f'w{i}') for i in range(10)])]
+        for index in (0, 4, 5, 9):
+            words = [f'w{i}' if i != index else 'changed' for i in range(10)]
+            text = '[00:01] '+' '.join(words[:5])+'\n[00:03] '+' '.join(words[5:])
+            with self.subTest(index=index), self.assertRaisesRegex(synced.AnchorError, 'line boundary'):
+                synced.line_plan(rows, text, 6.)
+        text = '[00:01] w0 changed w2 w3 w4\n[00:03] w5 w6 w7 w8 w9'
+        self.assertEqual([r['end'] for r in synced.line_plan(rows, text, 6.)], [5, 10])
+        # Extra source tokens may be omitted only inside a supported row;
+        # deleting a source edge would leave its timestamp unverified.
+        for line, index in ((0, 0), (0, 5), (1, 0), (1, 5)):
+            first, second = [f'w{i}' for i in range(5)], [f'w{i}' for i in range(5, 10)]
+            (first, second)[line].insert(index, 'extra')
+            text = '[00:01] '+' '.join(first)+'\n[00:03] '+' '.join(second)
+            with self.subTest(extra_edge=(line, index)), self.assertRaisesRegex(synced.AnchorError, 'line boundary'):
+                synced.line_plan(rows, text, 6.)
+        text = '[00:01] w0 extra w1 w2 w3 w4\n[00:03] w5 w6 w7 w8 w9'
+        self.assertEqual([r['end'] for r in synced.line_plan(rows, text, 6.)], [5, 10])
+        # A whole known row replaced inside an otherwise matching source row.
+        known = [dict(words=[dict(w=f'w{i}') for i in range(8)]), dict(words=[dict(w='w8')]),
+                 dict(words=[dict(w='w9')])]
+        with self.assertRaisesRegex(synced.AnchorError, 'known lyric row'):
+            synced.line_plan(known, '[00:01] w0 w1 w2 w3 w4 w5 w6 w7 changed w9', 6.)
+
+    def test_adjacent_rows_keep_the_previous_vocal_tail(self):
+        plan = synced.line_plan(lyrics(), '[00:01] aa bb\n[00:02] cc dd', 3.)
+        self.assertTrue(plan[0]['lo'] <= 1.90 < plan[0]['hi'])
+        self.assertFalse(plan[1]['lo'] <= 1.90 < plan[1]['hi'])
+        self.assertEqual(plan[0]['hi'], plan[1]['lo'])
+
+    def test_early_padding_uses_only_an_explicit_instrumental_gap(self):
+        for gap in (1.5, 1.9):
+            text = f'[00:01] aa bb\n[00:{gap:05.2f}]\n[00:02] cc dd'
+            plan = synced.line_plan(lyrics(), text, 4.)
+            self.assertEqual(plan[0]['hi'], gap)
+            self.assertEqual(plan[1]['lo'], max(gap, 1.75))
+            self.assertLessEqual(plan[0]['hi'], plan[1]['lo'])
+        plan = synced.line_plan(lyrics(), '[00:00.90]\n[00:01] aa bb\n[00:02] cc dd', 4.)
+        self.assertEqual(plan[0]['lo'], .9)
+
     def test_window_budget_and_recording_edges(self):
         plan = synced.line_plan(lyrics(), '[00:00] aa bb\n[00:50] cc dd', 100.)
         self.assertEqual(plan[0]['lo'], 0.)
         self.assertLessEqual(plan[0]['hi']-plan[0]['lo'], 30.)
         self.assertLessEqual(plan[-1]['hi'], 100.)
         with self.assertRaisesRegex(synced.AnchorError, 'insufficient room'):
-            synced.line_plan(lyrics(), '[00:01] aa bb\n[00:01.01] cc dd', 4.)
+            synced.line_plan(lyrics(), '[00:00] aa bb\n[00:00.01] cc dd', 4.)
 
     def test_trivial_even_spread_starts_at_published_anchor(self):
         p = synced.even_words(synced.line_plan(lyrics(), LRC, 4.))
-        self.assertEqual([w['a'] for w in p], [1., 1.375, 2., 2.375])
+        self.assertEqual([w['a'] for w in p], [1., 1.5, 2., 2.5])
         self.assertTrue(all(w['confidence'] == 0 for w in p))
         plan = synced.line_plan(lyrics(), LRC, 4.)
         plan[0]['hi'] = plan[0]['a']
@@ -95,7 +162,7 @@ class Bounds(unittest.TestCase):
         plan = synced.line_plan(lyrics(), LRC, 4.)
         p = synced.even_words(plan)
         p[0].update(a=1.70, b=1.74); p[1].update(a=.76, b=1.5)
-        p[2].update(a=2.70, b=2.74); p[3].update(a=1.76, b=2.5)
+        p[2].update(a=2.70, b=2.74); p[3].update(a=2.01, b=2.5)
         mapped, flags = run.map_words(lyrics(), p, 4., synced.word_bounds(plan))
         ws = score.words(dict(lyrics=mapped))
         self.assertEqual([len(row['words']) for row in mapped], [3, 1])
@@ -144,23 +211,26 @@ class Bounds(unittest.TestCase):
         from types import SimpleNamespace
         import soundfile as sf
         plan = synced.line_plan(lyrics(), LRC, 4.)
-        sizes = []
+        sizes, tails = [], []
         class Model:
             def to(self, device): return self
             def eval(self): return self
             def __call__(self, wave):
-                sizes.append(wave.shape[-1]); return torch.zeros(1, 50, 30), None
+                sizes.append(wave.shape[-1]); tails.append(bool(wave.abs().max() > .5))
+                return torch.zeros(1, 50, 30), None
         def runs(*args):
             return [SimpleNamespace(start=i*5, end=i*5+2, score=.9) for i in range(6)]
         with tempfile.TemporaryDirectory() as temp:
             pkg = Path(temp)
-            sf.write(pkg/'vocals_44k.flac', np.sin(np.arange(64000)*.1)*.1, 16000)
+            audio = np.zeros(64000); audio[int(1.90*16000)] = .9
+            sf.write(pkg/'vocals_44k.flac', audio, 16000)
             with patch.object(torchaudio.pipelines.MMS_FA, 'get_model', return_value=Model()), \
                     patch.object(torchaudio.functional, 'forced_align', return_value=(torch.zeros(1, 50), torch.zeros(1, 50))), \
                     patch.object(torchaudio.functional, 'merge_tokens', side_effect=runs):
                 p, meta = bench.align(pkg, lyrics(), dict(duration=4.), 'mms', 'cpu', plan)
-        self.assertEqual(sizes, [16000, 16000])
-        self.assertEqual(meta['windows'], [(.75, 1.75), (1.75, 2.75)])
+        self.assertEqual(sizes, [20000, 16000])
+        self.assertEqual(tails, [True, False])
+        self.assertEqual(meta['windows'], [(.75, 2.), (2., 3.)])
         for w, (lo, hi) in zip(p, synced.word_bounds(plan)):
             self.assertTrue(lo <= w['a'] < w['b'] <= hi)
 
@@ -219,6 +289,33 @@ class Commands(unittest.TestCase):
             r = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True)
             self.assertNotEqual(r.returncode, 0)
             self.assertIn('rows cannot be matched', r.stderr)
+
+    def test_both_commands_refuse_missing_rows_and_boundary_words_before_inference(self):
+        from song_auto_test import package, target
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); pkg = package(root); lrc = root/'input.lrc'
+            base = target()
+            base['lyrics'] = [dict(a=.1, b=.9, words=[dict(w=f'w{i}', a=.1+i*.05, b=.14+i*.05)
+                               for i in range(a, b)]) for a, b in ((0, 8), (8, 10))]
+            (pkg/'target.json').write_text(json.dumps(base))
+            texts = ['[00:00.10] w0 w1 w2 w3 w4 w5 w6 w7\n[00:01.20]',
+                     '[00:00.10] w0 w1 w2 w3 w4 w5 w6 w7\n[00:01.20] w9']
+            for text in texts:
+                lrc.write_text(text)
+                with patch.object(bench, 'align') as aligner, self.assertRaisesRegex(synced.AnchorError, 'unmatched words'):
+                    run.place(pkg, base, base, 'cpu', synced_text=text)
+                aligner.assert_not_called()
+                for module, extra in [('tools.song_auto.run', ['--model-cache', str(root/'models')]),
+                                      ('tools.song_auto.bench.run', ['mms', '--seed-target', str(pkg/'target.json')])]:
+                    cmd = [sys.executable, '-B', '-m', module, str(pkg), *extra, '--scratch', str(root/'out'),
+                           '--synced-lyrics', str(lrc)]
+                    env = {**os.environ, **{k: str(root/k) for k in ('TORCH_HOME', 'HF_HOME', 'NUMBA_CACHE_DIR')}}
+                    result = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True, timeout=90)
+                    with self.subTest(module=module, text=text):
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertIn('unmatched words need anchors', result.stderr)
+                        self.assertNotIn('w0', result.stdout + result.stderr)
+                self.assertFalse(list((root/'out').glob('*/output.json')))
 
     def test_command_rejects_incompatible_refinement_before_work(self):
         for args in (['--word-refinement', 'boundary'], ['--download-models']):
