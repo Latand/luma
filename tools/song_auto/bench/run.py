@@ -15,7 +15,7 @@ from .score import matches, validate, words
 
 ROOT = Path(__file__).resolve().parents[3]
 QA = ROOT / 'tools/song_qa'
-CANDIDATES = ('baseline', 'mms', 'wav2vec2', 'sofa', 'fcpe', 'penn')
+CANDIDATES = ('baseline', 'mms', 'wav2vec2', 'sofa', 'fcpe', 'penn', 'synced-even')
 
 
 def read(path):
@@ -71,15 +71,18 @@ def audio(package, sr):
     return resample_poly(y, sr//divisor, source_sr//divisor).astype(np.float32)
 
 
-def align(package, lyrics, seed, candidate, device):
+def align(package, lyrics, seed, candidate, device, synced_plan=None):
     import numpy as np
     import torch
     import torchaudio
     sys.path.insert(0, str(QA))
     from fa_align import model_word_owners, norm as fa_norm, sheet_hints
     # Validate all tokens before downloading/loading anything.
+    if synced_plan is not None:
+        lyrics = [dict(words=row['words']) for row in synced_plan]
     ownership = [model_word_owners(' '.join(w['w'] for w in line['words']), i) for i, line in enumerate(lyrics)]
-    windows = seed_windows(lyrics, seed, seed['duration'])
+    windows = ([(row['lo'], row['hi']) for row in synced_plan] if synced_plan is not None
+               else seed_windows(lyrics, seed, seed['duration']))
     y = audio(package, 16000)
     bundle = torchaudio.pipelines.MMS_FA if candidate == 'mms' else torchaudio.pipelines.WAV2VEC2_ASR_BASE_960H
     model = (bundle.get_model(with_star=True) if candidate == 'mms' else bundle.get_model()).to(device).eval()
@@ -123,7 +126,8 @@ def align(package, lyrics, seed, candidate, device):
             group = [w for w in proposals[i]['words'] if w['target_token'] == j]
             result.append(dict(w=word['w'], a=a, b=b, confidence=min(w['score'] for w in group)))
     # Keep crossing proposals in lyric order so the scorer can measure them.
-    return result, dict(windows=windows, model=str(bundle._path))
+    return result, dict(windows=windows, model=str(bundle._path),
+                        anchor_source='synced' if synced_plan is not None else 'stored')
 
 
 def sofa_row(row, owners, expected, aligned, intervals, confidence, offset):
@@ -229,7 +233,15 @@ def main():
     ap.add_argument('--checkpoint', type=Path, help='PENN or SOFA local checkpoint')
     ap.add_argument('--sofa-source', type=Path, help='upstream SOFA checkout outside the repository')
     ap.add_argument('--dictionary', type=Path, help='SOFA English dictionary')
+    ap.add_argument('--synced-lyrics', type=Path, help='optional published LRC file; MMS or synced-even only')
+    ap.add_argument('--ordered-words', action='store_true', help='apply the command word-order guard to MMS proposals')
     args = ap.parse_args()
+    if args.synced_lyrics and args.candidate not in ('mms', 'synced-even'):
+        ap.error('--synced-lyrics requires mms or synced-even')
+    if args.candidate == 'synced-even' and not args.synced_lyrics:
+        ap.error('synced-even requires --synced-lyrics')
+    if args.ordered_words and args.candidate != 'mms':
+        ap.error('--ordered-words requires mms')
     scratch = safe_scratch(args.package, args.seed_target, args.scratch)
     scratch.mkdir(parents=True, exist_ok=True)
     destination = Path(tempfile.mkdtemp(prefix=args.candidate+'-', dir=scratch))
@@ -239,17 +251,35 @@ def main():
         os.environ[key] = str(safe_scratch(args.package, args.seed_target, cache))
     os.environ.setdefault('HF_HUB_DISABLE_TELEMETRY', '1')
     inputs = [args.package/'target.json', args.seed_target, args.package/'vocals_44k.flac']
+    if args.synced_lyrics:
+        inputs.append(args.synced_lyrics)
     hashes = {str(p.resolve()): digest(p) for p in inputs}
     started = time.perf_counter()
     seed = read(args.seed_target); target = read(args.package/'target.json')
     output = baseline(seed); metadata = {}
-    if args.candidate != 'baseline':
+    plan = None
+    if args.synced_lyrics:
+        from ..synced import line_plan
+        plan = line_plan(target['lyrics'], args.synced_lyrics.read_text(encoding='utf-8-sig'), target['duration'])
+    if args.candidate == 'synced-even':
+        from ..synced import even_words
+        output['words'] = even_words(plan)
+        metadata = dict(device='none', anchor_source='synced', windows=[(r['lo'], r['hi']) for r in plan])
+    elif args.candidate != 'baseline':
         import numpy as np
         import torch
         np.random.seed(0); torch.manual_seed(0); torch.set_num_threads(2)
         device = ('cuda' if torch.cuda.is_available() else 'cpu') if args.device == 'auto' else args.device
         if args.candidate in ('mms', 'wav2vec2'):
-            output['words'], metadata = align(args.package, target['lyrics'], seed, args.candidate, device)
+            output['words'], metadata = align(args.package, target['lyrics'], seed, args.candidate, device, plan)
+            if args.ordered_words:
+                from ..run import map_words
+                from ..synced import word_bounds
+                mapped, flags = map_words(target['lyrics'], output['words'], target['duration'],
+                                          word_bounds(plan) if plan is not None else None)
+                output['words'] = [dict(w=w['w'], a=w['a'], b=w['b'], confidence=w['c'])
+                                   for w in words(dict(lyrics=mapped))]
+                metadata.update(ordered_words=True, order_flags=flags)
         elif args.candidate == 'sofa':
             if not all((args.sofa_source, args.checkpoint, args.dictionary)): ap.error('SOFA requires source, checkpoint and dictionary')
             output['words'], metadata = sofa_align(args.package, target['lyrics'], seed, device,
@@ -261,7 +291,7 @@ def main():
     else:
         metadata['device'] = 'saved'
     output['candidate'] = args.candidate
-    output['measured_component'] = 'both' if args.candidate == 'baseline' else 'words' if args.candidate in ('mms','wav2vec2','sofa') else 'pitch'
+    output['measured_component'] = 'both' if args.candidate == 'baseline' else 'words' if args.candidate in ('mms','wav2vec2','sofa','synced-even') else 'pitch'
     output['runtime_s'] = time.perf_counter()-started
     validate(output)
     if any(digest(p) != h for p, h in hashes.items()): raise ValueError('input changed during run')

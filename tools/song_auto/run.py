@@ -23,6 +23,7 @@ import tempfile
 import time
 
 from .bench import run as bench
+from .synced import AnchorError
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'tools/song_qa'))
@@ -74,7 +75,7 @@ def ordered_starts(values, duration, gap=.04):
     return result
 
 
-def map_words(lyrics, proposals, duration):
+def map_words(lyrics, proposals, duration, bounds=None):
     flat = [w for line in lyrics for w in line['words']]
     if len(flat) != len(proposals) or any(w['w'] != p['w'] for w, p in zip(flat, proposals)):
         raise ValueError('alignment ownership differs from package words')
@@ -82,7 +83,23 @@ def map_words(lyrics, proposals, duration):
         if (not all(math.isfinite(p[k]) for k in ('a', 'b', 'confidence')) or
                 not 0 <= p['a'] < p['b'] <= duration or not 0 <= p['confidence'] <= 1):
             raise ValueError('invalid alignment span or confidence')
-    starts = ordered_starts([p['a'] for p in proposals], duration)
+    starts = ordered_starts([p['a'] for p in proposals], duration) if bounds is None else []
+    if bounds is not None:
+        if len(bounds) != len(proposals):
+            raise ValueError('synced word bounds differ from proposals')
+        k = 0
+        while k < len(proposals):
+            lo, hi = bounds[k]
+            end = k+1
+            while end < len(proposals) and bounds[end] == (lo, hi):
+                end += 1
+            if not 0 <= lo < hi <= duration or (k and lo < bounds[k-1][1]):
+                raise ValueError('synced line windows overlap or exceed recording')
+            if any(not lo-1e-6 <= p['a'] < p['b'] <= hi+1e-6 for p in proposals[k:end]):
+                raise ValueError('aligned word crosses synced line window')
+            starts.extend(round(lo+t, 3) for t in ordered_starts(
+                [max(0., p['a']-lo) for p in proposals[k:end]], hi-lo))
+            k = end
     out, flags, k = [], [], 0
     for line in lyrics:
         if not line['words']:
@@ -92,6 +109,8 @@ def map_words(lyrics, proposals, duration):
             p = proposals[k]
             a = starts[k]
             limit = starts[k+1] - .005 if k+1 < len(starts) else duration
+            if bounds is not None:
+                limit = min(limit, bounds[k][1])
             b = round(min(limit, max(a+.02, p['b'])), 3)
             adjusted = abs(a-p['a']) > .001 or p['b'] > limit+.001
             c = min(.4, p['confidence']) if adjusted or p['confidence'] < .6 else p['confidence']
@@ -143,9 +162,16 @@ def pitch_target(package, base, device):
                      base.get('title', ''), base.get('artist', ''), 'pYIN + CREPE')
 
 
-def place(package, base, seed, device, pitch_song=None, refinement='none'):
+def place(package, base, seed, device, pitch_song=None, refinement='none', synced_text=None):
     """Shared entry for existing packages and preparation's opt-in path."""
-    proposals, _ = bench.align(package, base.get('lyrics', []), seed, 'mms', device) if base.get('lyrics') else ([], {})
+    from .synced import line_plan, word_bounds, AnchorError
+    if synced_text is not None and refinement != 'none':
+        raise AnchorError('synced lyrics: boundary refinement cannot be combined with line anchors')
+    plan = line_plan(base.get('lyrics', []), synced_text, base['duration']) if synced_text is not None else None
+    proposals = []
+    if base.get('lyrics'):
+        proposals, _ = bench.align(package, base['lyrics'], seed, 'mms', device,
+                                   **(dict(synced_plan=plan) if plan is not None else {}))
     # The acoustic model is local to align(); collect it before pitch inference.
     import gc
     import torch
@@ -155,7 +181,8 @@ def place(package, base, seed, device, pitch_song=None, refinement='none'):
     melody = pitch_song if pitch_song is not None else pitch_target(package, base, device)
     song = copy.deepcopy(base)
     song['points'] = copy.deepcopy(melody['points'])
-    song['lyrics'], flags = map_words(base.get('lyrics', []), proposals, base['duration'])
+    song['lyrics'], flags = map_words(base.get('lyrics', []), proposals, base['duration'],
+                                    word_bounds(plan) if plan is not None else None)
     F = compute(package)
     unpitched(song, F)
     song['notes'], song['phrases'], song['metrics'], song['initialTime'], _ = derive(song['points'], song['duration'], [])
@@ -168,9 +195,12 @@ def place(package, base, seed, device, pitch_song=None, refinement='none'):
         flags += [f for f in refinement_audit if f['doubtful']]
     report = end_checks(song, F, flags)
     report.update(refinement=refinement, refinement_audit=refinement_audit)
+    report['anchor_source'] = 'synced' if plan is not None else 'stored'
     song.update(status='unverified_draft', createdBy='song_auto: MMS + pYIN + CREPE; deterministic QA; listening required',
                 lyricsSource='Known package text; offline MMS forced alignment',
                 method='MMS word placement + pYIN + CREPE melody')
+    if plan is not None:
+        song['lyricsSource'] = 'Known package text; published LRC line anchors; offline MMS forced alignment'
     # A changed map gets a new edit namespace; identical outputs keep their id.
     content = {k: song[k] for k in ('points', 'lyrics', 'unpitched')}
     song['id'] = hashlib.sha256((str(base.get('sourceId', '')) + json.dumps(content, sort_keys=True)).encode()).hexdigest()[:20]
@@ -296,6 +326,7 @@ def main(argv=None):
     ap.add_argument('package', nargs='?', type=Path)
     ap.add_argument('--scratch', type=Path, default=Path(tempfile.gettempdir())/'luma-song-auto')
     ap.add_argument('--seed-target', type=Path, help='optional coarse timing source; defaults to package target')
+    ap.add_argument('--synced-lyrics', type=Path, help='opt-in published LRC line anchors for known text')
     ap.add_argument('--device', choices=('auto', 'cpu', 'cuda'), default='auto')
     ap.add_argument('--word-refinement', choices=('none', 'boundary', 'boundary-baseline'), default='none',
                     help='experimental boundary snapping; default none (see measured limits)')
@@ -304,6 +335,8 @@ def main(argv=None):
     ap.add_argument('--download-models', action='store_true', help='one-time MMS download; checks CREPE installation')
     ap.add_argument('--model-cache', type=Path, default=Path(os.environ.get('TORCH_HOME', Path.home()/'.cache/luma-song-auto/torch')))
     args = ap.parse_args(argv)
+    if args.synced_lyrics and (args.word_refinement != 'none' or args.download_models):
+        ap.error('--synced-lyrics requires placement without boundary refinement')
     if args.download_models:
         if args.package or args.apply:
             ap.error('download mode takes no package or apply flag')
@@ -330,6 +363,8 @@ def main(argv=None):
     os.environ['NUMBA_CACHE_DIR'] = str(destination/'numba')
     started = time.perf_counter()
     inputs = {p: bench.digest(p) for p in (package/'target.json', seed, package/'vocals_44k.flac')}
+    if args.synced_lyrics:
+        inputs[args.synced_lyrics] = bench.digest(args.synced_lyrics)
     base = bench.read(package/'target.json')
     trainer = trainer_path(package, args.trainer) if args.apply else None
     with offline():
@@ -339,7 +374,8 @@ def main(argv=None):
         torch.manual_seed(0)
         torch.set_num_threads(2)
         device = ('cuda' if torch.cuda.is_available() else 'cpu') if args.device == 'auto' else args.device
-        song, report = place(package, base, bench.read(seed), device, refinement=args.word_refinement)
+        song, report = place(package, base, bench.read(seed), device, refinement=args.word_refinement,
+                             **(dict(synced_text=args.synced_lyrics.read_text(encoding='utf-8-sig')) if args.synced_lyrics else {}))
         html = full_build(package, song, destination)
     if any(bench.digest(p) != h for p, h in inputs.items()):
         raise ValueError('input changed during run')
@@ -362,6 +398,9 @@ def main(argv=None):
 if __name__ == '__main__':
     try:
         main()
+    except AnchorError as error:
+        print(str(error), file=sys.stderr)
+        sys.exit(1)
     except (ValueError, RuntimeError, OSError, subprocess.SubprocessError):
         # Detailed paths, lyrics and exceptions belong only in private evidence.
         print('song_auto failed: check inputs, cached models and writable scratch; package backup is retained after apply failure', file=sys.stderr)
